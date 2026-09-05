@@ -254,7 +254,12 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
 .doc .sigline{border-top:1px solid #333;margin-top:46px;padding-top:6px;}
 .doc .foot{margin-top:40px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:10px;font-family:'JetBrains Mono',monospace;}
 .doc .stampline{font-family:'JetBrains Mono',monospace;letter-spacing:3px;color:#c8102e;font-weight:700;border:2px solid #c8102e;display:inline-block;padding:4px 12px;margin-top:6px;}
-@media print{ @page{margin:14mm;} }
+.license-certificate{border:8px solid #111;padding:18px;outline:2px solid #c9a227;outline-offset:-14px;}
+.license-certificate .doc-head{margin:0 0 16px;padding:0 0 12px;}
+.license-certificate h3{margin:15px 0 7px;}
+.license-certificate .sig{margin-top:28px;}
+.license-certificate .foot{margin-top:20px;}
+@media print{ @page{size:A4 portrait;margin:10mm;} }
 
 .loading{display:flex;align-items:center;justify-content:center;height:100vh;color:var(--grey);font-family:var(--mono);letter-spacing:2px;}
 </style>
@@ -334,8 +339,9 @@ const SESSION_TYPES = ["Training","Qualifying","Sprint-Qualifying","Sprint","Ren
 const CASE_STATUS = ["Offen","In Untersuchung","Entschieden","Archiviert"];
 const REPORTED_BY = ["Rennleitung","Steward-Beobachtung","Fahrer-Meldung (Protest)","Team-Meldung","Video-Beweis / Marshalling-System"];
 const EVENTS = ["Bahrain","Saudi-Arabien","Australien","Japan","China","Miami","Emilia-Romagna","Monaco","Kanada","Spanien","Österreich","Großbritannien","Belgien","Ungarn","Niederlande","Italien","Aserbaidschan","Singapur","USA (Austin)","Mexiko","Brasilien","Las Vegas","Katar","Abu Dhabi"];
-const PLATFORMS = ["iRacing","Assetto Corsa Competizione","rFactor 2","RaceRoom Racing Experience","Automobilista 2","Le Mans Ultimate","F1 25 / EA Sports F1","Sonstige"];
-const LICENSE_CLASS = ["Rookie","Pro","Elite / Werksfahrer","Gastfahrer"];
+const PLATFORMS = ["PlayStation","Xbox","PC"];
+const DIVISIONS = ["Division 1","Division 2","Division 3"];
+const LICENSE_CLASS = ["F1 26"];
 
 function loadKey(key, fallback){
   try{
@@ -787,7 +793,7 @@ function renderDriverTable(){
 function pageDriverForm(existing){
   const d = existing || {
     id:null, firstName:'', lastName:'', number:'', nationality:'', dob:'', teamId:DB.teams[0]?.id||'',
-    platform:PLATFORMS[0], simId:'', discord:'', email:'', debutDate:today(), licenseClass:LICENSE_CLASS[0],
+    division:DIVISIONS[0], platform:PLATFORMS[0], simId:'', discord:'', email:'', debutDate:today(), licenseClass:LICENSE_CLASS[0],
     photoUrl:'', notes:'', licenseNo:'', licenseStatus:'Nicht ausgestellt', licenseIssued:'', licenseExpiry:'',
     rulesAccepted:false, history:[]
   };
@@ -833,14 +839,15 @@ function pageDriverForm(existing){
 
       <div class="sectiontitle">Sim-Racing-Profil</div>
       <div class="grid cols-3">
-        <div class="field"><label>Plattform</label><select id="d_platform">${selectOptions(PLATFORMS, d.platform)}</select></div>
+        <div class="field"><label>Division</label><select id="d_division">${selectOptions(DIVISIONS, d.division||DIVISIONS[0])}</select></div>
+        <div class="field"><label>Plattform</label><select id="d_platform">${selectOptions(PLATFORMS, PLATFORMS.includes(d.platform)?d.platform:PLATFORMS[0])}</select></div>
         <div class="field"><label>Sim-Racing-ID / Handle</label><input id="d_simId" type="text" value="${esc(d.simId)}"></div>
         <div class="field"><label>Discord-Name#ID</label><input id="d_discord" type="text" value="${esc(d.discord)}"></div>
       </div>
       <div class="grid cols-3">
         <div class="field"><label>E-Mail (optional)</label><input id="d_email" type="email" value="${esc(d.email)}"></div>
         <div class="field"><label>Debüt in der Liga</label><input id="d_debutDate" type="date" value="${esc(d.debutDate)}"></div>
-        <div class="field"><label>Lizenzklasse</label><select id="d_licenseClass">${selectOptions(LICENSE_CLASS, d.licenseClass)}</select></div>
+        <div class="field"><label>Fahrerklasse</label><input id="d_licenseClass" type="text" value="F1 26" readonly></div>
       </div>
       <div class="field"><label>Foto-URL (optional)</label><input id="d_photoUrl" type="text" value="${esc(d.photoUrl)}" placeholder="https://…"></div>
       <div class="field"><label>Bemerkungen der Stewards</label><textarea id="d_notes" placeholder="Interne Notizen zum Fahrer …">${esc(d.notes)}</textarea></div>
@@ -901,8 +908,9 @@ async function saveDriver(id){
   Object.assign(d, {
     firstName:v('d_firstName'), lastName:v('d_lastName'), number:v('d_number'),
     nationality:v('d_nationality'), dob:v('d_dob'), teamId:v('d_teamId'),
+    division:v('d_division'),
     platform:v('d_platform'), simId:v('d_simId'), discord:v('d_discord'), email:v('d_email'),
-    debutDate:v('d_debutDate'), licenseClass:v('d_licenseClass'), photoUrl:v('d_photoUrl'),
+    debutDate:v('d_debutDate'), licenseClass:'F1 26', photoUrl:v('d_photoUrl'),
     notes:v('d_notes'), updatedAt:Date.now(),
   });
   if(!isNew && document.getElementById('d_rulesAccepted')) d.rulesAccepted = document.getElementById('d_rulesAccepted').checked;
@@ -1221,9 +1229,9 @@ function printLicense(id){
   const d = driverById(id); if(!d) return;
   const t = teamById(d.teamId);
   const html = `
-  <div class="doc">
+  <div class="doc license-certificate">
     <div class="doc-head">
-      <div><div class="t1">ZFC <span>RACING</span></div><div class="t2">Official Racing Licence</div></div>
+      <div><div class="t1">ZFC <span>RACING</span></div><div class="t2">Fahrer-Lizenz · Official Racing Certificate</div></div>
       <div><div class="stw">${esc(d.licenseNo||'—')}</div><div class="stwl">Lizenznummer</div></div>
     </div>
     <div style="display:flex;gap:24px;align-items:flex-start;margin-top:6px;">
@@ -1236,7 +1244,8 @@ function printLicense(id){
         <tr><td class="k">Nationalität</td><td>${esc(d.nationality||'—')}</td></tr>
         <tr><td class="k">Geburtsdatum</td><td>${fmtDate(d.dob)}</td></tr>
         <tr><td class="k">Team</td><td>${esc(t?.name||'—')}</td></tr>
-        <tr><td class="k">Lizenzklasse</td><td>${esc(d.licenseClass||'—')}</td></tr>
+        <tr><td class="k">Division</td><td><b>${esc(d.division||'—')}</b></td></tr>
+        <tr><td class="k">Lizenzklasse</td><td><b>F1 26</b></td></tr>
       </table>
     </div>
 
@@ -1246,6 +1255,7 @@ function printLicense(id){
       <tr><td class="k">Erteilt am</td><td>${fmtDate(d.licenseIssued)}</td></tr>
       <tr><td class="k">Gültig bis</td><td>${fmtDate(d.licenseExpiry)}</td></tr>
       <tr><td class="k">Plattform</td><td>${esc(d.platform||'—')}</td></tr>
+      <tr><td class="k">Fahrerklasse</td><td><b>F1 26</b></td></tr>
     </table>
 
     <h3>Erklärung</h3>
