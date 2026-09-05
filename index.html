@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZFC Racing — Stewards Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Titillium+Web:ital,wght@0,300;0,400;0,600;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --black:#0a0a0b;
+  --black-2:#141416;
+  --black-3:#1c1c1f;
+  --line:#2c2c30;
+  --red:#c8102e;
+  --red-2:#8f0c20;
+  --gold:#c9a227;
+  --gold-2:#e6c65c;
+  --white:#f2f0eb;
+  --grey:#9a9aa0;
+  --grey-2:#6b6b70;
+  --green:#3fae55;
+  --amber:#d99a2b;
+  --font: 'Titillium Web', sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--black);
+  color:var(--white);
+  font-family:var(--font);
+  min-height:100vh;
+}
+a{color:inherit;}
+::selection{background:var(--red);color:var(--white);}
+::-webkit-scrollbar{width:10px;height:10px;}
+::-webkit-scrollbar-track{background:var(--black-2);}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:0;}
+
+/* ---------- layout ---------- */
+#shell{display:flex;min-height:100vh;}
+#sidebar{
+  width:220px;flex:0 0 220px;
+  background:linear-gradient(180deg,var(--black-2),var(--black));
+  border-right:1px solid var(--line);
+  display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;
+}
+#brand{
+  padding:22px 18px 16px;
+  border-bottom:1px solid var(--line);
+}
+#brand .mark{
+  font-weight:900;font-size:19px;letter-spacing:0.5px;line-height:1.05;
+  color:var(--white);
+}
+#brand .mark span{color:var(--red);}
+#brand .sub{
+  margin-top:4px;font-family:var(--mono);font-size:10px;letter-spacing:2px;
+  color:var(--gold);text-transform:uppercase;
+}
+nav.mainnav{padding:14px 10px;display:flex;flex-direction:column;gap:2px;flex:1;}
+nav.mainnav .navitem{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 12px;border-radius:2px;cursor:pointer;
+  font-size:14px;font-weight:600;color:var(--grey);
+  border-left:3px solid transparent;
+  transition:color .15s, background .15s, border-color .15s;
+  user-select:none;
+}
+nav.mainnav .navitem:hover{color:var(--white);background:var(--black-3);}
+nav.mainnav .navitem.active{color:var(--white);border-left-color:var(--red);background:var(--black-3);}
+nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);color:var(--gold);font-size:12px;}
+#sidebar-foot{padding:14px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--grey-2);font-family:var(--mono);}
+
+#main{flex:1;min-width:0;padding:26px 34px 60px;max-width:1280px;}
+
+/* ---------- top bar within main ---------- */
+.pagehead{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:14px;}
+.pagehead h1{
+  font-size:26px;font-weight:900;margin:0;letter-spacing:0.3px;
+  border-left:4px solid var(--red);padding-left:12px;
+}
+.pagehead .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:2px;color:var(--gold);text-transform:uppercase;margin:0 0 4px 16px;}
+.pagehead .actions{display:flex;gap:10px;flex-wrap:wrap;}
+
+/* ---------- buttons ---------- */
+.btn{
+  font-family:var(--font);font-weight:700;font-size:13.5px;
+  padding:10px 18px;border-radius:2px;border:1px solid var(--line);
+  background:var(--black-3);color:var(--white);cursor:pointer;
+  transition:all .12s ease;letter-spacing:0.2px;
+}
+.btn:hover{border-color:var(--gold);color:var(--gold-2);}
+.btn.primary{background:var(--red);border-color:var(--red);color:#fff;}
+.btn.primary:hover{background:var(--red-2);border-color:var(--red-2);color:#fff;}
+.btn.gold{background:transparent;border-color:var(--gold);color:var(--gold-2);}
+.btn.gold:hover{background:var(--gold);color:#101010;}
+.btn.danger{border-color:var(--red-2);color:#ff8b96;}
+.btn.danger:hover{background:var(--red-2);color:#fff;}
+.btn.small{padding:6px 12px;font-size:12px;}
+.btn:disabled{opacity:.35;cursor:not-allowed;}
+.btn:disabled:hover{border-color:var(--line);color:var(--white);background:var(--black-3);}
+
+/* ---------- cards / panels ---------- */
+.panel{
+  background:var(--black-2);border:1px solid var(--line);
+  padding:20px 22px;margin-bottom:18px;position:relative;
+}
+.panel::before{
+  content:"";position:absolute;top:0;left:0;width:26px;height:3px;background:var(--gold);
+}
+.panel h2{font-size:15px;margin:0 0 14px;letter-spacing:1.2px;text-transform:uppercase;color:var(--grey);font-weight:700;}
+.panel h2 b{color:var(--white);}
+
+.grid{display:grid;gap:16px;}
+.grid.cols-4{grid-template-columns:repeat(4,1fr);}
+.grid.cols-3{grid-template-columns:repeat(3,1fr);}
+.grid.cols-2{grid-template-columns:repeat(2,1fr);}
+@media(max-width:1000px){.grid.cols-4{grid-template-columns:repeat(2,1fr);}.grid.cols-3{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:640px){.grid.cols-4,.grid.cols-3,.grid.cols-2{grid-template-columns:1fr;}#sidebar{width:66px;flex:0 0 66px;}#brand .mark, #brand .sub, nav.mainnav .navitem span.lbl{display:none;}#main{padding:18px;}}
+
+.stat{
+  background:var(--black-2);border:1px solid var(--line);padding:16px 18px;
+  border-top:3px solid var(--gold);
+}
+.stat .n{font-family:var(--mono);font-size:30px;font-weight:700;color:var(--white);line-height:1;}
+.stat .l{font-size:12px;color:var(--grey);margin-top:6px;text-transform:uppercase;letter-spacing:1px;}
+.stat.red{border-top-color:var(--red);}
+.stat.red .n{color:#ff5a6b;}
+.stat.green{border-top-color:var(--green);}
+.stat.green .n{color:#6bd684;}
+.stat.amber{border-top-color:var(--amber);}
+.stat.amber .n{color:var(--amber);}
+
+/* ---------- forms ---------- */
+label{display:block;font-size:11.5px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;}
+.field{margin-bottom:16px;}
+.field .hint{font-size:11px;color:var(--grey-2);margin-top:4px;}
+input[type=text],input[type=date],input[type=number],input[type=url],input[type=email],select,textarea{
+  width:100%;background:var(--black-3);border:1px solid var(--line);color:var(--white);
+  padding:10px 12px;font-family:var(--font);font-size:14px;border-radius:2px;
+}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);}
+textarea{min-height:90px;resize:vertical;font-family:var(--font);}
+.checkline{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--white);}
+.checkline input{width:16px;height:16px;accent-color:var(--red);}
+fieldset{border:1px dashed var(--line);padding:16px;margin:0 0 18px;}
+fieldset legend{padding:0 8px;font-family:var(--mono);font-size:11px;letter-spacing:1.5px;color:var(--gold);text-transform:uppercase;}
+
+/* ---------- tables ---------- */
+table{width:100%;border-collapse:collapse;font-size:13.5px;}
+th{
+  text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:1px;
+  color:var(--grey);border-bottom:1px solid var(--line);padding:8px 10px;font-weight:700;
+}
+td{padding:10px 10px;border-bottom:1px solid var(--line);vertical-align:middle;}
+tr:hover td{background:rgba(255,255,255,0.02);}
+.rowlink{cursor:pointer;}
+.rowlink:hover td{background:rgba(200,16,46,0.06);}
+
+/* ---------- badges/tags ---------- */
+.tag{display:inline-block;padding:3px 9px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;border-radius:2px;border:1px solid var(--line);}
+.tag.open{color:#ffd166;border-color:#5a4a1c;background:rgba(255,209,102,0.08);}
+.tag.invest{color:#7cc3ff;border-color:#1c3d5a;background:rgba(124,195,255,0.08);}
+.tag.decided{color:#6bd684;border-color:#1c5a2c;background:rgba(107,214,132,0.08);}
+.tag.archived{color:var(--grey);border-color:var(--line);background:rgba(255,255,255,0.03);}
+.tag.active{color:#6bd684;border-color:#1c5a2c;}
+.tag.suspended{color:var(--amber);border-color:#5a4a1c;}
+.tag.revoked{color:#ff5a6b;border-color:#5a1c26;}
+.tag.none{color:var(--grey-2);border-color:var(--line);}
+.pts{font-family:var(--mono);font-weight:700;}
+.pts.warn{color:var(--amber);}
+.pts.crit{color:#ff5a6b;}
+
+.teamchip{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:13px;}
+.teamchip .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:0 0 auto;}
+
+/* ---------- dossier / akte styling ---------- */
+.dossier{
+  background:var(--black-2);border:1px solid var(--line);
+  animation:openfile .38s ease;
+  transform-origin:top center;
+}
+@keyframes openfile{
+  0%{opacity:0;transform:perspective(900px) rotateX(-8deg) scaleY(.94);}
+  100%{opacity:1;transform:perspective(900px) rotateX(0) scaleY(1);}
+}
+.dossier-head{
+  background:linear-gradient(90deg,var(--black-3),var(--black-2));
+  border-bottom:2px solid var(--gold);
+  padding:18px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;
+}
+.dossier-head .stwno{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--gold-2);letter-spacing:1px;}
+.dossier-head .stwlabel{font-size:10px;letter-spacing:2px;color:var(--grey);text-transform:uppercase;}
+.dossier-body{padding:22px 24px;}
+.stamp{
+  font-family:var(--mono);font-size:11px;letter-spacing:1.5px;color:var(--red);
+  border:2px solid var(--red);display:inline-block;padding:3px 10px;transform:rotate(-3deg);
+  text-transform:uppercase;font-weight:700;
+}
+
+.sectiontitle{
+  font-family:var(--mono);font-size:11px;letter-spacing:2px;color:var(--gold);
+  text-transform:uppercase;border-bottom:1px solid var(--line);padding-bottom:6px;margin:26px 0 14px;
+}
+.sectiontitle:first-child{margin-top:0;}
+
+.driverface{
+  width:64px;height:64px;border-radius:2px;background:var(--black-3);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;color:var(--grey);
+  overflow:hidden;flex:0 0 auto;
+}
+.driverface img{width:100%;height:100%;object-fit:cover;}
+
+.empty{padding:40px 20px;text-align:center;color:var(--grey-2);border:1px dashed var(--line);font-size:14px;}
+.empty b{color:var(--grey);display:block;margin-bottom:6px;font-size:15px;}
+
+.barrow{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+.barrow .lbl{width:230px;flex:0 0 auto;font-size:12.5px;color:var(--grey);}
+.barrow .track{flex:1;background:var(--black-3);height:16px;position:relative;border:1px solid var(--line);}
+.barrow .fill{height:100%;background:linear-gradient(90deg,var(--red-2),var(--red));}
+.barrow .val{width:26px;flex:0 0 auto;font-family:var(--mono);font-size:12.5px;color:var(--white);text-align:right;}
+
+.searchbar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;}
+.searchbar input,.searchbar select{width:auto;min-width:160px;flex:1;}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:18px;}
+.tabs .tab{padding:10px 16px;font-size:13px;font-weight:700;color:var(--grey);cursor:pointer;border-bottom:2px solid transparent;}
+.tabs .tab.active{color:var(--white);border-bottom-color:var(--red);}
+.tabs .tab:hover{color:var(--gold-2);}
+
+.footer-note{color:var(--grey-2);font-size:11.5px;margin-top:30px;font-family:var(--mono);}
+
+/* ---------- print ---------- */
+#printArea{display:none;}
+body.printing > *:not(#printArea){display:none !important;}
+body.printing #printArea{display:block;background:#fff;color:#111;font-family:'Titillium Web',sans-serif;padding:0;}
+.doc{max-width:800px;margin:0 auto;padding:40px;}
+.doc-head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:4px solid #c8102e;padding-bottom:14px;margin-bottom:22px;}
+.doc-head .t1{font-size:22px;font-weight:900;letter-spacing:0.5px;}
+.doc-head .t1 span{color:#c8102e;}
+.doc-head .t2{font-size:11px;letter-spacing:2px;color:#a3831b;text-transform:uppercase;margin-top:2px;}
+.doc-head .stw{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;text-align:right;}
+.doc-head .stwl{font-size:10px;letter-spacing:1.5px;text-align:right;color:#666;text-transform:uppercase;}
+.doc h3{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#a3831b;border-bottom:1px solid #ddd;padding-bottom:5px;margin:22px 0 10px;}
+.doc table{width:100%;border-collapse:collapse;font-size:13px;}
+.doc td{padding:5px 4px;vertical-align:top;}
+.doc td.k{width:220px;color:#555;font-weight:600;}
+.doc p{font-size:13.5px;line-height:1.55;margin:6px 0;}
+.doc .sig{display:flex;justify-content:space-between;margin-top:50px;gap:20px;}
+.doc .sigbox{flex:1;text-align:center;font-size:12px;}
+.doc .sigline{border-top:1px solid #333;margin-top:46px;padding-top:6px;}
+.doc .foot{margin-top:40px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:10px;font-family:'JetBrains Mono',monospace;}
+.doc .stampline{font-family:'JetBrains Mono',monospace;letter-spacing:3px;color:#c8102e;font-weight:700;border:2px solid #c8102e;display:inline-block;padding:4px 12px;margin-top:6px;}
+@media print{ @page{margin:14mm;} }
+
+.loading{display:flex;align-items:center;justify-content:center;height:100vh;color:var(--grey);font-family:var(--mono);letter-spacing:2px;}
+</style>
+</head>
+<body>
+
+<div id="shell" style="display:none;">
+  <div id="sidebar">
+    <div id="brand">
+      <div class="mark">ZFC<span>RACING</span></div>
+      <div class="sub">Stewards Office</div>
+    </div>
+    <nav class="mainnav" id="mainnav"></nav>
+    <div id="sidebar-foot">SIM RACING SPORT<br>REGLEMENT SYSTEM</div>
+  </div>
+  <div id="main"></div>
+</div>
+<div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
+
+<div id="printArea"></div>
+
+<script>
+/* ============================= DATA LAYER ============================= */
+const DB = { teams: [], drivers: [], cases: [], transfers: [] };
+const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1' };
+
+function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
+function esc(s){ return (s===undefined||s===null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function nl2br(s){ return esc(s).replace(/\n/g,'<br>'); }
+function fmtDate(d){ if(!d) return '—'; try{ const dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){return d;} }
+function fmtDateTime(ts){ if(!ts) return '—'; const dt=new Date(ts); return dt.toLocaleDateString('de-DE')+' '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}); }
+function today(){ return new Date().toISOString().slice(0,10); }
+
+function defaultTeams(){
+  return [
+    {id:'redbull',name:'Red Bull Racing',color:'#1E41FF',country:'Österreich'},
+    {id:'ferrari',name:'Ferrari',color:'#E8002D',country:'Italien'},
+    {id:'mercedes',name:'Mercedes',color:'#00D7B6',country:'Deutschland'},
+    {id:'mclaren',name:'McLaren',color:'#FF8000',country:'Vereinigtes Königreich'},
+    {id:'astonmartin',name:'Aston Martin',color:'#00594F',country:'Vereinigtes Königreich'},
+    {id:'alpine',name:'Alpine',color:'#2173B8',country:'Frankreich'},
+    {id:'haas',name:'Haas',color:'#E6E6E6',country:'USA'},
+    {id:'williams',name:'Williams',color:'#00A3E0',country:'Vereinigtes Königreich'},
+    {id:'racingbulls',name:'Racing Bulls',color:'#6C98FF',country:'Italien'},
+    {id:'audi',name:'Audi',color:'#BB0A30',country:'Deutschland'},
+    {id:'cadillac',name:'Cadillac',color:'#8A8D8F',country:'USA'},
+  ];
+}
+const DRIVER_SUGGESTIONS = {
+  redbull:['Max Verstappen','Isack Hadjar'], ferrari:['Charles Leclerc','Lewis Hamilton'],
+  mercedes:['George Russell','Kimi Antonelli'], mclaren:['Lando Norris','Oscar Piastri'],
+  astonmartin:['Fernando Alonso','Lance Stroll'], alpine:['Pierre Gasly','Franco Colapinto'],
+  haas:['Oliver Bearman','Esteban Ocon'], williams:['Alex Albon','Carlos Sainz'],
+  racingbulls:['Liam Lawson','Arvid Lindblad'], audi:['Nico Hülkenberg','Gabriel Bortoleto'],
+  cadillac:['Valtteri Bottas','Sergio Pérez'],
+};
+
+const CATEGORIES = [
+  "Kollision zwischen Fahrern","Gefährliches oder gefährdendes Fahren",
+  "Verlassen der Strecke und dauerhafter Vorteil","Missachtung von Flaggen (Blau/Gelb/Rot)",
+  "Missachtung von Anweisungen der Rennleitung","Blockieren im Qualifying",
+  "Unsportliches Verhalten","Boxenstopp-Vergehen (Unsafe Release / Speeding)",
+  "Startvergehen (Jump Start / Formation Lap)","Verstoß gegen Parc-Fermé-Bedingungen",
+  "Technisches Reglementvergehen","Verstoß gegen das Sportliche Reglement (allgemein)",
+  "Verhalten unter Safety Car / Virtual Safety Car","Sonstiger Vorfall"
+];
+const DECISIONS = [
+  "Keine weitere Untersuchung erforderlich","Fall untersucht – keine Strafe",
+  "Mündliche Verwarnung","Schriftliche Verwarnung (Reprimand)",
+  "Zeitstrafe 5 Sekunden","Zeitstrafe 10 Sekunden","Zeitstrafe 20 Sekunden",
+  "Durchfahrtsstrafe (Drive-Through)","Stop-and-Go-Strafe (10s)",
+  "Startplatzversetzung","Streichung der Rundenzeit(en)",
+  "Disqualifikation (DSQ)","Rennsperre","Sonstige Maßnahme"
+];
+const LICENSE_AFTER = ["Bleibt uneingeschränkt aktiv","Aktiv, Verwarnung vermerkt","Vorübergehend ausgesetzt","Entzogen"];
+const SESSION_TYPES = ["Training","Qualifying","Sprint-Qualifying","Sprint","Rennen","Sonstige Session"];
+const CASE_STATUS = ["Offen","In Untersuchung","Entschieden","Archiviert"];
+const REPORTED_BY = ["Rennleitung","Steward-Beobachtung","Fahrer-Meldung (Protest)","Team-Meldung","Video-Beweis / Marshalling-System"];
+const EVENTS = ["Bahrain","Saudi-Arabien","Australien","Japan","China","Miami","Emilia-Romagna","Monaco","Kanada","Spanien","Österreich","Großbritannien","Belgien","Ungarn","Niederlande","Italien","Aserbaidschan","Singapur","USA (Austin)","Mexiko","Brasilien","Las Vegas","Katar","Abu Dhabi"];
+const PLATFORMS = ["iRacing","Assetto Corsa Competizione","rFactor 2","RaceRoom Racing Experience","Automobilista 2","Le Mans Ultimate","F1 25 / EA Sports F1","Sonstige"];
+const LICENSE_CLASS = ["Rookie","Pro","Elite / Werksfahrer","Gastfahrer"];
+
+async function loadKey(key, fallback){
+  try{ const r = await window.storage.get(key, true); return r ? JSON.parse(r.value) : fallback; }
+  catch(e){ return fallback; }
+}
+async function saveKey(key, value){
+  try{ await window.storage.set(key, JSON.stringify(value), true); return true; }
+  catch(e){ console.error('save failed', key, e); alert('Speichern fehlgeschlagen — bitte erneut versuchen.'); return false; }
+}
+async function loadAll(){
+  DB.teams = await loadKey(KEYS.teams, null);
+  if(!DB.teams){ DB.teams = defaultTeams(); await saveKey(KEYS.teams, DB.teams); }
+  DB.drivers = await loadKey(KEYS.drivers, []);
+  DB.cases = await loadKey(KEYS.cases, []);
+  DB.transfers = await loadKey(KEYS.transfers, []);
+}
+const persist = {
+  teams: ()=>saveKey(KEYS.teams, DB.teams),
+  drivers: ()=>saveKey(KEYS.drivers, DB.drivers),
+  cases: ()=>saveKey(KEYS.cases, DB.cases),
+  transfers: ()=>saveKey(KEYS.transfers, DB.transfers),
+};
+
+/* ---------- lookups ---------- */
+function teamById(id){ return DB.teams.find(t=>t.id===id); }
+function driverById(id){ return DB.drivers.find(d=>d.id===id); }
+function driverName(d){ return d? (d.firstName+' '+d.lastName).trim() : '—'; }
+function teamOptions(selected, includeNone){
+  let html = includeNone? `<option value="">— keine Angabe —</option>`:'';
+  DB.teams.forEach(t=> html += `<option value="${t.id}" ${t.id===selected?'selected':''}>${esc(t.name)}</option>`);
+  return html;
+}
+function driverOptionsForTeam(teamId, selected, includeNone){
+  let list = DB.drivers.filter(d=> !teamId || d.teamId===teamId);
+  let html = includeNone!==false? `<option value="">— keine Angabe —</option>`:'';
+  list.forEach(d=> html += `<option value="${d.id}" ${d.id===selected?'selected':''}>${esc(driverName(d))} ${d.number?('#'+esc(d.number)):''}</option>`);
+  if(list.length===0) html += `<option value="" disabled>Keine Fahrer in diesem Team erfasst</option>`;
+  return html;
+}
+function selectOptions(arr, selected){
+  return arr.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(v)}</option>`).join('');
+}
+function casesForDriver(driverId){
+  return DB.cases.filter(c=>c.driverInvolved===driverId || c.driverAffected===driverId)
+    .sort((a,b)=> (b.createdAt||0)-(a.createdAt||0));
+}
+function decidedCasesForDriver(driverId){
+  return DB.cases.filter(c=>c.driverInvolved===driverId && (c.status==='Entschieden'||c.status==='Archiviert'));
+}
+function driverPenaltyPoints(driverId){
+  return decidedCasesForDriver(driverId).reduce((sum,c)=> sum + (parseInt(c.penaltyPoints)||0), 0);
+}
+function transfersForDriver(driverId){
+  return DB.transfers.filter(t=>t.driverId===driverId).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+}
+function nextStw(season){
+  const nums = DB.cases.filter(c=>String(c.season)===String(season))
+    .map(c=> parseInt((c.stw||'').split('-').pop())||0);
+  const next = (nums.length? Math.max(...nums):0)+1;
+  return `STW-${season}-${String(next).padStart(3,'0')}`;
+}
+function nextLicenseNo(){
+  const nums = DB.drivers.filter(d=>d.licenseNo).map(d=>parseInt((d.licenseNo||'').split('-').pop())||0);
+  const next = (nums.length? Math.max(...nums):0)+1;
+  return `ZFC-LIC-${String(next).padStart(3,'0')}`;
+}
+function statusTagClass(s){
+  return {Offen:'open','In Untersuchung':'invest',Entschieden:'decided',Archiviert:'archived'}[s] || 'archived';
+}
+function licenseTagClass(s){
+  return {'Aktiv':'active','Ausgesetzt':'suspended','Entzogen':'revoked','Nicht ausgestellt':'none'}[s] || 'none';
+}
+
+/* ============================= ROUTER / APP ============================= */
+const App = {};
+let ROUTE = {page:'dashboard', id:null};
+
+function go(page, id){ ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
+window.addEventListener('hashchange', ()=>{
+  const h = location.hash.replace('#','');
+  const [page,id] = h.split('/');
+  ROUTE = {page: page||'dashboard', id: id||null};
+  render();
+});
+
+const NAV = [
+  {id:'dashboard', label:'Dashboard', ic:'01'},
+  {id:'caseform', label:'Neue Akte', ic:'02'},
+  {id:'cases', label:'Alle Akten', ic:'03'},
+  {id:'drivers', label:'Fahrer', ic:'04'},
+  {id:'teams', label:'Teams', ic:'05'},
+  {id:'transfers', label:'Transfers', ic:'06'},
+  {id:'manage', label:'Verwaltung', ic:'07'},
+];
+
+function renderNav(){
+  document.getElementById('mainnav').innerHTML = NAV.map(n=>`
+    <div class="navitem ${ROUTE.page===n.id?'active':''}" onclick="go('${n.id}')">
+      <span class="ic">${n.ic}</span><span class="lbl">${n.label}</span>
+    </div>`).join('');
+}
+
+function render(){
+  renderNav();
+  const main = document.getElementById('main');
+  if(ROUTE.page==='dashboard') main.innerHTML = pageDashboard();
+  else if(ROUTE.page==='caseform') main.innerHTML = pageCaseForm(ROUTE.id? DB.cases.find(c=>c.id===ROUTE.id): null);
+  else if(ROUTE.page==='cases') main.innerHTML = pageCaseList();
+  else if(ROUTE.page==='drivers') main.innerHTML = pageDriverList();
+  else if(ROUTE.page==='driverform') main.innerHTML = pageDriverForm(ROUTE.id? driverById(ROUTE.id): null);
+  else if(ROUTE.page==='teams') main.innerHTML = pageTeams();
+  else if(ROUTE.page==='transfers') main.innerHTML = pageTransfers();
+  else if(ROUTE.page==='manage') main.innerHTML = pageManage();
+  else main.innerHTML = pageDashboard();
+}
+
+/* ============================= DASHBOARD ============================= */
+function pageDashboard(){
+  const total = DB.cases.length;
+  const open = DB.cases.filter(c=>c.status==='Offen'||c.status==='In Untersuchung').length;
+  const activeLic = DB.drivers.filter(d=>d.licenseStatus==='Aktiv').length;
+  const suspRev = DB.drivers.filter(d=>d.licenseStatus==='Ausgesetzt'||d.licenseStatus==='Entzogen').length;
+
+  const catCount = {};
+  DB.cases.forEach(c=> catCount[c.category] = (catCount[c.category]||0)+1);
+  const catMax = Math.max(1, ...Object.values(catCount));
+  const catRows = Object.entries(catCount).sort((a,b)=>b[1]-a[1]).slice(0,8)
+    .map(([k,v])=>`<div class="barrow"><div class="lbl">${esc(k)}</div><div class="track"><div class="fill" style="width:${(v/catMax*100)}%"></div></div><div class="val">${v}</div></div>`).join('')
+    || `<div class="empty">Noch keine Akten erfasst.</div>`;
+
+  const teamCount = {};
+  DB.cases.forEach(c=>{ if(c.teamInvolved) teamCount[c.teamInvolved]=(teamCount[c.teamInvolved]||0)+1; });
+  const teamRows = Object.entries(teamCount).sort((a,b)=>b[1]-a[1]).slice(0,11).map(([tid,v])=>{
+    const t = teamById(tid); if(!t) return '';
+    return `<tr><td><span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span></td><td class="pts">${v}</td></tr>`;
+  }).join('') || `<tr><td colspan="2" style="color:var(--grey-2)">Keine Daten</td></tr>`;
+
+  const recent = [...DB.cases].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).slice(0,6);
+  const recentRows = recent.map(c=>{
+    const dt = driverById(c.driverInvolved), tt = teamById(c.teamInvolved);
+    return `<tr class="rowlink" onclick="go('caseform','${c.id}')">
+      <td class="pts">${esc(c.stw)}</td>
+      <td>${esc(c.event||'—')}</td>
+      <td>${tt? `<span class="teamchip"><span class="dot" style="background:${tt.color}"></span>${esc(tt.name)}</span>`:'—'}</td>
+      <td>${esc(driverName(dt))}</td>
+      <td>${esc(c.category||'—')}</td>
+      <td><span class="tag ${statusTagClass(c.status)}">${esc(c.status)}</span></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="6" style="color:var(--grey-2)">Noch keine Akten vorhanden.</td></tr>`;
+
+  return `
+  <div class="pagehead">
+    <div><div class="eyebrow">Stewards Office</div><h1>Dashboard</h1></div>
+    <div class="actions"><button class="btn primary" onclick="go('caseform')">+ Neue Akte eröffnen</button></div>
+  </div>
+
+  <div class="grid cols-4" style="margin-bottom:22px;">
+    <div class="stat"><div class="n">${total}</div><div class="l">Akten gesamt</div></div>
+    <div class="stat amber"><div class="n">${open}</div><div class="l">Offen / in Untersuchung</div></div>
+    <div class="stat green"><div class="n">${activeLic}</div><div class="l">Aktive Lizenzen</div></div>
+    <div class="stat red"><div class="n">${suspRev}</div><div class="l">Ausgesetzt / entzogen</div></div>
+  </div>
+
+  <div class="grid cols-2">
+    <div class="panel">
+      <h2>Vergehen nach <b>Kategorie</b></h2>
+      ${catRows}
+    </div>
+    <div class="panel">
+      <h2>Fälle nach <b>Team</b></h2>
+      <table><thead><tr><th>Team</th><th>Fälle</th></tr></thead><tbody>${teamRows}</tbody></table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Zuletzt bearbeitete <b>Akten</b></h2>
+    <table><thead><tr><th>STW-Nr.</th><th>Event</th><th>Team</th><th>Fahrer</th><th>Kategorie</th><th>Status</th></tr></thead>
+    <tbody>${recentRows}</tbody></table>
+  </div>
+  <div class="footer-note">ZFC RACING STEWARD-SYSTEM // Sportliche Integrität durch konsistente Entscheidungsfindung.</div>
+  `;
+}
+
+/* ============================= CASE FORM (AKTE) ============================= */
+function pageCaseForm(existing){
+  const c = existing || {
+    id:null, stw:null, season:'2026', status:'Offen', createdAt:null,
+    event:'', sessionType:'Rennen', incidentLap:'', category:CATEGORIES[0], reportedBy:REPORTED_BY[0],
+    teamInvolved:'', driverInvolved:'', teamAffected:'', driverAffected:'',
+    description:'', investigationNotes:'', evidenceLink:'', regulationBreach:'', precedent:'',
+    hearingHeld:false, decision:DECISIONS[0], decisionDetail:'', penaltyPoints:0,
+    licenseStatusAfter:LICENSE_AFTER[0], licenseStatusDetail:'',
+    stewardChairman:'', steward2:'', steward3:'', history:[]
+  };
+  const isNew = !existing;
+  const stwDisplay = c.stw || nextStw(c.season) + ' (Vorschau)';
+
+  return `
+  <div class="pagehead">
+    <div><div class="eyebrow">${isNew?'Neue Akte':'Akte bearbeiten'}</div><h1>Steward-Fall</h1></div>
+    <div class="actions">
+      <button class="btn" onclick="go('cases')">← Zur Übersicht</button>
+    </div>
+  </div>
+
+  <div class="dossier">
+    <div class="dossier-head">
+      <div><div class="stwlabel">Aktennummer</div><div class="stwno">${esc(stwDisplay)}</div></div>
+      <div style="text-align:right">
+        <div class="stwlabel">Status</div>
+        <select id="f_status" style="width:auto;">${selectOptions(CASE_STATUS, c.status)}</select>
+      </div>
+    </div>
+    <div class="dossier-body">
+
+      <div class="sectiontitle">Grunddaten</div>
+      <div class="grid cols-3">
+        <div class="field"><label>Saison</label><select id="f_season">${selectOptions(['2025','2026','2027'], c.season)}</select></div>
+        <div class="field"><label>Grand Prix / Event</label><input list="gplist" id="f_event" type="text" value="${esc(c.event)}" placeholder="z. B. GP Monaco"><datalist id="gplist">${EVENTS.map(e=>`<option value="${esc(e)}">`).join('')}</datalist></div>
+        <div class="field"><label>Session</label><select id="f_sessionType">${selectOptions(SESSION_TYPES, c.sessionType)}</select></div>
+      </div>
+      <div class="grid cols-3">
+        <div class="field"><label>Zeitpunkt (Runde / Minute)</label><input id="f_incidentLap" type="text" value="${esc(c.incidentLap)}" placeholder="z. B. Runde 34"></div>
+        <div class="field"><label>Kategorie</label><select id="f_category">${selectOptions(CATEGORIES, c.category)}</select></div>
+        <div class="field"><label>Meldung durch</label><select id="f_reportedBy">${selectOptions(REPORTED_BY, c.reportedBy)}</select></div>
+      </div>
+
+      <div class="sectiontitle">Beteiligte</div>
+      <div class="grid cols-2">
+        <div class="field"><label>Betroffenes / beschuldigtes Team</label>
+          <select id="f_teamInvolved" onchange="onCaseTeamChange('involved')">${teamOptions(c.teamInvolved, true)}</select>
+        </div>
+        <div class="field"><label>Betroffener Fahrer</label>
+          <select id="f_driverInvolved">${driverOptionsForTeam(c.teamInvolved, c.driverInvolved)}</select>
+        </div>
+        <div class="field"><label>Geschädigtes Team (falls zutreffend)</label>
+          <select id="f_teamAffected" onchange="onCaseTeamChange('affected')">${teamOptions(c.teamAffected, true)}</select>
+        </div>
+        <div class="field"><label>Geschädigter Fahrer (falls zutreffend)</label>
+          <select id="f_driverAffected">${driverOptionsForTeam(c.teamAffected, c.driverAffected)}</select>
+        </div>
+      </div>
+
+      <div class="sectiontitle">Sachverhalt</div>
+      <div class="field"><label>Beschreibung des Vorfalls</label><textarea id="f_description" placeholder="Objektive Schilderung des Vorfalls …">${esc(c.description)}</textarea></div>
+      <div class="grid cols-2">
+        <div class="field"><label>Beweismittel (Video-/Telemetrie-Link)</label><input id="f_evidenceLink" type="text" value="${esc(c.evidenceLink)}" placeholder="https://…"></div>
+        <div class="field"><label class="checkline" style="margin-top:26px;"><input type="checkbox" id="f_hearingHeld" ${c.hearingHeld?'checked':''}> Anhörung der Beteiligten durchgeführt</label></div>
+      </div>
+      <div class="field"><label>Untersuchung / Anmerkungen der Stewards</label><textarea id="f_investigationNotes" placeholder="Notizen aus der Untersuchung, Aussagen, Abwägungen …">${esc(c.investigationNotes)}</textarea></div>
+      <div class="grid cols-2">
+        <div class="field"><label>Klarer Regelverstoß (Artikel-Referenz)</label><input id="f_regulationBreach" type="text" value="${esc(c.regulationBreach)}" placeholder="z. B. Art. 27.3 Sportliches Reglement"></div>
+        <div class="field"><label>Vergleichbare frühere Fälle (Präzedenzfall)</label><input id="f_precedent" type="text" value="${esc(c.precedent)}" placeholder="z. B. STW-2026-004"></div>
+      </div>
+
+      <div class="sectiontitle">Entscheidung</div>
+      <div class="grid cols-2">
+        <div class="field"><label>Entscheidung</label><select id="f_decision">${selectOptions(DECISIONS, c.decision)}</select></div>
+        <div class="field"><label>Strafpunkte (auf Superlizenz)</label><input id="f_penaltyPoints" type="number" min="0" max="12" value="${c.penaltyPoints||0}"></div>
+      </div>
+      <div class="field"><label>Detail zur Strafe / Begründung der Entscheidung</label><textarea id="f_decisionDetail" placeholder="z. B. „Fahrer #23 verursachte die Kollision durch verspätetes Bremsen und erhält …“">${esc(c.decisionDetail)}</textarea></div>
+      <div class="grid cols-2">
+        <div class="field"><label>Status der Fahrlizenz nach diesem Vorfall</label><select id="f_licenseStatusAfter">${selectOptions(LICENSE_AFTER, c.licenseStatusAfter)}</select></div>
+        <div class="field"><label>Detail (z. B. Anzahl gesperrter Rennen)</label><input id="f_licenseStatusDetail" type="text" value="${esc(c.licenseStatusDetail)}" placeholder="z. B. 1 Rennen Sperre"></div>
+      </div>
+
+      <div class="sectiontitle">Unterzeichnende Stewards</div>
+      <div class="grid cols-3">
+        <div class="field"><label>Vorsitzender Steward</label><input id="f_stewardChairman" type="text" value="${esc(c.stewardChairman)}"></div>
+        <div class="field"><label>Steward 2</label><input id="f_steward2" type="text" value="${esc(c.steward2)}"></div>
+        <div class="field"><label>Steward 3</label><input id="f_steward3" type="text" value="${esc(c.steward3)}"></div>
+      </div>
+
+      ${c.history && c.history.length? `
+        <div class="sectiontitle">Änderungsprotokoll</div>
+        <table><thead><tr><th>Zeitpunkt</th><th>Ereignis</th></tr></thead><tbody>
+        ${c.history.slice().reverse().map(h=>`<tr><td class="pts">${fmtDateTime(h.ts)}</td><td>${esc(h.text)}</td></tr>`).join('')}
+        </tbody></table>` : ''}
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:26px;border-top:1px solid var(--line);padding-top:20px;">
+        <button class="btn primary" onclick="saveCase('${c.id||''}', false)">Akte speichern</button>
+        <button class="btn" onclick="saveCase('${c.id||''}', true)">Speichern &amp; schließen</button>
+        ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button>` : ''}
+        ${!isNew? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte löschen</button>` : ''}
+      </div>
+    </div>
+  </div>
+  `;
+}
+
+function onCaseTeamChange(which){
+  const teamSel = document.getElementById(which==='involved'?'f_teamInvolved':'f_teamAffected');
+  const driverSel = document.getElementById(which==='involved'?'f_driverInvolved':'f_driverAffected');
+  driverSel.innerHTML = driverOptionsForTeam(teamSel.value, '');
+}
+
+async function saveCase(id, closeAfter){
+  const v = (i)=> document.getElementById(i).value;
+  const now = Date.now();
+  let c = id? DB.cases.find(x=>x.id===id) : null;
+  const isNew = !c;
+  if(isNew){
+    const season = v('f_season');
+    c = { id: uid(), stw: nextStw(season), createdAt: now, history: [] };
+    DB.cases.push(c);
+  }
+  const prevStatus = c.status, prevDecision = c.decision;
+  Object.assign(c, {
+    season: v('f_season'), status: v('f_status'), event: v('f_event'), sessionType: v('f_sessionType'),
+    incidentLap: v('f_incidentLap'), category: v('f_category'), reportedBy: v('f_reportedBy'),
+    teamInvolved: v('f_teamInvolved'), driverInvolved: v('f_driverInvolved'),
+    teamAffected: v('f_teamAffected'), driverAffected: v('f_driverAffected'),
+    description: v('f_description'), evidenceLink: v('f_evidenceLink'),
+    hearingHeld: document.getElementById('f_hearingHeld').checked,
+    investigationNotes: v('f_investigationNotes'), regulationBreach: v('f_regulationBreach'),
+    precedent: v('f_precedent'), decision: v('f_decision'),
+    penaltyPoints: parseInt(v('f_penaltyPoints'))||0, decisionDetail: v('f_decisionDetail'),
+    licenseStatusAfter: v('f_licenseStatusAfter'), licenseStatusDetail: v('f_licenseStatusDetail'),
+    stewardChairman: v('f_stewardChairman'), steward2: v('f_steward2'), steward3: v('f_steward3'),
+    updatedAt: now,
+  });
+  if(isNew){ c.history.push({ts:now, text:'Akte '+c.stw+' eröffnet.'}); }
+  else{
+    if(prevStatus!==c.status) c.history.push({ts:now, text:`Status geändert: ${prevStatus} → ${c.status}`});
+    if(prevDecision!==c.decision) c.history.push({ts:now, text:`Entscheidung aktualisiert: ${c.decision}`});
+    else c.history.push({ts:now, text:'Akte bearbeitet.'});
+  }
+  await persist.cases();
+  if(closeAfter) go('cases'); else go('caseform', c.id);
+}
+
+async function deleteCase(id){
+  if(!confirm('Diese Akte unwiderruflich löschen?')) return;
+  DB.cases = DB.cases.filter(c=>c.id!==id);
+  await persist.cases();
+  go('cases');
+}
+
+/* ============================= CASE LIST ============================= */
+function pageCaseList(){
+  return `
+  <div class="pagehead">
+    <div><div class="eyebrow">Übersicht</div><h1>Alle Akten</h1></div>
+    <div class="actions"><button class="btn primary" onclick="go('caseform')">+ Neue Akte</button></div>
+  </div>
+  <div class="panel">
+    <div class="searchbar">
+      <input id="cf_q" type="text" placeholder="Suche: Event, Beschreibung, STW-Nr. …" oninput="renderCaseTable()">
+      <select id="cf_status" onchange="renderCaseTable()"><option value="">Alle Status</option>${selectOptions(CASE_STATUS,'')}</select>
+      <select id="cf_team" onchange="renderCaseTable()"><option value="">Alle Teams</option>${teamOptions('',false)}</select>
+      <select id="cf_cat" onchange="renderCaseTable()"><option value="">Alle Kategorien</option>${selectOptions(CATEGORIES,'')}</select>
+    </div>
+    <div id="caseTableWrap"></div>
+  </div>
+  <script>renderCaseTable();</script>
+  `;
+}
+function renderCaseTable(){
+  const q = (document.getElementById('cf_q')?.value||'').toLowerCase();
+  const st = document.getElementById('cf_status')?.value||'';
+  const tm = document.getElementById('cf_team')?.value||'';
+  const ct = document.getElementById('cf_cat')?.value||'';
+  let list = [...DB.cases].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  list = list.filter(c=>{
+    if(st && c.status!==st) return false;
+    if(tm && c.teamInvolved!==tm) return false;
+    if(ct && c.category!==ct) return false;
+    if(q){
+      const hay = [c.stw,c.event,c.description,c.category].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const rows = list.map(c=>{
+    const t = teamById(c.teamInvolved), d = driverById(c.driverInvolved);
+    return `<tr class="rowlink" onclick="go('caseform','${c.id}')">
+      <td class="pts">${esc(c.stw)}</td>
+      <td>${esc(c.event||'—')} <span style="color:var(--grey-2);font-size:11.5px;">/ ${esc(c.sessionType||'')}</span></td>
+      <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'—'}</td>
+      <td>${esc(driverName(d))}</td>
+      <td>${esc(c.category||'—')}</td>
+      <td>${esc(c.decision||'—')}</td>
+      <td><span class="tag ${statusTagClass(c.status)}">${esc(c.status)}</span></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('caseTableWrap').innerHTML = `
+    <table><thead><tr><th>STW-Nr.</th><th>Event / Session</th><th>Team</th><th>Fahrer</th><th>Kategorie</th><th>Entscheidung</th><th>Status</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="7"><div class="empty"><b>Keine Akten gefunden</b>Passe die Filter an oder eröffne eine neue Akte.</div></td></tr>`}</tbody></table>
+    <div class="footer-note">${list.length} von ${DB.cases.length} Akten angezeigt.</div>
+  `;
+}
+
+/* ============================= DRIVERS ============================= */
+function pageDriverList(){
+  return `
+  <div class="pagehead">
+    <div><div class="eyebrow">Fahrerkartei</div><h1>Fahrer</h1></div>
+    <div class="actions"><button class="btn primary" onclick="go('driverform')">+ Neuen Fahrer erfassen</button></div>
+  </div>
+  <div class="panel">
+    <div class="searchbar">
+      <input id="df_q" type="text" placeholder="Suche nach Name …" oninput="renderDriverTable()">
+      <select id="df_team" onchange="renderDriverTable()"><option value="">Alle Teams</option>${teamOptions('',false)}</select>
+      <select id="df_lic" onchange="renderDriverTable()"><option value="">Alle Lizenzstatus</option>${selectOptions(['Aktiv','Ausgesetzt','Entzogen','Nicht ausgestellt'],'')}</select>
+    </div>
+    <div id="driverTableWrap"></div>
+  </div>
+  <script>renderDriverTable();</script>
+  `;
+}
+function renderDriverTable(){
+  const q = (document.getElementById('df_q')?.value||'').toLowerCase();
+  const tm = document.getElementById('df_team')?.value||'';
+  const lic = document.getElementById('df_lic')?.value||'';
+  let list = [...DB.drivers].sort((a,b)=> driverName(a).localeCompare(driverName(b)));
+  list = list.filter(d=>{
+    if(tm && d.teamId!==tm) return false;
+    if(lic && (d.licenseStatus||'Nicht ausgestellt')!==lic) return false;
+    if(q && !driverName(d).toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const rows = list.map(d=>{
+    const t = teamById(d.teamId);
+    const pts = driverPenaltyPoints(d.id);
+    const ptsClass = pts>=12?'crit':pts>=8?'warn':'';
+    const ls = d.licenseStatus || 'Nicht ausgestellt';
+    return `<tr class="rowlink" onclick="go('driverform','${d.id}')">
+      <td>${esc(driverName(d))} ${d.number? `<span style="color:var(--grey-2)">#${esc(d.number)}</span>`:''}</td>
+      <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'—'}</td>
+      <td class="pts">${esc(d.licenseNo||'—')}</td>
+      <td><span class="tag ${licenseTagClass(ls)}">${esc(ls)}</span></td>
+      <td class="pts ${ptsClass}">${pts} / 12</td>
+      <td>${casesForDriver(d.id).length}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('driverTableWrap').innerHTML = `
+    <table><thead><tr><th>Fahrer</th><th>Team</th><th>Lizenz-Nr.</th><th>Lizenzstatus</th><th>Strafpunkte</th><th>Akten</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6"><div class="empty"><b>Noch keine Fahrer erfasst</b>Lege deinen ersten Fahrer an, um eine Fahrerakte zu erstellen.</div></td></tr>`}</tbody></table>
+    <div class="footer-note">${list.length} von ${DB.drivers.length} Fahrern angezeigt.</div>
+  `;
+}
+
+function pageDriverForm(existing){
+  const d = existing || {
+    id:null, firstName:'', lastName:'', number:'', nationality:'', dob:'', teamId:DB.teams[0]?.id||'',
+    platform:PLATFORMS[0], simId:'', discord:'', email:'', debutDate:today(), licenseClass:LICENSE_CLASS[0],
+    photoUrl:'', notes:'', licenseNo:'', licenseStatus:'Nicht ausgestellt', licenseIssued:'', licenseExpiry:'',
+    rulesAccepted:false, history:[]
+  };
+  const isNew = !existing;
+  const pts = existing? driverPenaltyPoints(d.id) : 0;
+  const ptsClass = pts>=12?'crit':pts>=8?'warn':'';
+
+  const suggestions = DRIVER_SUGGESTIONS[d.teamId] || [];
+
+  return `
+  <div class="pagehead">
+    <div><div class="eyebrow">${isNew?'Neue Fahrerakte':'Fahrerakte'}</div><h1>${isNew?'Fahrer erfassen':esc(driverName(d))}</h1></div>
+    <div class="actions"><button class="btn" onclick="go('drivers')">← Zur Übersicht</button></div>
+  </div>
+
+  <div class="dossier">
+    <div class="dossier-head">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div class="driverface">${d.photoUrl? `<img src="${esc(d.photoUrl)}">` : (d.firstName? esc((d.firstName[0]||'')+(d.lastName[0]||'')) : '—')}</div>
+        <div>
+          <div class="stwlabel">Lizenznummer</div>
+          <div class="stwno" style="font-size:18px;">${esc(d.licenseNo || '— noch nicht erteilt —')}</div>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div class="stwlabel">Lizenzstatus</div>
+        <span class="tag ${licenseTagClass(d.licenseStatus||'Nicht ausgestellt')}" style="font-size:12px;padding:5px 12px;">${esc(d.licenseStatus||'Nicht ausgestellt')}</span>
+      </div>
+    </div>
+    <div class="dossier-body">
+
+      <div class="sectiontitle">Persönliche Daten</div>
+      <div class="grid cols-3">
+        <div class="field"><label>Vorname</label><input id="d_firstName" type="text" value="${esc(d.firstName)}" list="drvsug"><datalist id="drvsug">${suggestions.map(s=>`<option value="${esc(s)}">`).join('')}</datalist></div>
+        <div class="field"><label>Nachname</label><input id="d_lastName" type="text" value="${esc(d.lastName)}"></div>
+        <div class="field"><label>Startnummer</label><input id="d_number" type="text" value="${esc(d.number)}"></div>
+      </div>
+      <div class="grid cols-3">
+        <div class="field"><label>Nationalität</label><input id="d_nationality" type="text" value="${esc(d.nationality)}"></div>
+        <div class="field"><label>Geburtsdatum</label><input id="d_dob" type="date" value="${esc(d.dob)}"></div>
+        <div class="field"><label>Team</label><select id="d_teamId" onchange="onDriverTeamChange()">${teamOptions(d.teamId,false)}</select></div>
+      </div>
+
+      <div class="sectiontitle">Sim-Racing-Profil</div>
+      <div class="grid cols-3">
+        <div class="field"><label>Plattform</label><select id="d_platform">${selectOptions(PLATFORMS, d.platform)}</select></div>
+        <div class="field"><label>Sim-Racing-ID / Handle</label><input id="d_simId" type="text" value="${esc(d.simId)}"></div>
+        <div class="field"><label>Discord-Name#ID</label><input id="d_discord" type="text" value="${esc(d.discord)}"></div>
+      </div>
+      <div class="grid cols-3">
+        <div class="field"><label>E-Mail (optional)</label><input id="d_email" type="email" value="${esc(d.email)}"></div>
+        <div class="field"><label>Debüt in der Liga</label><input id="d_debutDate" type="date" value="${esc(d.debutDate)}"></div>
+        <div class="field"><label>Lizenzklasse</label><select id="d_licenseClass">${selectOptions(LICENSE_CLASS, d.licenseClass)}</select></div>
+      </div>
+      <div class="field"><label>Foto-URL (optional)</label><input id="d_photoUrl" type="text" value="${esc(d.photoUrl)}" placeholder="https://…"></div>
+      <div class="field"><label>Bemerkungen der Stewards</label><textarea id="d_notes" placeholder="Interne Notizen zum Fahrer …">${esc(d.notes)}</textarea></div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin:22px 0;">
+        <button class="btn primary" onclick="saveDriver('${d.id||''}')">Fahrerakte speichern</button>
+        ${!isNew? `<button class="btn danger" onclick="deleteDriver('${d.id}')">Fahrerakte löschen</button>`:''}
+      </div>
+
+      ${!isNew? `
+      <div class="sectiontitle">Racing-Lizenz</div>
+      <div class="grid cols-3" style="margin-bottom:6px;">
+        <div class="stat"><div class="n pts ${ptsClass}">${pts} / 12</div><div class="l">Strafpunkte (rollierend)</div></div>
+        <div class="stat"><div class="n" style="font-size:15px;">${fmtDate(d.licenseIssued)}</div><div class="l">Lizenz erteilt am</div></div>
+        <div class="stat"><div class="n" style="font-size:15px;">${fmtDate(d.licenseExpiry)}</div><div class="l">Gültig bis</div></div>
+      </div>
+      ${pts>=12? `<p style="color:#ff5a6b;font-size:13px;"><b>Hinweis:</b> Der Fahrer hat die Schwelle von 12 Strafpunkten erreicht. Gemäß Reglement ist eine Rennsperre zu prüfen.</p>`:''}
+      <label class="checkline" style="margin:14px 0;"><input type="checkbox" id="d_rulesAccepted" ${d.rulesAccepted?'checked':''}> Fahrer hat das Sportreglement der ZFC Racing gelesen und akzeptiert</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        ${(!d.licenseStatus || d.licenseStatus==='Nicht ausgestellt')? `<button class="btn gold" onclick="issueLicense('${d.id}')">Lizenz erteilen</button>` : ''}
+        ${d.licenseStatus==='Aktiv'? `<button class="btn" onclick="setLicenseStatus('${d.id}','Ausgesetzt')">Lizenz aussetzen</button>`:''}
+        ${d.licenseStatus==='Aktiv'? `<button class="btn danger" onclick="setLicenseStatus('${d.id}','Entzogen')">Lizenz entziehen</button>`:''}
+        ${(d.licenseStatus==='Ausgesetzt'||d.licenseStatus==='Entzogen')? `<button class="btn" onclick="setLicenseStatus('${d.id}','Aktiv')">Lizenz reaktivieren</button>`:''}
+        ${d.licenseStatus && d.licenseStatus!=='Nicht ausgestellt'? `<button class="btn gold" onclick="printLicense('${d.id}')">Lizenz als PDF</button>`:''}
+      </div>
+
+      <div class="sectiontitle">Verknüpfte Steward-Akten</div>
+      ${casesForDriver(d.id).length? `
+      <table><thead><tr><th>STW-Nr.</th><th>Event</th><th>Kategorie</th><th>Entscheidung</th><th>Status</th></tr></thead><tbody>
+        ${casesForDriver(d.id).map(c=>`<tr class="rowlink" onclick="go('caseform','${c.id}')">
+          <td class="pts">${esc(c.stw)}</td><td>${esc(c.event||'—')}</td><td>${esc(c.category||'—')}</td>
+          <td>${esc(c.decision||'—')}</td><td><span class="tag ${statusTagClass(c.status)}">${esc(c.status)}</span></td>
+        </tr>`).join('')}
+      </tbody></table>` : `<div class="empty">Für diesen Fahrer wurden noch keine Fälle erfasst.</div>`}
+
+      <div class="sectiontitle">Transferhistorie</div>
+      ${transfersForDriver(d.id).length? `
+      <table><thead><tr><th>Datum</th><th>Von</th><th>Nach</th><th>Notiz</th></tr></thead><tbody>
+        ${transfersForDriver(d.id).map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${esc(teamById(t.fromTeamId)?.name||'—')}</td><td>${esc(teamById(t.toTeamId)?.name||'—')}</td><td>${esc(t.note||'—')}</td></tr>`).join('')}
+      </tbody></table>` : `<div class="empty">Keine Transfers erfasst.</div>`}
+      ` : `<div class="footer-note">Speichere die Fahrerakte zuerst, um eine Lizenz zu erteilen und Fälle zu verknüpfen.</div>`}
+
+    </div>
+  </div>
+  `;
+}
+function onDriverTeamChange(){ /* placeholder for future dependent logic */ }
+
+async function saveDriver(id){
+  const v = i=>document.getElementById(i).value;
+  let d = id? driverById(id) : null;
+  const isNew = !d;
+  if(isNew){ d = {id:uid(), createdAt:Date.now(), licenseStatus:'Nicht ausgestellt', history:[]}; DB.drivers.push(d); }
+  Object.assign(d, {
+    firstName:v('d_firstName'), lastName:v('d_lastName'), number:v('d_number'),
+    nationality:v('d_nationality'), dob:v('d_dob'), teamId:v('d_teamId'),
+    platform:v('d_platform'), simId:v('d_simId'), discord:v('d_discord'), email:v('d_email'),
+    debutDate:v('d_debutDate'), licenseClass:v('d_licenseClass'), photoUrl:v('d_photoUrl'),
+    notes:v('d_notes'), updatedAt:Date.now(),
+  });
+  if(!isNew && document.getElementById('d_rulesAccepted')) d.rulesAccepted = document.getElementById('d_rulesAccepted').checked;
+  if(!d.firstName && !d.lastName){ alert('Bitte mindestens Vor- oder Nachname angeben.'); return; }
+  await persist.drivers();
+  go('driverform', d.id);
+}
+async function deleteDriver(id){
+  if(!confirm('Diese Fahrerakte unwiderruflich löschen? Verknüpfte Fälle bleiben erhalten, verweisen aber ins Leere.')) return;
+  DB.drivers = DB.drivers.filter(d=>d.id!==id);
+  await persist.drivers();
+  go('drivers');
+}
+async function issueLicense(id){
+  const d = driverById(id);
+  const accepted = document.getElementById('d_rulesAccepted').checked;
+  if(!accepted){ alert('Der Fahrer muss das Sportreglement akzeptieren, bevor die Lizenz erteilt werden kann.'); return; }
+  d.licenseNo = nextLicenseNo();
+  d.licenseStatus = 'Aktiv';
+  d.licenseIssued = today();
+  const exp = new Date(); exp.setFullYear(exp.getFullYear()+1);
+  d.licenseExpiry = exp.toISOString().slice(0,10);
+  d.rulesAccepted = true;
+  d.history = d.history||[]; d.history.push({ts:Date.now(), text:`Lizenz ${d.licenseNo} erteilt.`});
+  await persist.drivers();
+  go('driverform', id);
+}
+async function setLicenseStatus(id, status){
+  const d = driverById(id);
+  if(status==='Entzogen' && !confirm('Lizenz wirklich entziehen?')) return;
+  d.licenseStatus = status;
+  d.history = d.history||[]; d.history.push({ts:Date.now(), text:`Lizenzstatus geändert zu: ${status}`});
+  await persist.drivers();
+  go('driverform', id);
+}
+
+/* ============================= TEAMS ============================= */
+function pageTeams(){
+  const cards = DB.teams.map(t=>{
+    const roster = DB.drivers.filter(d=>d.teamId===t.id);
+    const caseCount = DB.cases.filter(c=>c.teamInvolved===t.id).length;
+    return `
+    <div class="panel" style="border-top:3px solid ${t.color};padding-top:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div class="teamchip" style="font-size:16px;font-weight:800;"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</div>
+          <div style="color:var(--grey-2);font-size:12px;margin-top:2px;">${esc(t.country||'')}</div>
+        </div>
+        <div style="text-align:right;font-family:var(--mono);">
+          <div style="font-size:20px;font-weight:700;">${caseCount}</div>
+          <div style="font-size:10px;color:var(--grey-2);text-transform:uppercase;">Fälle</div>
+        </div>
+      </div>
+      <div class="sectiontitle" style="margin:14px 0 8px;">Aufstellung (${roster.length})</div>
+      ${roster.length? roster.map(d=>`<div class="rowlink" onclick="go('driverform','${d.id}')" style="padding:6px 4px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line);">
+        <span>${esc(driverName(d))} ${d.number?('#'+esc(d.number)):''}</span>
+        <span class="tag ${licenseTagClass(d.licenseStatus||'Nicht ausgestellt')}">${esc(d.licenseStatus||'Nicht ausgestellt')}</span>
+      </div>`).join('') : `<div style="color:var(--grey-2);font-size:13px;">Noch keine Fahrer zugeordnet.</div>`}
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="pagehead"><div><div class="eyebrow">Konstrukteure</div><h1>Teams — Saison 2026</h1></div></div>
+  <div class="grid cols-3">${cards}</div>
+  `;
+}
+
+/* ============================= TRANSFERS ============================= */
+function pageTransfers(){
+  const rows = [...DB.transfers].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).map(t=>{
+    const d = driverById(t.driverId);
+    return `<tr>
+      <td>${fmtDate(t.date)}</td>
+      <td>${esc(driverName(d))}</td>
+      <td>${esc(teamById(t.fromTeamId)?.name || '—')}</td>
+      <td>${esc(teamById(t.toTeamId)?.name || '—')}</td>
+      <td>${esc(t.note||'—')}</td>
+      <td><button class="btn small danger" onclick="deleteTransfer('${t.id}')">Löschen</button></td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="pagehead"><div><div class="eyebrow">Fahrermarkt</div><h1>Transfers</h1></div></div>
+
+  <div class="panel">
+    <h2>Neuer <b>Transfer</b></h2>
+    <div class="grid cols-4">
+      <div class="field"><label>Fahrer</label><select id="t_driver" onchange="onTransferDriverChange()">
+        <option value="">— wählen —</option>
+        ${DB.drivers.map(d=>`<option value="${d.id}">${esc(driverName(d))} (${esc(teamById(d.teamId)?.name||'ohne Team')})</option>`).join('')}
+      </select></div>
+      <div class="field"><label>Neues Team</label><select id="t_toTeam">${teamOptions('',false)}</select></div>
+      <div class="field"><label>Datum</label><input id="t_date" type="date" value="${today()}"></div>
+      <div class="field"><label>Notiz</label><input id="t_note" type="text" placeholder="z. B. Saisonwechsel 2027"></div>
+    </div>
+    <button class="btn primary" onclick="createTransfer()">Transfer eintragen</button>
+  </div>
+
+  <div class="panel">
+    <h2>Transfer<b>historie</b></h2>
+    <table><thead><tr><th>Datum</th><th>Fahrer</th><th>Von</th><th>Nach</th><th>Notiz</th><th></th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6"><div class="empty">Noch keine Transfers erfasst.</div></td></tr>`}</tbody></table>
+  </div>
+  `;
+}
+function onTransferDriverChange(){}
+async function createTransfer(){
+  const driverId = document.getElementById('t_driver').value;
+  const toTeamId = document.getElementById('t_toTeam').value;
+  const date = document.getElementById('t_date').value;
+  const note = document.getElementById('t_note').value;
+  if(!driverId || !toTeamId){ alert('Bitte Fahrer und Zielteam auswählen.'); return; }
+  const d = driverById(driverId);
+  const fromTeamId = d.teamId;
+  if(fromTeamId===toTeamId){ alert('Der Fahrer steht bereits bei diesem Team.'); return; }
+  DB.transfers.push({id:uid(), driverId, fromTeamId, toTeamId, date, note, createdAt:Date.now()});
+  d.teamId = toTeamId;
+  d.history = d.history||[]; d.history.push({ts:Date.now(), text:`Transfer: ${teamById(fromTeamId)?.name||'—'} → ${teamById(toTeamId)?.name||'—'}`});
+  await persist.transfers();
+  await persist.drivers();
+  go('transfers');
+}
+async function deleteTransfer(id){
+  if(!confirm('Diesen Transfer-Eintrag löschen? (Team-Zuordnung des Fahrers bleibt unverändert.)')) return;
+  DB.transfers = DB.transfers.filter(t=>t.id!==id);
+  await persist.transfers();
+  go('transfers');
+}
+
+/* ============================= MANAGEMENT ============================= */
+let MANAGE_TAB = 'cases';
+function pageManage(){
+  return `
+  <div class="pagehead"><div><div class="eyebrow">Administration</div><h1>Verwaltung</h1></div></div>
+  <div class="tabs">
+    <div class="tab ${MANAGE_TAB==='cases'?'active':''}" onclick="setManageTab('cases')">Akten (${DB.cases.length})</div>
+    <div class="tab ${MANAGE_TAB==='drivers'?'active':''}" onclick="setManageTab('drivers')">Fahrer (${DB.drivers.length})</div>
+    <div class="tab ${MANAGE_TAB==='teams'?'active':''}" onclick="setManageTab('teams')">Teams (${DB.teams.length})</div>
+    <div class="tab ${MANAGE_TAB==='transfers'?'active':''}" onclick="setManageTab('transfers')">Transfers (${DB.transfers.length})</div>
+    <div class="tab ${MANAGE_TAB==='data'?'active':''}" onclick="setManageTab('data')">Daten &amp; Backup</div>
+  </div>
+  <div id="manageBody"></div>
+  <script>renderManageBody();</script>
+  `;
+}
+function setManageTab(t){ MANAGE_TAB=t; document.getElementById('main').innerHTML = pageManage(); }
+function renderManageBody(){
+  const el = document.getElementById('manageBody');
+  if(MANAGE_TAB==='cases'){
+    el.innerHTML = `<div class="panel"><table><thead><tr><th>STW-Nr.</th><th>Event</th><th>Kategorie</th><th>Status</th><th></th></tr></thead><tbody>
+      ${DB.cases.map(c=>`<tr><td class="pts">${esc(c.stw)}</td><td>${esc(c.event||'—')}</td><td>${esc(c.category||'—')}</td>
+      <td><span class="tag ${statusTagClass(c.status)}">${esc(c.status)}</span></td>
+      <td style="display:flex;gap:6px;"><button class="btn small" onclick="go('caseform','${c.id}')">Bearbeiten</button><button class="btn small danger" onclick="deleteCase('${c.id}')">Löschen</button></td></tr>`).join('')
+      || `<tr><td colspan="5"><div class="empty">Keine Akten vorhanden.</div></td></tr>`}
+      </tbody></table></div>`;
+  } else if(MANAGE_TAB==='drivers'){
+    el.innerHTML = `<div class="panel"><table><thead><tr><th>Fahrer</th><th>Team</th><th>Lizenz</th><th></th></tr></thead><tbody>
+      ${DB.drivers.map(d=>`<tr><td>${esc(driverName(d))}</td><td>${esc(teamById(d.teamId)?.name||'—')}</td>
+      <td><span class="tag ${licenseTagClass(d.licenseStatus||'Nicht ausgestellt')}">${esc(d.licenseStatus||'Nicht ausgestellt')}</span></td>
+      <td style="display:flex;gap:6px;"><button class="btn small" onclick="go('driverform','${d.id}')">Bearbeiten</button><button class="btn small danger" onclick="deleteDriver('${d.id}')">Löschen</button></td></tr>`).join('')
+      || `<tr><td colspan="4"><div class="empty">Keine Fahrer vorhanden.</div></td></tr>`}
+      </tbody></table></div>`;
+  } else if(MANAGE_TAB==='teams'){
+    el.innerHTML = `<div class="panel">
+      <h2>Team <b>hinzufügen</b></h2>
+      <div class="grid cols-4">
+        <div class="field"><label>Name</label><input id="nt_name" type="text"></div>
+        <div class="field"><label>Land</label><input id="nt_country" type="text"></div>
+        <div class="field"><label>Farbe</label><input id="nt_color" type="text" placeholder="#RRGGBB" value="#c8102e"></div>
+        <div class="field" style="display:flex;align-items:flex-end;"><button class="btn primary" onclick="addTeam()">Team anlegen</button></div>
+      </div>
+      <table><thead><tr><th>Team</th><th>Land</th><th></th></tr></thead><tbody>
+      ${DB.teams.map(t=>`<tr><td><span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span></td><td>${esc(t.country||'—')}</td>
+      <td><button class="btn small danger" onclick="deleteTeam('${t.id}')">Löschen</button></td></tr>`).join('')}
+      </tbody></table>
+      <div class="footer-note">Hinweis: Beim Löschen eines Teams bleiben zugeordnete Fahrer und Akten bestehen, verlieren aber die Teamzuordnung.</div>
+      </div>`;
+  } else if(MANAGE_TAB==='transfers'){
+    el.innerHTML = `<div class="panel"><table><thead><tr><th>Datum</th><th>Fahrer</th><th>Von</th><th>Nach</th><th></th></tr></thead><tbody>
+      ${DB.transfers.map(t=>`<tr><td>${fmtDate(t.date)}</td><td>${esc(driverName(driverById(t.driverId)))}</td>
+      <td>${esc(teamById(t.fromTeamId)?.name||'—')}</td><td>${esc(teamById(t.toTeamId)?.name||'—')}</td>
+      <td><button class="btn small danger" onclick="deleteTransfer('${t.id}')">Löschen</button></td></tr>`).join('')
+      || `<tr><td colspan="5"><div class="empty">Keine Transfers vorhanden.</div></td></tr>`}
+      </tbody></table></div>`;
+  } else if(MANAGE_TAB==='data'){
+    el.innerHTML = `<div class="panel">
+      <h2>Daten<b>sicherung</b></h2>
+      <p style="color:var(--grey);font-size:13.5px;">Exportiere den gesamten Datenbestand als JSON-Datei oder spiele eine zuvor exportierte Sicherung wieder ein.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn gold" onclick="exportData()">Alle Daten exportieren (.json)</button>
+        <label class="btn" style="cursor:pointer;">Backup importieren
+          <input type="file" accept="application/json" style="display:none;" onchange="importData(event)">
+        </label>
+        <button class="btn danger" onclick="resetAllData()">Alle Daten zurücksetzen</button>
+      </div>
+    </div>`;
+  }
+}
+async function addTeam(){
+  const name = document.getElementById('nt_name').value.trim();
+  const country = document.getElementById('nt_country').value.trim();
+  const color = document.getElementById('nt_color').value.trim() || '#c8102e';
+  if(!name){ alert('Bitte einen Teamnamen angeben.'); return; }
+  DB.teams.push({id: uid(), name, country, color});
+  await persist.teams();
+  renderManageBody();
+}
+async function deleteTeam(id){
+  if(!confirm('Team wirklich löschen?')) return;
+  DB.teams = DB.teams.filter(t=>t.id!==id);
+  await persist.teams();
+  renderManageBody();
+}
+function exportData(){
+  const payload = { exportedAt: new Date().toISOString(), teams: DB.teams, drivers: DB.drivers, cases: DB.cases, transfers: DB.transfers };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `zfc-racing-backup-${today()}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function importData(evt){
+  const file = evt.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async ()=>{
+    try{
+      const data = JSON.parse(reader.result);
+      if(!confirm('Import überschreibt alle aktuellen Daten. Fortfahren?')) return;
+      DB.teams = data.teams || DB.teams;
+      DB.drivers = data.drivers || [];
+      DB.cases = data.cases || [];
+      DB.transfers = data.transfers || [];
+      await persist.teams(); await persist.drivers(); await persist.cases(); await persist.transfers();
+      alert('Import erfolgreich.');
+      go('dashboard');
+    }catch(e){ alert('Ungültige Backup-Datei.'); }
+  };
+  reader.readAsText(file);
+}
+async function resetAllData(){
+  if(!confirm('WARNUNG: Dies löscht alle Akten, Fahrer, Teams und Transfers unwiderruflich. Fortfahren?')) return;
+  if(!confirm('Bist du dir absolut sicher? Dieser Vorgang kann nicht rückgängig gemacht werden.')) return;
+  DB.teams = defaultTeams(); DB.drivers = []; DB.cases = []; DB.transfers = [];
+  await persist.teams(); await persist.drivers(); await persist.cases(); await persist.transfers();
+  go('dashboard');
+}
+
+/* ============================= PRINT: FIA REPORT & LICENSE ============================= */
+function printDoc(html){
+  document.getElementById('printArea').innerHTML = html;
+  document.body.classList.add('printing');
+  setTimeout(()=>{ window.print(); }, 60);
+}
+window.onafterprint = ()=> document.body.classList.remove('printing');
+
+function printCaseReport(id){
+  const c = DB.cases.find(x=>x.id===id); if(!c) return;
+  const ti = teamById(c.teamInvolved), di = driverById(c.driverInvolved);
+  const ta = teamById(c.teamAffected), da = driverById(c.driverAffected);
+  const html = `
+  <div class="doc">
+    <div class="doc-head">
+      <div><div class="t1">ZFC <span>RACING</span></div><div class="t2">Official Document — Sportkommissare</div></div>
+      <div><div class="stw">${esc(c.stw)}</div><div class="stwl">Aktennummer</div></div>
+    </div>
+    <p style="font-size:12px;color:#666;">${esc(c.event||'—')} · ${esc(c.sessionType||'—')} · Saison ${esc(c.season||'—')} · Erstellt am ${fmtDateTime(c.createdAt)}</p>
+
+    <h3>1. Beteiligte</h3>
+    <table>
+      <tr><td class="k">Betroffenes Team</td><td>${esc(ti?.name || '—')}</td></tr>
+      <tr><td class="k">Betroffener Fahrer</td><td>${esc(driverName(di))} ${di?.number? '(#'+esc(di.number)+')':''}</td></tr>
+      <tr><td class="k">Geschädigtes Team</td><td>${esc(ta?.name || '—')}</td></tr>
+      <tr><td class="k">Geschädigter Fahrer</td><td>${esc(driverName(da)) || '—'}</td></tr>
+      <tr><td class="k">Meldung durch</td><td>${esc(c.reportedBy||'—')}</td></tr>
+      <tr><td class="k">Zeitpunkt des Vorfalls</td><td>${esc(c.incidentLap||'—')}</td></tr>
+      <tr><td class="k">Kategorie</td><td>${esc(c.category||'—')}</td></tr>
+    </table>
+
+    <h3>2. Beschreibung des Vorfalls</h3>
+    <p>${nl2br(c.description) || '—'}</p>
+
+    <h3>3. Klarer Regelverstoß</h3>
+    <p>${esc(c.regulationBreach) || '—'}</p>
+    ${c.precedent? `<p style="color:#777;font-size:12px;">Vergleichbarer Fall: ${esc(c.precedent)}</p>`:''}
+
+    <h3>4. Untersuchung</h3>
+    <p>Anhörung der Beteiligten: <b>${c.hearingHeld? 'Ja':'Nein'}</b></p>
+    <p>${nl2br(c.investigationNotes) || '—'}</p>
+    ${c.evidenceLink? `<p style="font-size:12px;color:#777;">Beweismittel: ${esc(c.evidenceLink)}</p>`:''}
+
+    <h3>5. Entscheidung der Sportkommissare</h3>
+    <table>
+      <tr><td class="k">Entscheidung</td><td><b>${esc(c.decision||'—')}</b></td></tr>
+      <tr><td class="k">Strafpunkte</td><td>${esc(c.penaltyPoints||0)}</td></tr>
+    </table>
+    <p>${nl2br(c.decisionDetail) || '—'}</p>
+
+    <h3>6. Status der Fahrlizenz</h3>
+    <p><span class="stampline">${esc(c.licenseStatusAfter || 'Bleibt aktiv')}</span>${c.licenseStatusDetail? '  — '+esc(c.licenseStatusDetail):''}</p>
+
+    <div class="sig">
+      <div class="sigbox"><div class="sigline">${esc(c.stewardChairman)||'—'}<br>Vorsitzender Steward</div></div>
+      <div class="sigbox"><div class="sigline">${esc(c.steward2)||'—'}<br>Steward</div></div>
+      <div class="sigbox"><div class="sigline">${esc(c.steward3)||'—'}<br>Steward</div></div>
+    </div>
+
+    <div class="foot">ZFC RACING STEWARD-SYSTEM // Automatisch generiert am ${fmtDateTime(Date.now())} // Aktenstatus: ${esc(c.status)}</div>
+  </div>`;
+  printDoc(html);
+}
+
+function printLicense(id){
+  const d = driverById(id); if(!d) return;
+  const t = teamById(d.teamId);
+  const html = `
+  <div class="doc">
+    <div class="doc-head">
+      <div><div class="t1">ZFC <span>RACING</span></div><div class="t2">Official Racing Licence</div></div>
+      <div><div class="stw">${esc(d.licenseNo||'—')}</div><div class="stwl">Lizenznummer</div></div>
+    </div>
+    <div style="display:flex;gap:24px;align-items:flex-start;margin-top:6px;">
+      <div style="width:110px;height:110px;border:2px solid #c9a227;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f2f0eb;">
+        ${d.photoUrl? `<img src="${esc(d.photoUrl)}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-family:'JetBrains Mono',monospace;font-size:26px;color:#999;">${esc((d.firstName[0]||'')+(d.lastName[0]||''))}</span>`}
+      </div>
+      <table style="flex:1;">
+        <tr><td class="k">Name</td><td><b>${esc(driverName(d))}</b></td></tr>
+        <tr><td class="k">Startnummer</td><td>${esc(d.number||'—')}</td></tr>
+        <tr><td class="k">Nationalität</td><td>${esc(d.nationality||'—')}</td></tr>
+        <tr><td class="k">Geburtsdatum</td><td>${fmtDate(d.dob)}</td></tr>
+        <tr><td class="k">Team</td><td>${esc(t?.name||'—')}</td></tr>
+        <tr><td class="k">Lizenzklasse</td><td>${esc(d.licenseClass||'—')}</td></tr>
+      </table>
+    </div>
+
+    <h3>Gültigkeit</h3>
+    <table>
+      <tr><td class="k">Status</td><td><b>${esc(d.licenseStatus||'—')}</b></td></tr>
+      <tr><td class="k">Erteilt am</td><td>${fmtDate(d.licenseIssued)}</td></tr>
+      <tr><td class="k">Gültig bis</td><td>${fmtDate(d.licenseExpiry)}</td></tr>
+      <tr><td class="k">Plattform</td><td>${esc(d.platform||'—')}</td></tr>
+    </table>
+
+    <h3>Erklärung</h3>
+    <p>Der Inhaber dieser Lizenz bestätigt, das Sportliche Reglement der ZFC Racing gelesen, verstanden und vorbehaltlos akzeptiert zu haben, und verpflichtet sich zur Einhaltung sämtlicher sportlichen und disziplinarischen Bestimmungen der Liga.</p>
+    <p><span class="stampline">${d.rulesAccepted? '✔ REGLEMENT AKZEPTIERT' : 'REGLEMENT NICHT BESTÄTIGT'}</span></p>
+
+    <div class="sig">
+      <div class="sigbox"><div class="sigline">${esc(driverName(d))}<br>Unterschrift Fahrer</div></div>
+      <div class="sigbox"><div class="sigline">Race Director<br>ZFC Racing</div></div>
+    </div>
+
+    <div class="foot">ZFC RACING STEWARD-SYSTEM // Lizenzdokument automatisch generiert am ${fmtDateTime(Date.now())}</div>
+  </div>`;
+  printDoc(html);
+}
+
+/* ============================= INIT ============================= */
+async function init(){
+  await loadAll();
+  document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('shell').style.display = 'flex';
+  const h = location.hash.replace('#','');
+  const [page,id] = h.split('/');
+  ROUTE = {page: page||'dashboard', id: id||null};
+  render();
+}
+init();
+</script>
+</body>
+</html>
