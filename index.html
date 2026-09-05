@@ -337,7 +337,7 @@ const EVENTS = ["Bahrain","Saudi-Arabien","Australien","Japan","China","Miami","
 const PLATFORMS = ["iRacing","Assetto Corsa Competizione","rFactor 2","RaceRoom Racing Experience","Automobilista 2","Le Mans Ultimate","F1 25 / EA Sports F1","Sonstige"];
 const LICENSE_CLASS = ["Rookie","Pro","Elite / Werksfahrer","Gastfahrer"];
 
-async function loadKey(key, fallback){
+function loadKey(key, fallback){
   try{
     const value = window.localStorage.getItem(key);
     return value === null ? fallback : JSON.parse(value);
@@ -346,16 +346,16 @@ async function loadKey(key, fallback){
     return fallback;
   }
 }
-async function saveKey(key, value){
+function saveKey(key, value){
   try{ window.localStorage.setItem(key, JSON.stringify(value)); return true; }
   catch(e){ console.error('save failed', key, e); alert('Speichern fehlgeschlagen — bitte erneut versuchen.'); return false; }
 }
-async function loadAll(){
-  DB.teams = await loadKey(KEYS.teams, null);
-  if(!DB.teams){ DB.teams = defaultTeams(); await saveKey(KEYS.teams, DB.teams); }
-  DB.drivers = await loadKey(KEYS.drivers, []);
-  DB.cases = await loadKey(KEYS.cases, []);
-  DB.transfers = await loadKey(KEYS.transfers, []);
+function loadAll(){
+  DB.teams = loadKey(KEYS.teams, null);
+  if(!DB.teams){ DB.teams = defaultTeams(); saveKey(KEYS.teams, DB.teams); }
+  DB.drivers = loadKey(KEYS.drivers, []);
+  DB.cases = loadKey(KEYS.cases, []);
+  DB.transfers = loadKey(KEYS.transfers, []);
 }
 const persist = {
   teams: ()=>saveKey(KEYS.teams, DB.teams),
@@ -1263,8 +1263,8 @@ function printLicense(id){
 }
 
 /* ============================= INIT ============================= */
-async function init(){
-  await loadAll();
+function init(){
+  loadAll();
   document.getElementById('loadingScreen').style.display = 'none';
   document.getElementById('shell').style.display = 'flex';
   const h = location.hash.replace('#','');
