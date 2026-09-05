@@ -338,11 +338,16 @@ const PLATFORMS = ["iRacing","Assetto Corsa Competizione","rFactor 2","RaceRoom 
 const LICENSE_CLASS = ["Rookie","Pro","Elite / Werksfahrer","Gastfahrer"];
 
 async function loadKey(key, fallback){
-  try{ const r = await window.storage.get(key, true); return r ? JSON.parse(r.value) : fallback; }
-  catch(e){ return fallback; }
+  try{
+    const value = window.localStorage.getItem(key);
+    return value === null ? fallback : JSON.parse(value);
+  }catch(e){
+    console.error('load failed', key, e);
+    return fallback;
+  }
 }
 async function saveKey(key, value){
-  try{ await window.storage.set(key, JSON.stringify(value), true); return true; }
+  try{ window.localStorage.setItem(key, JSON.stringify(value)); return true; }
   catch(e){ console.error('save failed', key, e); alert('Speichern fehlgeschlagen — bitte erneut versuchen.'); return false; }
 }
 async function loadAll(){
@@ -450,6 +455,9 @@ function render(){
   else if(ROUTE.page==='transfers') main.innerHTML = pageTransfers();
   else if(ROUTE.page==='manage') main.innerHTML = pageManage();
   else main.innerHTML = pageDashboard();
+  if(ROUTE.page==='cases') renderCaseTable();
+  if(ROUTE.page==='drivers') renderDriverTable();
+  if(ROUTE.page==='manage') renderManageBody();
 }
 
 /* ============================= DASHBOARD ============================= */
@@ -690,7 +698,6 @@ function pageCaseList(){
     </div>
     <div id="caseTableWrap"></div>
   </div>
-  <script>renderCaseTable();</script>
   `;
 }
 function renderCaseTable(){
@@ -743,7 +750,6 @@ function pageDriverList(){
     </div>
     <div id="driverTableWrap"></div>
   </div>
-  <script>renderDriverTable();</script>
   `;
 }
 function renderDriverTable(){
@@ -887,6 +893,10 @@ async function saveDriver(id){
   const v = i=>document.getElementById(i).value;
   let d = id? driverById(id) : null;
   const isNew = !d;
+  if(isNew && !v('d_firstName').trim() && !v('d_lastName').trim()){
+    alert('Bitte mindestens Vor- oder Nachname angeben.');
+    return;
+  }
   if(isNew){ d = {id:uid(), createdAt:Date.now(), licenseStatus:'Nicht ausgestellt', history:[]}; DB.drivers.push(d); }
   Object.assign(d, {
     firstName:v('d_firstName'), lastName:v('d_lastName'), number:v('d_number'),
@@ -896,7 +906,6 @@ async function saveDriver(id){
     notes:v('d_notes'), updatedAt:Date.now(),
   });
   if(!isNew && document.getElementById('d_rulesAccepted')) d.rulesAccepted = document.getElementById('d_rulesAccepted').checked;
-  if(!d.firstName && !d.lastName){ alert('Bitte mindestens Vor- oder Nachname angeben.'); return; }
   await persist.drivers();
   go('driverform', d.id);
 }
@@ -1035,7 +1044,6 @@ function pageManage(){
     <div class="tab ${MANAGE_TAB==='data'?'active':''}" onclick="setManageTab('data')">Daten &amp; Backup</div>
   </div>
   <div id="manageBody"></div>
-  <script>renderManageBody();</script>
   `;
 }
 function setManageTab(t){ MANAGE_TAB=t; document.getElementById('main').innerHTML = pageManage(); }
