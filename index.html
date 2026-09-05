@@ -1046,7 +1046,11 @@ function pageManage(){
   <div id="manageBody"></div>
   `;
 }
-function setManageTab(t){ MANAGE_TAB=t; document.getElementById('main').innerHTML = pageManage(); }
+function setManageTab(t){
+  MANAGE_TAB=t;
+  document.getElementById('main').innerHTML = pageManage();
+  renderManageBody();
+}
 function renderManageBody(){
   const el = document.getElementById('manageBody');
   if(MANAGE_TAB==='cases'){
