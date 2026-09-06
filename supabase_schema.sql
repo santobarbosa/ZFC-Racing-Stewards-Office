@@ -22,6 +22,11 @@ create table if not exists public.zfc_finance_settings (
   updated_at timestamptz not null default now()
 );
 
+alter table public.zfc_finance_settings
+  add column if not exists case_webhook_url text;
+alter table public.zfc_finance_settings
+  add column if not exists site_url text;
+
 create table if not exists public.zfc_finance_transactions (
   id uuid primary key default gen_random_uuid(),
   season text not null default '2026',
@@ -36,6 +41,9 @@ create table if not exists public.zfc_finance_transactions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.zfc_finance_transactions
+  add column if not exists team_id text;
 
 create index if not exists zfc_finance_transactions_season_idx
   on public.zfc_finance_transactions(season);
