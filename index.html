@@ -448,14 +448,52 @@ async function sendFinanceDiscordNotification(transaction){
   const webhook=DB.financeSettings?.discordWebhookUrl, siteUrl=DB.financeSettings?.siteUrl||location.href.split('#')[0];
   if(!webhook || t.type!=='expense') return;
   const paymentUrl=siteUrl+'#finance-pay/'+encodeURIComponent(t.id);
-  try{ const response=await fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'ZFC Racing Finance',content:'Neue geplante Finanzzahlung',embeds:[{title:'Zahlung freigeben',description:t.description||t.category,fields:[{name:'Team',value:teamById(t.teamId)?.name||'Liga gesamt',inline:true},{name:'Betrag',value:financeAmount(t.amount),inline:true},{name:'Rennen',value:t.race||'—',inline:true},{name:'Empfänger',value:t.counterparty||'—',inline:true}],color:13209898}],components:[{type:1,components:[{type:2,style:5,label:'Jetzt bezahlen',url:paymentUrl}]}]})}); if(!response.ok) throw new Error('HTTP '+response.status); alert('Rechnung wurde an Discord gesendet.'); }
+  const team=teamById(t.teamId)?.name||'Liga gesamt';
+  const invoiceEmbed={
+    title:'RECHNUNG · ZAHLUNGSFREIGABE',
+    description:'Eine neue Rennsport-Ausgabe wurde zur Prüfung und Zahlung eingereicht.',
+    color:13209898,
+    fields:[
+      {name:'Betrag',value:`**${financeAmount(t.amount)}**`,inline:true},
+      {name:'Status',value:t.status||'Geplant',inline:true},
+      {name:'Team',value:team,inline:true},
+      {name:'Rennen / Event',value:t.race||'—',inline:true},
+      {name:'Kategorie',value:t.category||'Sonstiges',inline:true},
+      {name:'Empfänger',value:t.counterparty||'—',inline:true},
+      {name:'Leistungsbeschreibung',value:t.description||'Keine Beschreibung hinterlegt.',inline:false}
+    ],
+    footer:{text:'ZFC Racing Finance · Interne Zahlungsfreigabe'},
+    timestamp:new Date().toISOString()
+  };
+  try{ const response=await fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'ZFC Racing Finance',content:'**Neue Rechnung zur Freigabe**',embeds:[invoiceEmbed],components:[{type:1,components:[{type:2,style:5,label:'Jetzt bezahlen',url:paymentUrl}]}]})}); if(!response.ok) throw new Error('HTTP '+response.status); alert('Rechnung wurde an Discord gesendet.'); }
   catch(error){ console.warn('Discord-Finanznachricht fehlgeschlagen',error); alert('Rechnung konnte nicht an Discord gesendet werden.'); }
 }
 async function sendCaseDiscordNotification(id){
   const c=DB.cases.find(item=>item.id===id), webhook=DB.financeSettings?.caseWebhookUrl;
   if(!c || !webhook){ alert('Bitte zuerst einen Discord-Webhook in Verwaltung → Integrationen speichern.'); return; }
   const team=teamById(c.teamInvolved), driver=driverById(c.driverInvolved);
-  try{ const response=await fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'ZFC Racing Stewards',content:'Neue Steward-Akte',embeds:[{title:c.stw||'Steward-Akte',description:c.description||'Neue Akte wurde veröffentlicht.',fields:[{name:'Event',value:c.event||'—',inline:true},{name:'Team',value:team?.name||'—',inline:true},{name:'Fahrer',value:driverName(driver),inline:true},{name:'Status',value:c.status||'—',inline:true},{name:'Entscheidung',value:c.decision||'—',inline:true}],color:13111342}]})}); if(!response.ok) throw new Error('HTTP '+response.status); alert('Steward-Akte wurde an Discord gesendet.'); }
+  const sanction=`${c.decision||'Keine Entscheidung hinterlegt'}${c.penaltyPoints?`\n**Strafpunkte: ${c.penaltyPoints} / 12**`:''}${c.licenseStatusAfter?`\nLizenzstatus: ${c.licenseStatusAfter}`:''}`;
+  const caseEmbed={
+    title:`STEWARDS DECISION · ${c.stw||'AKTE'}`,
+    description:'Offizielle Zusammenfassung einer Entscheidung der ZFC Racing Stewards.',
+    color:c.status==='Entschieden'?13111342:14408667,
+    fields:[
+      {name:'EVENT / SESSION',value:`${c.event||'—'} · ${c.sessionType||'—'}`,inline:true},
+      {name:'STATUS',value:c.status||'—',inline:true},
+      {name:'RUNDE / ZEITPUNKT',value:c.incidentLap||'—',inline:true},
+      {name:'BETROFFENES TEAM',value:team?.name||'—',inline:true},
+      {name:'BETROFFENER FAHRER',value:`${driverName(driver)}${driver?.number?` (#${driver.number})`:''}`,inline:true},
+      {name:'MELDUNG DURCH',value:c.reportedBy||'—',inline:true},
+      {name:'SACHVERHALT',value:c.description||'Keine Beschreibung hinterlegt.',inline:false},
+      {name:'REGELVERSTOSS',value:c.regulationBreach||'Kein Artikel angegeben.',inline:false},
+      {name:'ENTSCHEIDUNG / STRAFE',value:sanction,inline:false},
+      {name:'BEGRÜNDUNG',value:c.decisionDetail||'Keine Begründung hinterlegt.',inline:false},
+      {name:'BEWEISMITTEL',value:c.evidenceLink||'Keine Beweismittel verlinkt.',inline:false}
+    ],
+    footer:{text:'ZFC Racing Stewards · Offizielle Aktenmitteilung'},
+    timestamp:new Date().toISOString()
+  };
+  try{ const response=await fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'ZFC Racing Stewards',content:`**Steward-Akte ${c.stw||''} · Entscheidung veröffentlicht**`,embeds:[caseEmbed]})}); if(!response.ok) throw new Error('HTTP '+response.status); alert('Steward-Akte wurde an Discord gesendet.'); }
   catch(error){ alert('Die Steward-Akte konnte nicht an Discord gesendet werden.'); }
 }
 
