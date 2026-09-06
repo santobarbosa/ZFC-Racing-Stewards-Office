@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZFC Racing — Stewards Office</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:ital,wght@0,300;0,400;0,600;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -171,6 +172,7 @@ tr:hover td{background:rgba(255,255,255,0.02);}
 .tag.revoked{color:#ff5a6b;border-color:#5a1c26;}
 .tag.none{color:var(--grey-2);border-color:var(--line);}
 .pts{font-family:var(--mono);font-weight:700;}
+.green-text{color:#6bd684;}
 .pts.warn{color:var(--amber);}
 .pts.crit{color:#ff5a6b;}
 
@@ -283,8 +285,9 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
 
 <script>
 /* ============================= DATA LAYER ============================= */
-const DB = { teams: [], drivers: [], cases: [], transfers: [] };
-const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1' };
+const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null };
+const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', supabase:'zfc_supabase_config_v1' };
+let SUPABASE = { client:null, channel:null, applyingRemote:false };
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
 function esc(s){ return (s===undefined||s===null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -362,13 +365,68 @@ function loadAll(){
   DB.drivers = loadKey(KEYS.drivers, []);
   DB.cases = loadKey(KEYS.cases, []);
   DB.transfers = loadKey(KEYS.transfers, []);
+  DB.finance = loadKey(KEYS.finance, []);
+  DB.financeSettings = loadKey(KEYS.financeSettings, {season:'2026', startingCapital:0, currency:'EUR', discordWebhookUrl:''});
 }
 const persist = {
-  teams: ()=>saveKey(KEYS.teams, DB.teams),
-  drivers: ()=>saveKey(KEYS.drivers, DB.drivers),
-  cases: ()=>saveKey(KEYS.cases, DB.cases),
-  transfers: ()=>saveKey(KEYS.transfers, DB.transfers),
+  teams: ()=>{ saveKey(KEYS.teams, DB.teams); return syncAppState(); },
+  drivers: ()=>{ saveKey(KEYS.drivers, DB.drivers); return syncAppState(); },
+  cases: ()=>{ saveKey(KEYS.cases, DB.cases); return syncAppState(); },
+  transfers: ()=>{ saveKey(KEYS.transfers, DB.transfers); return syncAppState(); },
+  finance: ()=>{ saveKey(KEYS.finance, DB.finance); return syncAppState(); },
+  financeSettings: ()=>{ saveKey(KEYS.financeSettings, DB.financeSettings); return syncAppState(); },
 };
+
+function financeAmount(value){ return Number(value||0).toLocaleString('de-DE',{style:'currency',currency:DB.financeSettings?.currency||'EUR'}); }
+function financeBalance(){ return Number(DB.financeSettings?.startingCapital||0) + DB.finance.filter(t=>t.status==='Gebucht').reduce((sum,t)=>sum+(t.type==='income'?1:-1)*Number(t.amount||0),0); }
+function financeIncome(){ return DB.finance.filter(t=>t.type==='income'&&t.status==='Gebucht').reduce((sum,t)=>sum+Number(t.amount||0),0); }
+function financeExpense(){ return DB.finance.filter(t=>t.type==='expense'&&t.status==='Gebucht').reduce((sum,t)=>sum+Number(t.amount||0),0); }
+function supabaseConfig(){ return loadKey(KEYS.supabase, {url:'', anonKey:''}); }
+function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,finance:DB.finance,financeSettings:DB.financeSettings}; }
+async function syncAppState(){
+  if(!SUPABASE.client || SUPABASE.applyingRemote) return;
+  await SUPABASE.client.from('zfc_app_state').upsert({id:1,state:appState(),updated_at:new Date().toISOString()});
+}
+function fromSupabaseTransaction(t){ return {id:t.id, season:t.season, race:t.race, date:t.transaction_date, type:t.type, category:t.category, description:t.description, amount:Number(t.amount||0), counterparty:t.counterparty, status:t.status, createdAt:t.created_at, updatedAt:t.updated_at}; }
+async function initSupabase(){
+  const config = supabaseConfig();
+  if(!config.url || !config.anonKey || !window.supabase) return;
+  try{
+    SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
+    const shared = await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
+    if(shared.data?.state){ Object.assign(DB,shared.data.state); Object.keys(DB).forEach(key=>saveKey(KEYS[key],DB[key])); }
+    const settings = await SUPABASE.client.from('zfc_finance_settings').select('*').order('updated_at',{ascending:false}).limit(1).maybeSingle();
+    if(settings.data){ DB.financeSettings={season:settings.data.season,startingCapital:Number(settings.data.starting_capital||0),currency:settings.data.currency||'EUR',discordWebhookUrl:settings.data.discord_webhook_url||''}; persist.financeSettings(); }
+    const transactions = await SUPABASE.client.from('zfc_finance_transactions').select('*').order('transaction_date',{ascending:false});
+    if(!transactions.error && transactions.data) DB.finance = transactions.data.map(fromSupabaseTransaction);
+    SUPABASE.channel = SUPABASE.client.channel('zfc-racing-realtime')
+      .on('postgres_changes',{event:'*',schema:'public',table:'zfc_app_state'}, payload=>{
+        if(!payload.new?.state) return;
+        SUPABASE.applyingRemote=true; Object.assign(DB,payload.new.state); Object.keys(DB).forEach(key=>saveKey(KEYS[key],DB[key])); SUPABASE.applyingRemote=false;
+        render();
+      })
+      .on('postgres_changes',{event:'*',schema:'public',table:'zfc_finance_transactions'}, payload=>{
+        const item=fromSupabaseTransaction(payload.new||payload.old);
+        if(payload.eventType==='DELETE') DB.finance=DB.finance.filter(t=>t.id!==item.id);
+        else { const index=DB.finance.findIndex(t=>t.id===item.id); if(index<0) DB.finance.push(item); else DB.finance[index]=item; }
+        saveKey(KEYS.finance,DB.finance); if(ROUTE.page==='finance') render();
+      }).on('postgres_changes',{event:'*',schema:'public',table:'zfc_finance_settings'}, payload=>{
+        if(payload.new){ DB.financeSettings={season:payload.new.season,startingCapital:Number(payload.new.starting_capital||0),currency:payload.new.currency||'EUR',discordWebhookUrl:payload.new.discord_webhook_url||''}; persist.financeSettings(); if(ROUTE.page==='finance'||ROUTE.page==='manage') render(); }
+      }).subscribe();
+    render();
+  }catch(error){ console.warn('Supabase nicht verfügbar',error); }
+}
+async function syncFinanceTransaction(t){
+  if(!SUPABASE.client) return;
+  await SUPABASE.client.from('zfc_finance_transactions').upsert({id:t.id,season:t.season,race:t.race,transaction_date:t.date,type:t.type,category:t.category,description:t.description,amount:t.amount,counterparty:t.counterparty,status:t.status,updated_at:new Date().toISOString()});
+}
+async function sendFinanceDiscordNotification(t){
+  const webhook=DB.financeSettings?.discordWebhookUrl, siteUrl=DB.financeSettings?.siteUrl||location.href.split('#')[0];
+  if(!webhook || t.type!=='expense') return;
+  const paymentUrl=siteUrl+'#finance-pay/'+encodeURIComponent(t.id);
+  try{ await fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'ZFC Racing Finance',content:'Neue geplante Finanzzahlung',embeds:[{title:'Zahlung freigeben',description:t.description||t.category,fields:[{name:'Betrag',value:financeAmount(t.amount),inline:true},{name:'Rennen',value:t.race||'—',inline:true},{name:'Empfänger',value:t.counterparty||'—',inline:true}],color:13209898}],components:[{type:1,components:[{type:2,style:5,label:'Jetzt bezahlen',url:paymentUrl}]}]})}); }
+  catch(error){ console.warn('Discord-Finanznachricht fehlgeschlagen',error); }
+}
 
 /* ---------- lookups ---------- */
 function teamById(id){ return DB.teams.find(t=>t.id===id); }
@@ -439,7 +497,8 @@ const NAV = [
   {id:'drivers', label:'Fahrer', ic:'04'},
   {id:'teams', label:'Teams', ic:'05'},
   {id:'transfers', label:'Transfers', ic:'06'},
-  {id:'manage', label:'Verwaltung', ic:'07'},
+  {id:'finance', label:'Finanzen', ic:'07'},
+  {id:'manage', label:'Verwaltung', ic:'08'},
 ];
 
 function renderNav(){
@@ -459,12 +518,47 @@ function render(){
   else if(ROUTE.page==='driverform') main.innerHTML = pageDriverForm(ROUTE.id? driverById(ROUTE.id): null);
   else if(ROUTE.page==='teams') main.innerHTML = pageTeams();
   else if(ROUTE.page==='transfers') main.innerHTML = pageTransfers();
+  else if(ROUTE.page==='finance') main.innerHTML = pageFinance();
+  else if(ROUTE.page==='finance-pay') main.innerHTML = pageFinancePayment(ROUTE.id);
   else if(ROUTE.page==='manage') main.innerHTML = pageManage();
   else main.innerHTML = pageDashboard();
   if(ROUTE.page==='cases') renderCaseTable();
   if(ROUTE.page==='drivers') renderDriverTable();
   if(ROUTE.page==='manage') renderManageBody();
 }
+
+/* ============================= FINANCE ============================= */
+const FINANCE_CATEGORIES = ['Startkapital','Sponsoring','Preisgeld','Teilnahmegebühr','Ticketverkauf','Rennveranstaltung','Streckenmiete','Server & Technik','Lizenzen','Marketing','Teamprämien','Reisekosten','Sonstiges'];
+function pageFinance(){
+  const settings=DB.financeSettings||{season:'2026',startingCapital:0,currency:'EUR'};
+  const rows=[...DB.finance].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).map(t=>`<tr>
+    <td>${fmtDate(t.date)}</td><td>${esc(t.race||'—')}</td><td>${esc(t.category)}</td><td>${esc(t.description||'—')}</td>
+    <td>${esc(t.counterparty||'—')}</td><td class="pts ${t.type==='income'?'green-text':'crit'}">${t.type==='income'?'+':'−'} ${financeAmount(t.amount)}</td>
+    <td><span class="tag ${t.status==='Gebucht'?'decided':t.status==='Geplant'?'open':'archived'}">${esc(t.status)}</span></td>
+    <td style="white-space:nowrap"><button class="btn small" onclick="editFinance('${t.id}')">Bearbeiten</button> ${t.status==='Geplant'?`<button class="btn small gold" onclick="markFinancePaid('${t.id}')">Jetzt bezahlen</button>`:''} <button class="btn small danger" onclick="deleteFinance('${t.id}')">Löschen</button></td>
+  </tr>`).join('');
+  return `<div class="pagehead"><div><div class="eyebrow">Teamführung · Saison ${esc(settings.season)}</div><h1>Finanzen</h1></div><div class="actions"><button class="btn gold" onclick="go('manage')">Verwaltung öffnen</button></div></div>
+  <div class="grid cols-4" style="margin-bottom:22px"><div class="stat green"><div class="n">${financeAmount(financeBalance())}</div><div class="l">Kontostand</div></div><div class="stat"><div class="n">${financeAmount(settings.startingCapital)}</div><div class="l">Startkapital</div></div><div class="stat green"><div class="n">${financeAmount(financeIncome())}</div><div class="l">Einnahmen</div></div><div class="stat red"><div class="n">${financeAmount(financeExpense())}</div><div class="l">Ausgaben</div></div></div>
+  <div class="panel"><h2>Neue <b>Buchung</b></h2><div class="grid cols-4"><div class="field"><label>Art</label><select id="fin_type"><option value="expense">Ausgabe / Rennkosten</option><option value="income">Einnahme</option></select></div><div class="field"><label>Betrag (${esc(settings.currency)})</label><input id="fin_amount" type="number" min="0" step="0.01" placeholder="0,00"></div><div class="field"><label>Datum</label><input id="fin_date" type="date" value="${today()}"></div><div class="field"><label>Grand Prix / Rennen</label><input id="fin_race" type="text" placeholder="z. B. GP Monaco"></div></div><div class="grid cols-4"><div class="field"><label>Kategorie</label><select id="fin_category">${selectOptions(FINANCE_CATEGORIES,'Rennveranstaltung')}</select></div><div class="field"><label>Beschreibung</label><input id="fin_description" type="text" placeholder="z. B. Streckenmiete und Marshalling"></div><div class="field"><label>Partner / Empfänger</label><input id="fin_counterparty" type="text" placeholder="z. B. Circuit de Monaco"></div><div class="field"><label>Status</label><select id="fin_status"><option>Gebucht</option><option>Geplant</option><option>Storniert</option></select></div></div><button class="btn primary" onclick="saveFinance()">Buchung speichern</button></div>
+  <div class="panel"><h2>Finanz<b>journal</b></h2><div style="overflow:auto"><table><thead><tr><th>Datum</th><th>Rennen</th><th>Kategorie</th><th>Beschreibung</th><th>Partner</th><th>Betrag</th><th>Status</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="8"><div class="empty"><b>Noch keine Finanzbuchungen</b>Erfasse Startkapital, Sponsoren, Rennkosten oder Preisgelder.</div></td></tr>'}</tbody></table></div></div>`;
+}
+function pageFinancePayment(id){
+  const t=DB.finance.find(item=>item.id===id);
+  if(!t) return '<div class="panel"><h2>Zahlung nicht gefunden</h2><p class="empty">Dieser Finanzposten existiert nicht mehr.</p></div>';
+  return `<div class="pagehead"><div><div class="eyebrow">ZFC Racing Finance</div><h1>Zahlung bestätigen</h1></div></div><div class="panel"><h2>Finanz<b>freigabe</b></h2><table><tbody><tr><td>Rennen</td><td>${esc(t.race||'—')}</td></tr><tr><td>Beschreibung</td><td>${esc(t.description||t.category)}</td></tr><tr><td>Empfänger</td><td>${esc(t.counterparty||'—')}</td></tr><tr><td>Betrag</td><td class="pts">${financeAmount(t.amount)}</td></tr><tr><td>Status</td><td>${esc(t.status)}</td></tr></tbody></table><div style="display:flex;gap:10px;margin-top:22px"><button class="btn primary" onclick="markFinancePaid('${t.id}')">Zahlung jetzt buchen</button><button class="btn" onclick="go('finance')">Abbrechen</button></div></div>`;
+}
+let EDIT_FINANCE_ID=null;
+function editFinance(id){ const t=DB.finance.find(x=>x.id===id); if(!t) return; EDIT_FINANCE_ID=id; render(); setTimeout(()=>{ ['type','amount','date','race','category','description','counterparty','status'].forEach(k=>{const el=document.getElementById('fin_'+k); if(el) el.value=t[k==='date'?'date':k]??'';}); document.querySelector('#fin_amount')?.focus(); },0); }
+async function saveFinance(){
+  const value=id=>document.getElementById('fin_'+id).value; const amount=Number(value('amount'));
+  if(!amount || amount<0){ alert('Bitte einen gültigen Betrag eintragen.'); return; }
+  let t=EDIT_FINANCE_ID?DB.finance.find(x=>x.id===EDIT_FINANCE_ID):null;
+  if(!t){ t={id:uid(),createdAt:new Date().toISOString()}; DB.finance.push(t); }
+  Object.assign(t,{season:DB.financeSettings.season,race:value('race'),date:value('date'),type:value('type'),category:value('category'),description:value('description'),amount,counterparty:value('counterparty'),status:value('status'),updatedAt:new Date().toISOString()});
+  EDIT_FINANCE_ID=null; await persist.finance(); await syncFinanceTransaction(t); if(t.status==='Geplant'&&t.type==='expense') await sendFinanceDiscordNotification(t); render();
+}
+async function deleteFinance(id){ if(!confirm('Diese Finanzbuchung wirklich löschen?')) return; DB.finance=DB.finance.filter(t=>t.id!==id); await persist.finance(); if(SUPABASE.client) await SUPABASE.client.from('zfc_finance_transactions').delete().eq('id',id); render(); }
+async function markFinancePaid(id){ const t=DB.finance.find(item=>item.id===id); if(!t) return; if(t.status==='Gebucht'){ go('finance'); return; } if(!confirm(`Zahlung über ${financeAmount(t.amount)} wirklich buchen?`)) return; t.status='Gebucht'; t.paidAt=new Date().toISOString(); await persist.finance(); await syncFinanceTransaction(t); go('finance'); }
 
 /* ============================= DASHBOARD ============================= */
 function pageDashboard(){
@@ -1049,6 +1143,8 @@ function pageManage(){
     <div class="tab ${MANAGE_TAB==='drivers'?'active':''}" onclick="setManageTab('drivers')">Fahrer (${DB.drivers.length})</div>
     <div class="tab ${MANAGE_TAB==='teams'?'active':''}" onclick="setManageTab('teams')">Teams (${DB.teams.length})</div>
     <div class="tab ${MANAGE_TAB==='transfers'?'active':''}" onclick="setManageTab('transfers')">Transfers (${DB.transfers.length})</div>
+    <div class="tab ${MANAGE_TAB==='finance'?'active':''}" onclick="setManageTab('finance')">Finanzen</div>
+    <div class="tab ${MANAGE_TAB==='integrations'?'active':''}" onclick="setManageTab('integrations')">Integrationen</div>
     <div class="tab ${MANAGE_TAB==='data'?'active':''}" onclick="setManageTab('data')">Daten &amp; Backup</div>
   </div>
   <div id="manageBody"></div>
@@ -1097,6 +1193,12 @@ function renderManageBody(){
       <td><button class="btn small danger" onclick="deleteTransfer('${t.id}')">Löschen</button></td></tr>`).join('')
       || `<tr><td colspan="5"><div class="empty">Keine Transfers vorhanden.</div></td></tr>`}
       </tbody></table></div>`;
+  } else if(MANAGE_TAB==='finance'){
+    const s=DB.financeSettings||{};
+    el.innerHTML=`<div class="panel"><h2>Finanz<b>einstellungen</b></h2><div class="grid cols-4"><div class="field"><label>Saison</label><input id="fs_season" type="text" value="${esc(s.season||'2026')}"></div><div class="field"><label>Startkapital</label><input id="fs_capital" type="number" min="0" step="0.01" value="${Number(s.startingCapital||0)}"></div><div class="field"><label>Währung</label><select id="fs_currency">${selectOptions(['EUR','CHF','USD','GBP'],s.currency||'EUR')}</select></div><div class="field" style="display:flex;align-items:flex-end"><button class="btn primary" onclick="saveFinanceSettings()">Einstellungen speichern</button></div></div><p class="footer-note">Alle Beträge werden im Finanzjournal als Einnahme oder Ausgabe verbucht. Änderungen sind sofort im Dashboard sichtbar.</p></div><div class="panel"><h2>Aktuelle <b>Übersicht</b></h2><table><tbody><tr><td>Kontostand</td><td class="pts">${financeAmount(financeBalance())}</td></tr><tr><td>Buchungen</td><td class="pts">${DB.finance.length}</td></tr></tbody></table></div>`;
+  } else if(MANAGE_TAB==='integrations'){
+    const config=supabaseConfig(), s=DB.financeSettings||{};
+    el.innerHTML=`<div class="panel"><h2>Supabase <b>Realtime</b></h2><p style="color:var(--grey);font-size:13.5px;">Trage die Projekt-URL und den öffentlichen anon-Key ein. Der gesamte Datenbestand wird danach live zwischen allen offenen Browsern synchronisiert.</p><div class="grid cols-2"><div class="field"><label>Supabase Project URL</label><input id="sb_url" type="url" value="${esc(config.url||'')}" placeholder="https://xxxx.supabase.co"></div><div class="field"><label>Supabase anon public key</label><input id="sb_key" type="text" value="${esc(config.anonKey||'')}"></div></div><button class="btn primary" onclick="saveSupabaseSettings()">Supabase verbinden</button><span id="sb_status" class="footer-note" style="margin-left:12px;">${SUPABASE.client?'Verbunden':'Noch nicht verbunden'}</span></div><div class="panel"><h2>Discord <b>Webhook</b></h2><p style="color:var(--grey);font-size:13.5px;">Nur Finanzereignisse werden an Discord gesendet. Geplante Ausgaben enthalten einen Link-Button zur sicheren Bestätigung auf dieser Website.</p><div class="field"><label>Discord Webhook URL</label><input id="discord_webhook" type="url" value="${esc(s.discordWebhookUrl||'')}" placeholder="https://discord.com/api/webhooks/…"></div><div class="field"><label>Öffentliche Website-URL</label><input id="finance_site_url" type="url" value="${esc(s.siteUrl||location.href.split('#')[0])}" placeholder="https://deine-domain.de/"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn gold" onclick="saveFinanceSettings()">Webhook speichern</button><button class="btn" onclick="sendDiscordTest()">Testnachricht senden</button></div></div>`;
   } else if(MANAGE_TAB==='data'){
     el.innerHTML = `<div class="panel">
       <h2>Daten<b>sicherung</b></h2>
@@ -1110,6 +1212,22 @@ function renderManageBody(){
       </div>
     </div>`;
   }
+}
+async function saveFinanceSettings(){
+  DB.financeSettings={season:document.getElementById('fs_season')?.value||DB.financeSettings.season,startingCapital:Number(document.getElementById('fs_capital')?.value||0),currency:document.getElementById('fs_currency')?.value||DB.financeSettings.currency,discordWebhookUrl:document.getElementById('discord_webhook')?.value||DB.financeSettings.discordWebhookUrl||'',siteUrl:document.getElementById('finance_site_url')?.value.trim()||DB.financeSettings.siteUrl||location.href.split('#')[0]};
+  await persist.financeSettings();
+  if(SUPABASE.client) await SUPABASE.client.from('zfc_finance_settings').upsert({id:'00000000-0000-0000-0000-000000000001',season:DB.financeSettings.season,starting_capital:DB.financeSettings.startingCapital,currency:DB.financeSettings.currency,discord_webhook_url:DB.financeSettings.discordWebhookUrl,updated_at:new Date().toISOString()});
+  alert('Finanzeinstellungen gespeichert.'); render();
+}
+async function saveSupabaseSettings(){
+  const config={url:document.getElementById('sb_url').value.trim().replace(/\/$/,''),anonKey:document.getElementById('sb_key').value.trim()};
+  saveKey(KEYS.supabase,config); await initSupabase(); alert(SUPABASE.client?'Supabase verbunden.':'Verbindung konnte nicht aufgebaut werden.'); render();
+}
+async function sendDiscordTest(){
+  const webhook=document.getElementById('discord_webhook')?.value.trim()||DB.financeSettings.discordWebhookUrl;
+  if(!webhook){ alert('Bitte zuerst eine Discord-Webhook-URL eintragen.'); return; }
+  try{ const response=await fetch(webhook,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'ZFC Racing Office',content:'✅ Testnachricht aus dem ZFC Racing Stewards Office.'})}); if(!response.ok) throw new Error('HTTP '+response.status); alert('Testnachricht wurde an Discord gesendet.'); }
+  catch(error){ alert('Discord konnte nicht erreicht werden. Prüfe Webhook und Browser-Konsole.'); }
 }
 async function addTeam(){
   const name = document.getElementById('nt_name').value.trim();
@@ -1127,7 +1245,7 @@ async function deleteTeam(id){
   renderManageBody();
 }
 function exportData(){
-  const payload = { exportedAt: new Date().toISOString(), teams: DB.teams, drivers: DB.drivers, cases: DB.cases, transfers: DB.transfers };
+  const payload = { exportedAt: new Date().toISOString(), teams: DB.teams, drivers: DB.drivers, cases: DB.cases, transfers: DB.transfers, finance: DB.finance, financeSettings: DB.financeSettings };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1146,7 +1264,9 @@ function importData(evt){
       DB.drivers = data.drivers || [];
       DB.cases = data.cases || [];
       DB.transfers = data.transfers || [];
-      await persist.teams(); await persist.drivers(); await persist.cases(); await persist.transfers();
+      DB.finance = data.finance || [];
+      DB.financeSettings = data.financeSettings || DB.financeSettings;
+      await persist.teams(); await persist.drivers(); await persist.cases(); await persist.transfers(); await persist.finance(); await persist.financeSettings();
       alert('Import erfolgreich.');
       go('dashboard');
     }catch(e){ alert('Ungültige Backup-Datei.'); }
@@ -1156,8 +1276,8 @@ function importData(evt){
 async function resetAllData(){
   if(!confirm('WARNUNG: Dies löscht alle Akten, Fahrer, Teams und Transfers unwiderruflich. Fortfahren?')) return;
   if(!confirm('Bist du dir absolut sicher? Dieser Vorgang kann nicht rückgängig gemacht werden.')) return;
-  DB.teams = defaultTeams(); DB.drivers = []; DB.cases = []; DB.transfers = [];
-  await persist.teams(); await persist.drivers(); await persist.cases(); await persist.transfers();
+  DB.teams = defaultTeams(); DB.drivers = []; DB.cases = []; DB.transfers = []; DB.finance = []; DB.financeSettings = {season:'2026',startingCapital:0,currency:'EUR',discordWebhookUrl:''};
+  await persist.teams(); await persist.drivers(); await persist.cases(); await persist.transfers(); await persist.finance(); await persist.financeSettings();
   go('dashboard');
 }
 
@@ -1281,6 +1401,7 @@ function init(){
   const [page,id] = h.split('/');
   ROUTE = {page: page||'dashboard', id: id||null};
   render();
+  initSupabase();
 }
 init();
 </script>
