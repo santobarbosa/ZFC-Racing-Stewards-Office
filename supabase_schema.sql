@@ -68,6 +68,21 @@ where not exists (select 1 from public.zfc_finance_settings);
 alter table public.zfc_finance_settings replica identity full;
 alter table public.zfc_finance_transactions replica identity full;
 
--- In Supabase Dashboard: Database > Replication > enable these tables for realtime.
--- Also enable public.zfc_app_state for realtime. The app stores the complete
--- editable ZFC state in its single row so all modules stay synchronized.
+-- Enable Realtime automatically when the standard Supabase publication exists.
+-- This works on the Supabase Free plan within its Realtime quotas.
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'zfc_app_state') then
+      alter publication supabase_realtime add table public.zfc_app_state;
+    end if;
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'zfc_finance_settings') then
+      alter publication supabase_realtime add table public.zfc_finance_settings;
+    end if;
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'zfc_finance_transactions') then
+      alter publication supabase_realtime add table public.zfc_finance_transactions;
+    end if;
+  end if;
+end $$;
+
+-- zfc_app_state stores the complete editable state so all modules synchronize.

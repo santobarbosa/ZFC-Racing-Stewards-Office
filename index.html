@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZFC Racing — Stewards Office</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:ital,wght@0,300;0,400;0,600;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -383,10 +384,23 @@ function financeBalance(teamId){ return Number(DB.financeSettings?.startingCapit
 function financeIncome(teamId){ return financeForTeam(teamId).filter(t=>t.type==='income'&&t.status==='Gebucht').reduce((sum,t)=>sum+Number(t.amount||0),0); }
 function financeExpense(teamId){ return financeForTeam(teamId).filter(t=>t.type==='expense'&&t.status==='Gebucht').reduce((sum,t)=>sum+Number(t.amount||0),0); }
 function supabaseConfig(){ return loadKey(KEYS.supabase, {url:'', anonKey:''}); }
+function readSupabaseConfigFromUrl(){
+  const params=new URLSearchParams(location.search), url=params.get('sb_url'), anonKey=params.get('sb_key');
+  if(!url || !anonKey) return;
+  saveKey(KEYS.supabase,{url,anonKey});
+  history.replaceState(null,'',location.pathname+location.hash);
+}
+function publicShareUrl(){
+  const config=supabaseConfig();
+  if(!config.url || !config.anonKey) return '';
+  return location.origin+location.pathname+'?sb_url='+encodeURIComponent(config.url)+'&sb_key='+encodeURIComponent(config.anonKey)+'#dashboard';
+}
 function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,finance:DB.finance,financeSettings:DB.financeSettings}; }
+function stateRecordCount(state){ return ['drivers','cases','transfers','finance'].reduce((count,key)=>count+(Array.isArray(state?.[key])?state[key].length:0),0); }
 async function syncAppState(){
   if(!SUPABASE.client || SUPABASE.applyingRemote) return;
-  await SUPABASE.client.from('zfc_app_state').upsert({id:1,state:appState(),updated_at:new Date().toISOString()});
+  const result=await SUPABASE.client.from('zfc_app_state').upsert({id:1,state:appState(),updated_at:new Date().toISOString()});
+  if(result.error) console.warn('Supabase-State konnte nicht synchronisiert werden',result.error);
 }
 function fromSupabaseTransaction(t){ return {id:t.id, season:t.season, teamId:t.team_id||'', race:t.race, date:t.transaction_date, type:t.type, category:t.category, description:t.description, amount:Number(t.amount||0), counterparty:t.counterparty, status:t.status, createdAt:t.created_at, updatedAt:t.updated_at}; }
 async function initSupabase(){
@@ -394,12 +408,19 @@ async function initSupabase(){
   if(!config.url || !config.anonKey || !window.supabase) return;
   try{
     SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
+    const localState=appState();
     const shared = await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
-    if(shared.data?.state){ Object.assign(DB,shared.data.state); Object.keys(DB).forEach(key=>saveKey(KEYS[key],DB[key])); }
+    if(shared.error) throw shared.error;
+    const remoteState=shared.data?.state;
+    if(remoteState && stateRecordCount(remoteState)>=stateRecordCount(localState)){
+      Object.assign(DB,remoteState); Object.keys(DB).forEach(key=>saveKey(KEYS[key],DB[key]));
+    }else{
+      await syncAppState();
+    }
     const settings = await SUPABASE.client.from('zfc_finance_settings').select('*').order('updated_at',{ascending:false}).limit(1).maybeSingle();
     if(settings.data){ DB.financeSettings={...DB.financeSettings,season:settings.data.season,startingCapital:Number(settings.data.starting_capital||0),currency:settings.data.currency||'EUR',discordWebhookUrl:settings.data.discord_webhook_url||'',caseWebhookUrl:settings.data.case_webhook_url||'',siteUrl:settings.data.site_url||DB.financeSettings.siteUrl}; persist.financeSettings(); }
     const transactions = await SUPABASE.client.from('zfc_finance_transactions').select('*').order('transaction_date',{ascending:false});
-    if(!transactions.error && transactions.data) DB.finance = transactions.data.map(fromSupabaseTransaction);
+    if(!transactions.error && transactions.data?.length) DB.finance = transactions.data.map(fromSupabaseTransaction);
     SUPABASE.channel = SUPABASE.client.channel('zfc-racing-realtime')
       .on('postgres_changes',{event:'*',schema:'public',table:'zfc_app_state'}, payload=>{
         if(!payload.new?.state) return;
@@ -493,6 +514,7 @@ const App = {};
 let ROUTE = {page:'dashboard', id:null};
 
 function go(page, id){ ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
+function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
 window.addEventListener('hashchange', ()=>{
   const h = location.hash.replace('#','');
   const [page,id] = h.split('/');
@@ -534,7 +556,7 @@ function render(){
   else main.innerHTML = pageDashboard();
   if(ROUTE.page==='cases') renderCaseTable();
   if(ROUTE.page==='drivers') renderDriverTable();
-  if(ROUTE.page==='manage') renderManageBody();
+  if(ROUTE.page==='manage'){ renderManageBody(); if(MANAGE_TAB==='integrations') renderPublicSharePanel(); }
 }
 
 /* ============================= FINANCE ============================= */
@@ -547,9 +569,9 @@ function pageFinance(){
     <td>${fmtDate(t.date)}</td><td>${esc(teamById(t.teamId)?.name||'Liga gesamt')}</td><td>${esc(t.race||'—')}</td><td>${esc(t.category)}</td><td>${esc(t.description||'—')}</td>
     <td>${esc(t.counterparty||'—')}</td><td class="pts ${t.type==='income'?'green-text':'crit'}">${t.type==='income'?'+':'−'} ${financeAmount(t.amount)}</td>
     <td><span class="tag ${t.status==='Gebucht'?'decided':t.status==='Geplant'?'open':'archived'}">${esc(t.status)}</span></td>
-    <td style="white-space:nowrap"><button class="btn small" onclick="editFinance('${t.id}')">Bearbeiten</button> ${t.status==='Geplant'?`<button class="btn small gold" onclick="sendFinanceDiscordNotification('${t.id}')">Discord senden</button><button class="btn small gold" onclick="markFinancePaid('${t.id}')">Jetzt bezahlen</button>`:''} <button class="btn small danger" onclick="deleteFinance('${t.id}')">Löschen</button></td>
+    <td style="white-space:nowrap"><button class="btn small" onclick="editFinance('${t.id}')">Bearbeiten</button> ${t.type==='expense'?`<button class="btn small gold" onclick="sendFinanceDiscordNotification('${t.id}')">Discord senden</button>`:''} ${t.status==='Geplant'?`<button class="btn small gold" onclick="markFinancePaid('${t.id}')">Jetzt bezahlen</button>`:''} <button class="btn small danger" onclick="deleteFinance('${t.id}')">Löschen</button></td>
   </tr>`).join('');
-  return `<div class="pagehead"><div><div class="eyebrow">Teamführung · Saison ${esc(settings.season)}</div><h1>Finanzen</h1></div><div class="actions"><button class="btn gold" onclick="go('manage')">Verwaltung öffnen</button></div></div>
+  return `<div class="pagehead"><div><div class="eyebrow">Teamführung · Saison ${esc(settings.season)}</div><h1>Finanzen</h1></div><div class="actions"><button class="btn gold" onclick="openIntegrations()">Discord-Webhooks</button><button class="btn" onclick="go('manage')">Verwaltung öffnen</button></div></div>
   <div class="grid cols-4" style="margin-bottom:22px"><div class="stat green"><div class="n">${financeAmount(financeBalance(selectedTeam))}</div><div class="l">Kontostand${selectedTeam?' · Team':''}</div></div><div class="stat"><div class="n">${financeAmount(settings.startingCapital)}</div><div class="l">Startkapital je Team</div></div><div class="stat green"><div class="n">${financeAmount(financeIncome(selectedTeam))}</div><div class="l">Einnahmen</div></div><div class="stat red"><div class="n">${financeAmount(financeExpense(selectedTeam))}</div><div class="l">Ausgaben</div></div></div>
   <div class="panel"><h2>Team<b>konten</b></h2><div class="grid cols-4">${teamRows||'<div class="empty">Noch keine Teams angelegt.</div>'}</div></div>
   <div class="panel"><h2>Neue <b>Buchung</b></h2><div class="grid cols-4"><div class="field"><label>Team</label><select id="fin_team">${teamOptions('',true)}</select></div><div class="field"><label>Art</label><select id="fin_type"><option value="expense">Ausgabe / Rennkosten</option><option value="income">Einnahme</option></select></div><div class="field"><label>Betrag (${esc(settings.currency)})</label><input id="fin_amount" type="number" min="0" step="0.01" placeholder="0,00"></div><div class="field"><label>Datum</label><input id="fin_date" type="date" value="${today()}"></div></div><div class="grid cols-4"><div class="field"><label>Grand Prix / Rennen</label><input id="fin_race" type="text" placeholder="z. B. GP Monaco"></div><div class="field"><label>Kategorie</label><select id="fin_category">${selectOptions(FINANCE_CATEGORIES,'Rennveranstaltung')}</select></div><div class="field"><label>Beschreibung</label><input id="fin_description" type="text" placeholder="z. B. Streckenmiete und Marshalling"></div><div class="field"><label>Partner / Empfänger</label><input id="fin_counterparty" type="text" placeholder="z. B. Circuit de Monaco"></div></div><div class="grid cols-4"><div class="field"><label>Status</label><select id="fin_status"><option>Gebucht</option><option>Geplant</option><option>Storniert</option></select></div><div class="field" style="display:flex;align-items:flex-end"><button class="btn primary" onclick="saveFinance()">Buchung speichern</button></div></div></div>
@@ -1167,6 +1189,15 @@ function setManageTab(t){
   MANAGE_TAB=t;
   document.getElementById('main').innerHTML = pageManage();
   renderManageBody();
+  if(MANAGE_TAB==='integrations') renderPublicSharePanel();
+}
+function renderPublicSharePanel(){
+  const el=document.getElementById('manageBody');
+  if(!el) return;
+  const panel=document.createElement('div');
+  panel.className='panel';
+  panel.innerHTML=`<h2>Öffentlicher <b>Team-Link</b></h2><p style="color:var(--grey);font-size:13.5px;">Sende diesen Link an deine Mitarbeiter. Es ist kein Benutzerkonto nötig; alle arbeiten am selben öffentlichen Supabase-Datenbestand.</p><div class="field"><label>Freigabelink</label><input id="public_share_url" type="url" readonly value="${esc(publicShareUrl())}" placeholder="Nach dem Verbinden wird der Link erzeugt"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn gold" onclick="copyPublicShareUrl()">Link kopieren</button><button class="btn" onclick="openPublicShareUrl()">Link öffnen</button><button class="btn" onclick="createPublicQr()">QR-Code erzeugen</button></div><div id="public_qr" style="margin-top:16px"></div>`;
+  el.insertBefore(panel,el.firstChild);
 }
 function renderManageBody(){
   const el = document.getElementById('manageBody');
@@ -1235,6 +1266,22 @@ async function saveFinanceSettings(){
 async function saveSupabaseSettings(){
   const config={url:document.getElementById('sb_url').value.trim().replace(/\/$/,''),anonKey:document.getElementById('sb_key').value.trim()};
   saveKey(KEYS.supabase,config); await initSupabase(); alert(SUPABASE.client?'Supabase verbunden.':'Verbindung konnte nicht aufgebaut werden.'); render();
+}
+async function copyPublicShareUrl(){
+  const url=publicShareUrl();
+  if(!url){ alert('Bitte zuerst Supabase verbinden.'); return; }
+  await navigator.clipboard.writeText(url); alert('Öffentlicher Team-Link wurde kopiert.');
+}
+function openPublicShareUrl(){
+  const url=publicShareUrl();
+  if(!url){ alert('Bitte zuerst Supabase verbinden.'); return; }
+  window.open(url,'_blank','noopener');
+}
+function createPublicQr(){
+  const url=publicShareUrl(), target=document.getElementById('public_qr');
+  if(!url){ alert('Bitte zuerst Supabase verbinden.'); return; }
+  if(!window.QRCode || !target){ alert('QR-Code-Bibliothek konnte nicht geladen werden.'); return; }
+  target.innerHTML=''; const canvas=document.createElement('canvas'); target.appendChild(canvas); QRCode.toCanvas(canvas,url,{width:220,margin:2},error=>{ if(error) target.textContent='QR-Code konnte nicht erzeugt werden.'; });
 }
 async function sendDiscordTest(){
   const webhook=document.getElementById('discord_webhook')?.value.trim()||DB.financeSettings.discordWebhookUrl;
@@ -1413,6 +1460,7 @@ function printLicense(id){
 
 /* ============================= INIT ============================= */
 function init(){
+  readSupabaseConfigFromUrl();
   loadAll();
   document.getElementById('loadingScreen').style.display = 'none';
   document.getElementById('shell').style.display = 'flex';
