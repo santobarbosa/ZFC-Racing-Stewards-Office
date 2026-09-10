@@ -288,7 +288,7 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
 /* ============================= DATA LAYER ============================= */
 const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', supabase:'zfc_supabase_config_v1' };
-let SUPABASE = { client:null, channel:null, applyingRemote:false };
+let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden' };
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
 function esc(s){ return (s===undefined||s===null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -340,7 +340,7 @@ const DECISIONS = [
 ];
 const LICENSE_AFTER = ["Bleibt uneingeschränkt aktiv","Aktiv, Verwarnung vermerkt","Vorübergehend ausgesetzt","Entzogen"];
 const SESSION_TYPES = ["Training","Qualifying","Sprint-Qualifying","Sprint","Rennen","Sonstige Session"];
-const CASE_STATUS = ["Offen","In Untersuchung","Entschieden","Archiviert"];
+const CASE_STATUS = ["Neu","Offen","In Untersuchung","Entschieden","Archiviert"];
 const REPORTED_BY = ["Rennleitung","Steward-Beobachtung","Fahrer-Meldung (Protest)","Team-Meldung","Video-Beweis / Marshalling-System"];
 const EVENTS = ["Bahrain","Saudi-Arabien","Australien","Japan","China","Miami","Emilia-Romagna","Monaco","Kanada","Spanien","Österreich","Großbritannien","Belgien","Ungarn","Niederlande","Italien","Aserbaidschan","Singapur","USA (Austin)","Mexiko","Brasilien","Las Vegas","Katar","Abu Dhabi"];
 const PLATFORMS = ["PlayStation","Xbox","PC"];
@@ -400,19 +400,25 @@ function stateRecordCount(state){ return ['drivers','cases','transfers','finance
 async function syncAppState(){
   if(!SUPABASE.client || SUPABASE.applyingRemote) return;
   const result=await SUPABASE.client.from('zfc_app_state').upsert({id:1,state:appState(),updated_at:new Date().toISOString()});
-  if(result.error) console.warn('Supabase-State konnte nicht synchronisiert werden',result.error);
+  if(result.error){ SUPABASE.status='Synchronisierung fehlgeschlagen'; console.warn('Supabase-State konnte nicht synchronisiert werden',result.error); }
 }
 function fromSupabaseTransaction(t){ return {id:t.id, season:t.season, teamId:t.team_id||'', race:t.race, date:t.transaction_date, type:t.type, category:t.category, description:t.description, amount:Number(t.amount||0), counterparty:t.counterparty, status:t.status, createdAt:t.created_at, updatedAt:t.updated_at}; }
+function setSupabaseStatus(status){
+  SUPABASE.status=status;
+  const el=document.getElementById('sb_status');
+  if(el) el.textContent=status;
+}
 async function initSupabase(){
   const config = supabaseConfig();
-  if(!config.url || !config.anonKey || !window.supabase) return;
+  if(!config.url || !config.anonKey || !window.supabase){ setSupabaseStatus('Nicht konfiguriert'); return; }
   try{
+    setSupabaseStatus('Verbinde …');
     SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
     const localState=appState();
-    const shared = await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
+    const shared = await SUPABASE.client.from('zfc_app_state').select('state,updated_at').eq('id',1).maybeSingle();
     if(shared.error) throw shared.error;
     const remoteState=shared.data?.state;
-    if(remoteState && stateRecordCount(remoteState)>=stateRecordCount(localState)){
+    if(remoteState && Object.keys(remoteState).length){
       Object.assign(DB,remoteState); Object.keys(DB).forEach(key=>saveKey(KEYS[key],DB[key]));
     }else{
       await syncAppState();
@@ -434,9 +440,18 @@ async function initSupabase(){
         saveKey(KEYS.finance,DB.finance); if(ROUTE.page==='finance') render();
       }).on('postgres_changes',{event:'*',schema:'public',table:'zfc_finance_settings'}, payload=>{
         if(payload.new){ DB.financeSettings={...DB.financeSettings,season:payload.new.season,startingCapital:Number(payload.new.starting_capital||0),currency:payload.new.currency||'EUR',discordWebhookUrl:payload.new.discord_webhook_url||'',caseWebhookUrl:payload.new.case_webhook_url||'',siteUrl:payload.new.site_url||DB.financeSettings.siteUrl}; saveKey(KEYS.financeSettings,DB.financeSettings); if(ROUTE.page==='finance'||ROUTE.page==='manage') render(); }
-      }).subscribe();
+      }).subscribe((status)=>{
+        if(status==='SUBSCRIBED') setSupabaseStatus('Verbunden · Live-Sync aktiv');
+        else if(status==='CHANNEL_ERROR') setSupabaseStatus('Fehler: Realtime nicht aktiv');
+        else if(status==='TIMED_OUT') setSupabaseStatus('Zeitüberschreitung beim Realtime-Start');
+      });
+    setSupabaseStatus('Verbunden · Synchronisierung läuft');
     render();
-  }catch(error){ console.warn('Supabase nicht verfügbar',error); }
+  }catch(error){
+    SUPABASE.client=null;
+    setSupabaseStatus('Verbindung fehlgeschlagen');
+    console.warn('Supabase nicht verfügbar',error);
+  }
 }
 async function syncFinanceTransaction(t){
   if(!SUPABASE.client) return;
@@ -529,11 +544,11 @@ function driverPenaltyPoints(driverId){
 function transfersForDriver(driverId){
   return DB.transfers.filter(t=>t.driverId===driverId).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 }
-function nextStw(season){
-  const nums = DB.cases.filter(c=>String(c.season)===String(season))
-    .map(c=> parseInt((c.stw||'').split('-').pop())||0);
-  const next = (nums.length? Math.max(...nums):0)+1;
-  return `STW-${season}-${String(next).padStart(3,'0')}`;
+function nextStw(){
+  const used = new Set(DB.cases.map(c=>String(c.stw||'').toUpperCase()));
+  let number = 0;
+  do{ number = Math.floor(100000 + Math.random()*900000); }while(used.has(`STW-${number}`));
+  return `STW-${number}`;
 }
 function nextLicenseNo(){
   const nums = DB.drivers.filter(d=>d.licenseNo).map(d=>parseInt((d.licenseNo||'').split('-').pop())||0);
@@ -541,7 +556,7 @@ function nextLicenseNo(){
   return `ZFC-LIC-${String(next).padStart(3,'0')}`;
 }
 function statusTagClass(s){
-  return {Offen:'open','In Untersuchung':'invest',Entschieden:'decided',Archiviert:'archived'}[s] || 'archived';
+  return {Neu:'open',Offen:'open','In Untersuchung':'invest',Entschieden:'decided',Archiviert:'archived'}[s] || 'archived';
 }
 function licenseTagClass(s){
   return {'Aktiv':'active','Ausgesetzt':'suspended','Entzogen':'revoked','Nicht ausgestellt':'none'}[s] || 'none';
@@ -636,7 +651,7 @@ async function markFinancePaid(id){ const t=DB.finance.find(item=>item.id===id);
 /* ============================= DASHBOARD ============================= */
 function pageDashboard(){
   const total = DB.cases.length;
-  const open = DB.cases.filter(c=>c.status==='Offen'||c.status==='In Untersuchung').length;
+  const open = DB.cases.filter(c=>c.status==='Neu'||c.status==='Offen'||c.status==='In Untersuchung').length;
   const activeLic = DB.drivers.filter(d=>d.licenseStatus==='Aktiv').length;
   const suspRev = DB.drivers.filter(d=>d.licenseStatus==='Ausgesetzt'||d.licenseStatus==='Entzogen').length;
 
@@ -703,7 +718,7 @@ function pageDashboard(){
 /* ============================= CASE FORM (AKTE) ============================= */
 function pageCaseForm(existing){
   const c = existing || {
-    id:null, stw:null, season:'2026', status:'Offen', createdAt:null,
+    id:null, stw:null, season:'2026', status:'Neu', createdAt:null,
     event:'', sessionType:'Rennen', incidentLap:'', category:CATEGORIES[0], reportedBy:REPORTED_BY[0],
     teamInvolved:'', driverInvolved:'', teamAffected:'', driverAffected:'',
     description:'', investigationNotes:'', evidenceLink:'', regulationBreach:'', precedent:'',
@@ -712,7 +727,7 @@ function pageCaseForm(existing){
     stewardChairman:'', steward2:'', steward3:'', history:[]
   };
   const isNew = !existing;
-  const stwDisplay = c.stw || nextStw(c.season) + ' (Vorschau)';
+  const stwDisplay = c.stw || nextStw() + ' (Vorschau)';
 
   return `
   <div class="pagehead">
@@ -725,9 +740,9 @@ function pageCaseForm(existing){
   <div class="dossier">
     <div class="dossier-head">
       <div><div class="stwlabel">Aktennummer</div><div class="stwno">${esc(stwDisplay)}</div></div>
-      <div style="text-align:right">
+        <div style="text-align:right">
         <div class="stwlabel">Status</div>
-        <select id="f_status" style="width:auto;">${selectOptions(CASE_STATUS, c.status)}</select>
+        ${isNew ? '<span class="tag open">Neu</span>' : `<select id="f_status" style="width:auto;">${selectOptions(CASE_STATUS, c.status)}</select>`}
       </div>
     </div>
     <div class="dossier-body">
@@ -769,10 +784,11 @@ function pageCaseForm(existing){
       <div class="field"><label>Untersuchung / Anmerkungen der Stewards</label><textarea id="f_investigationNotes" placeholder="Notizen aus der Untersuchung, Aussagen, Abwägungen …">${esc(c.investigationNotes)}</textarea></div>
       <div class="grid cols-2">
         <div class="field"><label>Klarer Regelverstoß (Artikel-Referenz)</label><input id="f_regulationBreach" type="text" value="${esc(c.regulationBreach)}" placeholder="z. B. Art. 27.3 Sportliches Reglement"></div>
-        <div class="field"><label>Vergleichbare frühere Fälle (Präzedenzfall)</label><input id="f_precedent" type="text" value="${esc(c.precedent)}" placeholder="z. B. STW-2026-004"></div>
+        <div class="field"><label>Vergleichbare frühere Fälle (Präzedenzfall)</label><input id="f_precedent" type="text" value="${esc(c.precedent)}" placeholder="z. B. STW-378945"></div>
       </div>
 
-      <div class="sectiontitle">Entscheidung</div>
+      ${isNew ? '<div class="panel" style="margin-top:26px;margin-bottom:0;"><h2>Akte zuerst <b>anlegen</b></h2><p style="margin:0;color:var(--grey);">Trage die Grunddaten und eine objektive Fallbeschreibung ein. Nach dem Anlegen wird die Akte mit Status „Neu“ gespeichert und kann anschließend vollständig ausgewertet werden.</p></div>' : '<div class="sectiontitle">Entscheidung</div>'}
+      ${isNew ? '' : `
       <div class="grid cols-2">
         <div class="field"><label>Entscheidung</label><select id="f_decision">${selectOptions(DECISIONS, c.decision)}</select></div>
         <div class="field"><label>Strafpunkte (auf Superlizenz)</label><input id="f_penaltyPoints" type="number" min="0" max="12" value="${c.penaltyPoints||0}"></div>
@@ -782,13 +798,16 @@ function pageCaseForm(existing){
         <div class="field"><label>Status der Fahrlizenz nach diesem Vorfall</label><select id="f_licenseStatusAfter">${selectOptions(LICENSE_AFTER, c.licenseStatusAfter)}</select></div>
         <div class="field"><label>Detail (z. B. Anzahl gesperrter Rennen)</label><input id="f_licenseStatusDetail" type="text" value="${esc(c.licenseStatusDetail)}" placeholder="z. B. 1 Rennen Sperre"></div>
       </div>
+      `}
 
-      <div class="sectiontitle">Unterzeichnende Stewards</div>
+      ${isNew ? '' : '<div class="sectiontitle">Unterzeichnende Stewards</div>'}
+      ${isNew ? '' : `
       <div class="grid cols-3">
         <div class="field"><label>Vorsitzender Steward</label><input id="f_stewardChairman" type="text" value="${esc(c.stewardChairman)}"></div>
         <div class="field"><label>Steward 2</label><input id="f_steward2" type="text" value="${esc(c.steward2)}"></div>
         <div class="field"><label>Steward 3</label><input id="f_steward3" type="text" value="${esc(c.steward3)}"></div>
       </div>
+      `}
 
       ${c.history && c.history.length? `
         <div class="sectiontitle">Änderungsprotokoll</div>
@@ -797,7 +816,7 @@ function pageCaseForm(existing){
         </tbody></table>` : ''}
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:26px;border-top:1px solid var(--line);padding-top:20px;">
-        <button class="btn primary" onclick="saveCase('${c.id||''}', false)">Akte speichern</button>
+        <button class="btn primary" onclick="saveCase('${c.id||''}', false)">${isNew?'Akte anlegen':'Akte speichern'}</button>
         <button class="btn" onclick="saveCase('${c.id||''}', true)">Speichern &amp; schließen</button>
         ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button><button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
         ${!isNew? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte löschen</button>` : ''}
@@ -819,23 +838,27 @@ async function saveCase(id, closeAfter){
   let c = id? DB.cases.find(x=>x.id===id) : null;
   const isNew = !c;
   if(isNew){
+    if(!v('f_event').trim() || !v('f_description').trim()){
+      alert('Bitte Event und eine Fallbeschreibung eintragen, bevor die Akte angelegt wird.');
+      return;
+    }
     const season = v('f_season');
-    c = { id: uid(), stw: nextStw(season), createdAt: now, history: [] };
+    c = { id: uid(), stw: nextStw(), createdAt: now, history: [] };
     DB.cases.push(c);
   }
   const prevStatus = c.status, prevDecision = c.decision;
   Object.assign(c, {
-    season: v('f_season'), status: v('f_status'), event: v('f_event'), sessionType: v('f_sessionType'),
+    season: v('f_season'), status: isNew ? 'Neu' : v('f_status'), event: v('f_event'), sessionType: v('f_sessionType'),
     incidentLap: v('f_incidentLap'), category: v('f_category'), reportedBy: v('f_reportedBy'),
     teamInvolved: v('f_teamInvolved'), driverInvolved: v('f_driverInvolved'),
     teamAffected: v('f_teamAffected'), driverAffected: v('f_driverAffected'),
     description: v('f_description'), evidenceLink: v('f_evidenceLink'),
     hearingHeld: document.getElementById('f_hearingHeld').checked,
     investigationNotes: v('f_investigationNotes'), regulationBreach: v('f_regulationBreach'),
-    precedent: v('f_precedent'), decision: v('f_decision'),
-    penaltyPoints: parseInt(v('f_penaltyPoints'))||0, decisionDetail: v('f_decisionDetail'),
-    licenseStatusAfter: v('f_licenseStatusAfter'), licenseStatusDetail: v('f_licenseStatusDetail'),
-    stewardChairman: v('f_stewardChairman'), steward2: v('f_steward2'), steward3: v('f_steward3'),
+    precedent: v('f_precedent'), decision: isNew ? DECISIONS[0] : v('f_decision'),
+    penaltyPoints: isNew ? 0 : parseInt(v('f_penaltyPoints'))||0, decisionDetail: isNew ? '' : v('f_decisionDetail'),
+    licenseStatusAfter: isNew ? LICENSE_AFTER[0] : v('f_licenseStatusAfter'), licenseStatusDetail: isNew ? '' : v('f_licenseStatusDetail'),
+    stewardChairman: isNew ? '' : v('f_stewardChairman'), steward2: isNew ? '' : v('f_steward2'), steward3: isNew ? '' : v('f_steward3'),
     updatedAt: now,
   });
   if(isNew){ c.history.push({ts:now, text:'Akte '+c.stw+' eröffnet.'}); }
@@ -1280,7 +1303,7 @@ function renderManageBody(){
     el.innerHTML=`<div class="panel"><h2>Finanz<b>einstellungen</b></h2><div class="grid cols-4"><div class="field"><label>Saison</label><input id="fs_season" type="text" value="${esc(s.season||'2026')}"></div><div class="field"><label>Startkapital</label><input id="fs_capital" type="number" min="0" step="0.01" value="${Number(s.startingCapital||0)}"></div><div class="field"><label>Währung</label><select id="fs_currency">${selectOptions(['EUR','CHF','USD','GBP'],s.currency||'EUR')}</select></div><div class="field" style="display:flex;align-items:flex-end"><button class="btn primary" onclick="saveFinanceSettings()">Einstellungen speichern</button></div></div><p class="footer-note">Alle Beträge werden im Finanzjournal als Einnahme oder Ausgabe verbucht. Änderungen sind sofort im Dashboard sichtbar.</p></div><div class="panel"><h2>Aktuelle <b>Übersicht</b></h2><table><tbody><tr><td>Kontostand</td><td class="pts">${financeAmount(financeBalance())}</td></tr><tr><td>Buchungen</td><td class="pts">${DB.finance.length}</td></tr></tbody></table></div>`;
   } else if(MANAGE_TAB==='integrations'){
     const config=supabaseConfig(), s=DB.financeSettings||{};
-    el.innerHTML=`<div class="panel"><h2>Supabase <b>Realtime</b></h2><p style="color:var(--grey);font-size:13.5px;">Trage die Projekt-URL und den öffentlichen anon-Key ein. Der gesamte Datenbestand wird danach live zwischen allen offenen Browsern synchronisiert.</p><div class="grid cols-2"><div class="field"><label>Supabase Project URL</label><input id="sb_url" type="url" value="${esc(config.url||'')}" placeholder="https://xxxx.supabase.co"></div><div class="field"><label>Supabase anon public key</label><input id="sb_key" type="text" value="${esc(config.anonKey||'')}"></div></div><button class="btn primary" onclick="saveSupabaseSettings()">Supabase verbinden</button><span id="sb_status" class="footer-note" style="margin-left:12px;">${SUPABASE.client?'Verbunden':'Noch nicht verbunden'}</span></div><div class="panel"><h2>Discord <b>Webhooks</b></h2><p style="color:var(--grey);font-size:13.5px;">Verwende den Finanz-Webhook für Rechnungen und den Akten-Webhook für Steward-Akten. Beide können im selben oder in getrennten Kanälen liegen.</p><div class="field"><label>Finanz-Webhook URL</label><input id="discord_webhook" type="url" value="${esc(s.discordWebhookUrl||'')}" placeholder="https://discord.com/api/webhooks/…"></div><div class="field"><label>Akten-Webhook URL</label><input id="case_webhook" type="url" value="${esc(s.caseWebhookUrl||'')}" placeholder="https://discord.com/api/webhooks/…"></div><div class="field"><label>Öffentliche Website-URL</label><input id="finance_site_url" type="url" value="${esc(s.siteUrl||location.href.split('#')[0])}" placeholder="https://deine-domain.de/"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn gold" onclick="saveFinanceSettings()">Webhooks speichern</button><button class="btn" onclick="sendDiscordTest()">Finanz-Test senden</button><button class="btn" onclick="sendCaseDiscordTest()">Akten-Test senden</button></div></div>`;
+    el.innerHTML=`<div class="panel"><h2>Supabase <b>Realtime</b></h2><p style="color:var(--grey);font-size:13.5px;">Trage die Projekt-URL und den öffentlichen anon-Key ein. Der gesamte Datenbestand wird danach live zwischen allen offenen Browsern synchronisiert. Für andere Geräte muss der Freigabelink aus diesem Bereich verwendet werden.</p><div class="grid cols-2"><div class="field"><label>Supabase Project URL</label><input id="sb_url" type="url" value="${esc(config.url||'')}" placeholder="https://xxxx.supabase.co"></div><div class="field"><label>Supabase anon public key</label><input id="sb_key" type="text" value="${esc(config.anonKey||'')}"></div></div><button class="btn primary" onclick="saveSupabaseSettings()">Supabase verbinden</button><span id="sb_status" class="footer-note" style="margin-left:12px;">${esc(SUPABASE.status)}</span></div><div class="panel"><h2>Discord <b>Webhooks</b></h2><p style="color:var(--grey);font-size:13.5px;">Verwende den Finanz-Webhook für Rechnungen und den Akten-Webhook für Steward-Akten. Beide können im selben oder in getrennten Kanälen liegen.</p><div class="field"><label>Finanz-Webhook URL</label><input id="discord_webhook" type="url" value="${esc(s.discordWebhookUrl||'')}" placeholder="https://discord.com/api/webhooks/…"></div><div class="field"><label>Akten-Webhook URL</label><input id="case_webhook" type="url" value="${esc(s.caseWebhookUrl||'')}" placeholder="https://discord.com/api/webhooks/…"></div><div class="field"><label>Öffentliche Website-URL</label><input id="finance_site_url" type="url" value="${esc(s.siteUrl||location.href.split('#')[0])}" placeholder="https://deine-domain.de/"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn gold" onclick="saveFinanceSettings()">Webhooks speichern</button><button class="btn" onclick="sendDiscordTest()">Finanz-Test senden</button><button class="btn" onclick="sendCaseDiscordTest()">Akten-Test senden</button></div></div>`;
   } else if(MANAGE_TAB==='data'){
     el.innerHTML = `<div class="panel">
       <h2>Daten<b>sicherung</b></h2>
@@ -1303,6 +1326,9 @@ async function saveFinanceSettings(){
 }
 async function saveSupabaseSettings(){
   const config={url:document.getElementById('sb_url').value.trim().replace(/\/$/,''),anonKey:document.getElementById('sb_key').value.trim()};
+  if(SUPABASE.channel && SUPABASE.client) await SUPABASE.client.removeChannel(SUPABASE.channel);
+  SUPABASE.channel=null;
+  SUPABASE.client=null;
   saveKey(KEYS.supabase,config); await initSupabase(); alert(SUPABASE.client?'Supabase verbunden.':'Verbindung konnte nicht aufgebaut werden.'); render();
 }
 async function copyPublicShareUrl(){
@@ -1403,7 +1429,7 @@ function printCaseReport(id){
       <div><div class="t1">ZFC <span>RACING</span></div><div class="t2">Official Document — Sportkommissare</div></div>
       <div><div class="stw">${esc(c.stw)}</div><div class="stwl">Aktennummer</div></div>
     </div>
-    <p style="font-size:12px;color:#666;">${esc(c.event||'—')} · ${esc(c.sessionType||'—')} · Saison ${esc(c.season||'—')} · Erstellt am ${fmtDateTime(c.createdAt)}</p>
+    <p style="font-size:12px;color:#666;">${esc(c.event||'—')} · ${esc(c.sessionType||'—')} · Saison ${esc(c.season||'—')} · Status ${esc(c.status||'—')} · Erstellt am ${fmtDateTime(c.createdAt)} · Zuletzt geändert am ${fmtDateTime(c.updatedAt||c.createdAt)}</p>
 
     <h3>1. Beteiligte</h3>
     <table>
@@ -1437,6 +1463,8 @@ function printCaseReport(id){
 
     <h3>6. Status der Fahrlizenz</h3>
     <p><span class="stampline">${esc(c.licenseStatusAfter || 'Bleibt aktiv')}</span>${c.licenseStatusDetail? '  — '+esc(c.licenseStatusDetail):''}</p>
+    <h3>7. Aktenverlauf</h3>
+    ${c.history?.length? `<table>${c.history.map(h=>`<tr><td class="k">${fmtDateTime(h.ts)}</td><td>${esc(h.text)}</td></tr>`).join('')}</table>`:'<p>Keine Einträge vorhanden.</p>'}
 
     <div class="sig">
       <div class="sigbox"><div class="sigline">${esc(c.stewardChairman)||'—'}<br>Vorsitzender Steward</div></div>
