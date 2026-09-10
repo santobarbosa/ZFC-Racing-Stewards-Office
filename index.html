@@ -145,9 +145,10 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
   justify-content:center;padding:18px 14px 14px;position:relative;overflow:hidden;
   transition:transform .18s ease,border-color .18s ease,background .18s ease;
 }
-.finance-team-card:hover{transform:translateY(-4px);border-color:var(--team-accent,var(--gold));background:linear-gradient(145deg,#242428,var(--black-2));}
+.finance-team-card:hover{transform:none;border-color:var(--team-accent,var(--gold));background:linear-gradient(145deg,#242428,var(--black-2));}
 .finance-team-card::after{content:"";position:absolute;inset:auto 16px 0;height:2px;background:var(--team-accent,var(--gold));opacity:.35;}
-.finance-team-card.is-opening{animation:teamLogoOpen .48s ease both;}
+.finance-team-card.is-opening{border-color:var(--team-accent,var(--gold));}
+.finance-team-card .team-logo.is-opening{animation:teamLogoOpen .48s ease both;}
 @keyframes teamLogoOpen{0%{transform:scale(1) rotate(0);opacity:1}45%{transform:scale(1.08) rotate(-3deg);filter:brightness(1.45)}100%{transform:scale(.94) rotate(0);opacity:.55}}
 .team-logo{width:92px;height:92px;display:grid;place-items:center;margin-bottom:12px;}
 .team-logo img{max-width:82px;max-height:68px;width:auto;height:auto;object-fit:contain;filter:drop-shadow(0 5px 8px rgba(0,0,0,.35));}
@@ -155,6 +156,27 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 .finance-team-name{font-size:15px;font-weight:800;letter-spacing:.4px;text-align:center;}
 .finance-team-balance{font-family:var(--mono);font-size:11px;color:var(--grey);margin-top:5px;}
 .finance-team-card .team-open-label{font-family:var(--mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--gold-2);margin-top:10px;opacity:.75;}
+.finance-team-account{display:grid;grid-template-columns:220px minmax(0,1fr);gap:24px;align-items:stretch;}
+.finance-account-brand{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:12px 20px;}
+.finance-account-logo{width:128px;height:128px;display:grid;place-items:center;margin-bottom:14px;animation:accountLogoReveal .55s ease both;}
+.finance-account-logo img{max-width:112px;max-height:88px;object-fit:contain;filter:drop-shadow(0 8px 12px rgba(0,0,0,.38));}
+.finance-account-logo .team-logo-fallback{width:92px;height:92px;font-size:26px;}
+@keyframes accountLogoReveal{0%{opacity:0;transform:scale(.65) rotate(-10deg)}65%{opacity:1;transform:scale(1.08) rotate(2deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+.finance-team-account .finance-account-brand{animation:teamAccountBrandIn .42s ease both;}
+.finance-team-account .finance-account-summary{animation:teamAccountContentIn .5s .08s ease both;}
+@keyframes teamAccountBrandIn{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:translateX(0)}}
+@keyframes teamAccountContentIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.finance-account-brand h2{font-size:20px;color:var(--white);letter-spacing:.4px;margin:0 0 4px;text-transform:none;}
+.finance-account-brand .team-country{font-size:12px;color:var(--grey);}
+.finance-account-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-content:center;}
+.finance-account-summary .stat{min-height:92px;}
+.finance-account-section{margin-top:20px;padding-top:18px;border-top:1px solid var(--line);}
+.finance-driver-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.finance-driver{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--black-3);border:1px solid var(--line);cursor:pointer;}
+.finance-driver:hover{border-color:var(--gold);background:#242428;}
+.finance-driver .driver-name{font-weight:700;}
+.finance-driver .driver-number{font-family:var(--mono);font-size:12px;color:var(--gold-2);}
+@media(max-width:760px){.finance-team-account{grid-template-columns:1fr;gap:16px;}.finance-account-brand{border-right:0;border-bottom:1px solid var(--line);padding-bottom:18px;}.finance-account-summary{grid-template-columns:1fr 1fr;}.finance-driver-list{grid-template-columns:1fr;}}
 @media(max-width:1000px){.finance-team-gallery{grid-template-columns:repeat(2,1fr);}}
 @media(max-width:640px){.finance-team-gallery{grid-template-columns:1fr 1fr;gap:10px;}.finance-team-card{min-height:156px;padding:12px 8px;}.team-logo{width:76px;height:76px;}.team-logo img{max-width:68px;max-height:54px;}.finance-team-name{font-size:13px;}}
 
@@ -353,7 +375,7 @@ function teamInitials(team){
 function teamLogo(team){ return TEAM_LOGOS[team?.id]||''; }
 function openFinanceTeam(teamId, button){
   if(button){
-    button.classList.add('is-opening');
+    button.querySelector('.team-logo')?.classList.add('is-opening');
     setTimeout(()=>go('finance',teamId),420);
   }else go('finance',teamId);
 }
@@ -663,6 +685,8 @@ function pageFinance(){
   const settings=DB.financeSettings||{season:'2026',startingCapital:0,currency:'EUR'};
   const selectedTeam=ROUTE.id||document.getElementById('fin_team_filter')?.value||'';
   const selectedTeamData=selectedTeam?teamById(selectedTeam):null;
+  const selectedTeamDrivers=selectedTeamData?DB.drivers.filter(driver=>driver.teamId===selectedTeamData.id).sort((a,b)=>driverName(a).localeCompare(driverName(b))):[];
+  const selectedTeamTransactions=selectedTeamData?DB.finance.filter(transaction=>transaction.teamId===selectedTeamData.id):[];
   const teamRows=DB.teams.map(team=>{
     const logo=teamLogo(team);
     return `<button class="finance-team-card" style="--team-accent:${esc(team.color||'var(--gold)')}" onclick="openFinanceTeam('${team.id}',this)" aria-label="Finanzseite von ${esc(team.name)} öffnen">
@@ -670,14 +694,30 @@ function pageFinance(){
       <span class="finance-team-name">${esc(team.name)}</span>
     </button>`;
   }).join('');
-  const rows=[...financeForTeam(selectedTeam)].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).map(t=>`<tr>
+  const visibleTransactions=selectedTeamData?selectedTeamTransactions:DB.finance;
+  const rows=[...visibleTransactions].sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).map(t=>`<tr>
     <td>${fmtDate(t.date)}</td><td>${esc(teamById(t.teamId)?.name||'Liga gesamt')}</td><td>${esc(t.race||'—')}</td><td>${esc(t.category)}</td><td>${esc(t.description||'—')}</td>
     <td>${esc(t.counterparty||'—')}</td><td class="pts ${t.type==='income'?'green-text':'crit'}">${t.type==='income'?'+':'−'} ${financeAmount(t.amount)}</td>
     <td><span class="tag ${t.status==='Gebucht'?'decided':t.status==='Geplant'?'open':'archived'}">${esc(t.status)}</span></td>
     <td style="white-space:nowrap"><button class="btn small" onclick="editFinance('${t.id}')">Bearbeiten</button> ${t.type==='expense'?`<button class="btn small gold" onclick="sendFinanceDiscordNotification('${t.id}')">Discord senden</button>`:''} ${t.status==='Geplant'?`<button class="btn small gold" onclick="markFinancePaid('${t.id}')">Jetzt bezahlen</button>`:''} <button class="btn small danger" onclick="deleteFinance('${t.id}')">Löschen</button></td>
   </tr>`).join('');
+  const accountLogo=selectedTeamData?teamLogo(selectedTeamData):'';
+  const accountDrivers=selectedTeamDrivers.map(driver=>`<div class="finance-driver" onclick="go('driverform','${driver.id}')"><span class="driver-name">${esc(driverName(driver))}</span><span class="driver-number">${driver.number?`#${esc(driver.number)}`:'ohne Startnummer'}</span></div>`).join('');
+  const accountPanel=selectedTeamData?`<div class="panel finance-team-account">
+    <div class="finance-account-brand">
+      <div class="finance-account-logo">${accountLogo?`<img src="${accountLogo}" alt="${esc(selectedTeamData.name)} Logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';">`:''}<span class="team-logo-fallback" style="${accountLogo?'':'display:grid;'}">${esc(teamInitials(selectedTeamData))}</span></div>
+      <h2>${esc(selectedTeamData.name)}</h2><div class="team-country">${esc(selectedTeamData.country||'Teamakte')}</div>
+    </div>
+    <div class="finance-account-summary">
+      <div class="stat green"><div class="n">${financeAmount(financeBalance(selectedTeamData.id))}</div><div class="l">Kontostand</div></div>
+      <div class="stat green"><div class="n">${financeAmount(financeIncome(selectedTeamData.id))}</div><div class="l">Einnahmen</div></div>
+      <div class="stat red"><div class="n">${financeAmount(financeExpense(selectedTeamData.id))}</div><div class="l">Ausgaben</div></div>
+      <div class="finance-account-section" style="grid-column:1/-1;"><div class="sectiontitle" style="margin-top:0;">Aktuelle <b>Fahrer</b></div>${accountDrivers?`<div class="finance-driver-list">${accountDrivers}</div>`:'<div class="empty">Für dieses Team sind noch keine Fahrer registriert.</div>'}</div>
+    </div>
+  </div>`:'';
   return `<div class="pagehead"><div><div class="eyebrow">Teamführung · Saison ${esc(settings.season)}</div><h1>Finanzen${selectedTeamData?` · ${esc(selectedTeamData.name)}`:''}</h1></div><div class="actions">${selectedTeamData?'<button class="btn" onclick="go(\'finance\')">Alle Teams</button>':''}<button class="btn gold" onclick="openIntegrations()">Discord-Webhooks</button><button class="btn" onclick="go('manage')">Verwaltung öffnen</button></div></div>
   <div class="grid cols-4" style="margin-bottom:22px"><div class="stat green"><div class="n">${financeAmount(financeBalance(selectedTeam))}</div><div class="l">Kontostand${selectedTeam?' · Team':''}</div></div><div class="stat"><div class="n">${financeAmount(settings.startingCapital)}</div><div class="l">Startkapital je Team</div></div><div class="stat green"><div class="n">${financeAmount(financeIncome(selectedTeam))}</div><div class="l">Einnahmen</div></div><div class="stat red"><div class="n">${financeAmount(financeExpense(selectedTeam))}</div><div class="l">Ausgaben</div></div></div>
+  ${accountPanel}
   <div class="panel"><h2>Team<b>konten</b></h2><p style="margin:-4px 0 16px;color:var(--grey);font-size:13px;">Wähle ein Team, um sein Finanzkonto und alle zugehörigen Buchungen zu öffnen.</p><div class="finance-team-gallery">${teamRows||'<div class="empty">Noch keine Teams angelegt.</div>'}</div></div>
   <div class="panel"><h2>Neue <b>Buchung</b></h2><div class="grid cols-4"><div class="field"><label>Team</label><select id="fin_team">${teamOptions('',true)}</select></div><div class="field"><label>Art</label><select id="fin_type"><option value="expense">Ausgabe / Rennkosten</option><option value="income">Einnahme</option></select></div><div class="field"><label>Betrag (${esc(settings.currency)})</label><input id="fin_amount" type="number" min="0" step="0.01" placeholder="0,00"></div><div class="field"><label>Datum</label><input id="fin_date" type="date" value="${today()}"></div></div><div class="grid cols-4"><div class="field"><label>Grand Prix / Rennen</label><input id="fin_race" type="text" placeholder="z. B. GP Monaco"></div><div class="field"><label>Kategorie</label><select id="fin_category">${selectOptions(FINANCE_CATEGORIES,'Rennveranstaltung')}</select></div><div class="field"><label>Beschreibung</label><input id="fin_description" type="text" placeholder="z. B. Streckenmiete und Marshalling"></div><div class="field"><label>Partner / Empfänger</label><input id="fin_counterparty" type="text" placeholder="z. B. Circuit de Monaco"></div></div><div class="grid cols-4"><div class="field"><label>Status</label><select id="fin_status"><option>Gebucht</option><option>Geplant</option><option>Storniert</option></select></div><div class="field" style="display:flex;align-items:flex-end"><button class="btn primary" onclick="saveFinance()">Buchung speichern</button></div></div></div>
   <div class="panel"><h2>Finanz<b>journal</b></h2><div class="searchbar"><select id="fin_team_filter" onchange="go('finance',this.value)"><option value="">Alle Teams</option>${teamOptions(selectedTeam,false)}</select></div><div style="overflow:auto"><table><thead><tr><th>Datum</th><th>Team</th><th>Rennen</th><th>Kategorie</th><th>Beschreibung</th><th>Partner</th><th>Betrag</th><th>Status</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="9"><div class="empty"><b>Noch keine Finanzbuchungen</b>Erfasse Startkapital, Sponsoren, Rennkosten oder Preisgelder.</div></td></tr>'}</tbody></table></div></div>`;
