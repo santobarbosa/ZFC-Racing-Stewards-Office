@@ -120,7 +120,7 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 /* ---------- Jarves case assistant ---------- */
 .jarves-panel{margin:22px 0 24px;padding:0;background:linear-gradient(135deg,rgba(20,25,29,.96),rgba(18,18,21,.94));border:1px solid #36505a;border-left:4px solid #54d9e8;position:relative;overflow:hidden;}
 .jarves-panel::after{content:"J";position:absolute;right:20px;top:-30px;color:rgba(84,217,232,.08);font:900 150px/1 var(--font);font-style:italic;pointer-events:none;}
-.jarves-panel::before{content:"";position:absolute;inset:-2px;border:2px solid transparent;border-radius:2px;background:linear-gradient(90deg,transparent,#54d9e8,transparent) border-box;background-size:38% 100%;background-repeat:no-repeat;animation:jarvesBorderRun 7s linear infinite;pointer-events:none;z-index:2;}
+.jarves-panel::before{content:"";position:absolute;inset:-3px;padding:2px;border-radius:4px;background:conic-gradient(from 0deg,transparent 0 72deg,#54d9e8 96deg,#b9fbff 108deg,#54d9e8 120deg,transparent 145deg 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;animation:jarvesBorderRun 7s linear infinite;pointer-events:none;z-index:2;}
 .jarves-panel.is-closed{display:none;}
 .jarves-launcher{display:flex;align-items:center;gap:12px;margin:22px 0 24px;}
 .jarves-launcher.is-hidden{display:none;}
@@ -139,7 +139,7 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 .jarves-result{display:none;margin-top:16px;padding:14px 16px;background:rgba(8,13,15,.58);border:1px solid #2d4148;color:#dce7e9;font-size:13px;line-height:1.55;}.jarves-result.is-visible{display:block;animation:jarvesReveal .24s ease both;}.jarves-result h4{margin:0 0 8px;color:#79e5ef;font:700 11px var(--mono);letter-spacing:1.2px;text-transform:uppercase;}.jarves-result p{margin:7px 0;}.jarves-result ul{margin:7px 0;padding-left:20px;}.jarves-note{color:#8ea1a6;font-size:11px;}
 .jarves-output{width:100%;min-height:260px;margin-top:16px;background:#0b1215;border:1px solid #36505a;color:#dce7e9;font:13px/1.6 var(--font);padding:14px;resize:vertical;}.jarves-copy-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;}.jarves-copy-row .jarves-note{margin:0;}
 @keyframes jarvesReveal{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
-@keyframes jarvesBorderRun{0%{background-position:-38% 0}50%{background-position:100% 0}100%{background-position:138% 0}}
+@keyframes jarvesBorderRun{to{transform:rotate(360deg)}}
 @keyframes jarvesReactorSpin{to{transform:rotate(360deg)}}
 @keyframes jarvesReactorSpinReverse{to{transform:rotate(-360deg)}}
 @keyframes jarvesWelcome{0%{opacity:0;transform:translateY(8px) scale(.96)}35%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-8px) scale(1.02)}}
@@ -1229,17 +1229,24 @@ function jarvesRepeatAnalysis(draft){
   }).filter(item=>item.score>0).sort((a,b)=>b.score-a.score);
   return {cases:previous,score:previous[0]?.score||0};
 }
+function jarvesHash(value){ return [...String(value||'')].reduce((hash,char)=>(hash*31+char.charCodeAt(0))>>>0,7); }
+function jarvesSentences(value){ return String(value||'').replace(/\s+/g,' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean); }
 function jarvesProfessionalText(input,draft){
   const clean=String(input||'').trim().replace(/\s+/g,' ');
   if(!clean) return '';
+  const seed=jarvesHash(clean);
+  const sentences=jarvesSentences(clean).map(sentence=>sentence.charAt(0).toUpperCase()+sentence.slice(1).replace(/[.!?]+$/,'')+'.');
   const driver=draft.driverInvolved?driverName(driverById(draft.driverInvolved)):'der betroffene Fahrer';
   const context=[draft.event,draft.sessionType,draft.incidentLap].filter(Boolean).join(', ');
-  const setting=context?` während ${context}`:' während der Rennsession';
-  const incident=clean.charAt(0).toUpperCase()+clean.slice(1).replace(/[.!?]+$/,'')+'.';
+  const openings=[`Nach Auswertung der vorliegenden Angaben war ${driver}`,`Aus der bisherigen Aktenaufnahme ergibt sich, dass ${driver}`,`Gegenstand der Prüfung ist ein Vorfall, an dem ${driver}`];
+  const transitions=['Im weiteren Ablauf ist festzuhalten:','Der konkrete Ablauf wird wie folgt zusammengefasst:','Für die sportrechtliche Prüfung ist insbesondere folgender Ablauf maßgeblich:'];
+  const review=['Die Bewertung hat sich auf die Kontrolle des Fahrzeugs, die Vorhersehbarkeit des Manövers und die Möglichkeit einer sicheren Vermeidung zu beziehen.','Für die Würdigung sind Ausgangslage, Abstand, Geschwindigkeit, verfügbare Fahrbahn und die Reaktion der Beteiligten getrennt zu betrachten.','Maßgeblich sind die konkrete Überlappung, die gewählte Linie, die Reaktionsmöglichkeit des jeweils anderen Fahrers und die unmittelbare Auswirkung auf das Renngeschehen.'];
+  const setting=context?` ${context}`:' in der betreffenden Rennsession';
   const category=draft.category?` Der Vorgang wird vorläufig der Kategorie „${draft.category}“ zugeordnet.`:'';
-  const evidence=draft.evidenceLink?` Als Beweismittel ist ein Replay- oder Telemetrieverweis hinterlegt; dieser ist bei der abschließenden Würdigung mit den Fahrzeugpositionen, Abständen und Zeitverlusten abzugleichen.`:' Die abschließende Bewertung soll sich auf Replay, Onboard-Aufnahmen, Telemetrie und die feststellbaren Fahrzeugpositionen stützen.';
-  const rule=draft.regulationBreach?` Die Prüfung erfolgt insbesondere im Hinblick auf die eingetragene Regelreferenz „${draft.regulationBreach}“.`:' Die einschlägige Regelstelle und der konkrete Strafrahmen sind im weiteren Prüfungsverlauf zu bestimmen.';
-  return `Sachverhalt\n${driver} war${setting} an dem nachfolgend beschriebenen Vorfall beteiligt. ${incident}${category}\n\nVorläufige Würdigung\nNach derzeitiger Aktenlage ist zu prüfen, ob das beschriebene Verhalten kontrolliert, vorhersehbar und vermeidbar war. Dabei sind die Ausgangssituation, der verfügbare Raum, die Geschwindigkeit, die Reaktion der beteiligten Fahrer und die unmittelbare Folge des Manövers getrennt voneinander zu bewerten.${evidence}${rule}\n\nPrüfhinweis\nDiese Darstellung beruht auf der eingegebenen Kurzfassung und stellt noch keine abschließende Schuld- oder Sanktionsentscheidung dar. Aussagen, Videoaufnahmen und weitere Beweismittel sollten vor der Entscheidung mit dem beschriebenen Ablauf abgeglichen werden.`;
+  const evidence=draft.evidenceLink?` Der hinterlegte Replay- oder Telemetrieverweis ist mit den Fahrzeugpositionen, Abständen und entstandenen Zeit- oder Positionsverlusten abzugleichen.`:' Zur abschließenden Feststellung sind Replay, Onboard-Aufnahmen und gegebenenfalls Telemetriedaten heranzuziehen.';
+  const rule=draft.regulationBreach?` Die Prüfung erfolgt dabei insbesondere im Hinblick auf „${draft.regulationBreach}“.`:' Die einschlägige Regelstelle und der konkrete Strafrahmen sind nach Abschluss der Beweismittelprüfung festzulegen.';
+  const incident=sentences.length>1?sentences.join(' '):sentences[0];
+  return `SACHVERHALT\n${openings[seed%openings.length]}${setting} an dem nachfolgend dokumentierten Ereignis beteiligt.\n\n${transitions[(seed>>3)%transitions.length]}\n${incident}${category}\n\nVORLÄUFIGE WÜRDIGUNG\n${review[(seed>>6)%review.length]} ${evidence}${rule}\n\nPRÜFHINWEIS\nDiese Fassung gibt ausschließlich die eingegebene Kurzbeschreibung und die derzeit bekannten Falldaten wieder. Sie stellt keine abschließende Schuld- oder Sanktionsentscheidung dar; die endgültige Bewertung obliegt den Stewards nach vollständiger Sichtung der Beweismittel.`;
 }
 function jarvesResult(title,content){
   const result=document.getElementById('jarves_result');
