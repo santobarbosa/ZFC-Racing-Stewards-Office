@@ -319,6 +319,24 @@ tr:hover td{background:rgba(255,255,255,0.02);}
 .process-gate{border:1px solid #6a4d1b;background:rgba(217,154,43,.08);padding:16px 18px;margin-bottom:18px;}.process-gate h2{color:var(--amber);margin:0 0 8px;font-size:16px;}.process-gate p{color:#e2d4b0;font-size:13.5px;line-height:1.5;margin:0;}.process-gate strong{color:#ffd166;}
 @media(max-width:820px){.knowledge-layout{grid-template-columns:1fr;}.knowledge-nav{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));max-height:none;}.guide-grid{grid-template-columns:1fr;}}
 @media(max-width:520px){.knowledge-nav{grid-template-columns:1fr;}.ui-shot-body{grid-template-columns:66px 1fr;}.ui-shot-content{padding:12px 10px;}.ui-shot-callout{right:6px;max-width:116px;font-size:9px;}.ui-shot-boxes{gap:4px;}.ui-shot-side span{font-size:8px;}}
+.driver-overview-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+.driver-overview-select{min-width:280px;max-width:420px;}
+.driver-overview-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:18px;}
+.driver-overview-summary .stat{min-width:0;}
+.driver-overview-summary .stat .n{font-size:25px;}
+.driver-chart{display:grid;gap:10px;}
+.driver-chart-row{display:grid;grid-template-columns:minmax(150px,1.2fr) minmax(100px,2fr) 34px;gap:10px;align-items:center;}
+.driver-chart-label{font-size:12.5px;color:var(--grey);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.driver-chart-track{height:16px;background:var(--black-3);border:1px solid var(--line);}
+.driver-chart-fill{height:100%;min-width:3px;background:linear-gradient(90deg,var(--red-2),var(--red));}
+.driver-chart-fill.gold{background:linear-gradient(90deg,#806918,var(--gold-2));}
+.driver-chart-value{font:12px var(--mono);color:var(--white);text-align:right;}
+.driver-overview-profile{display:flex;align-items:center;gap:14px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--line);}
+.driver-overview-profile h2{font-size:22px;color:var(--white);margin:0 0 3px;text-transform:none;letter-spacing:.2px;}
+.driver-overview-profile p{margin:0;color:var(--grey);font-size:13px;}
+.driver-overview-empty{padding:30px 20px;text-align:center;border:1px dashed var(--line);color:var(--grey);}
+@media(max-width:1000px){.driver-overview-summary{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:640px){.driver-overview-summary{grid-template-columns:repeat(2,1fr);}.driver-overview-select{min-width:0;max-width:none;width:100%;}.driver-chart-row{grid-template-columns:110px minmax(70px,1fr) 28px;gap:7px;}.driver-chart-label{font-size:11px;}}
 
 .footer-note{color:var(--grey-2);font-size:11.5px;margin-top:30px;font-family:var(--mono);}
 
@@ -766,12 +784,13 @@ const NAV = [
   {id:'caseform', label:'Neue Akte', ic:'02'},
   {id:'cases', label:'Alle Akten', ic:'03'},
   {id:'drivers', label:'Fahrer', ic:'04'},
-  {id:'teams', label:'Teams', ic:'05'},
-  {id:'transfers', label:'Transfers', ic:'06'},
-  {id:'finance', label:'Finanzen', ic:'07'},
-  {id:'processes', label:'Prozesse', ic:'08'},
-  {id:'rulebook', label:'Regelwerk', ic:'09'},
-  {id:'manage', label:'Verwaltung', ic:'10'},
+  {id:'drivercases', label:'Fahrer Cases', ic:'05'},
+  {id:'teams', label:'Teams', ic:'06'},
+  {id:'transfers', label:'Transfers', ic:'07'},
+  {id:'finance', label:'Finanzen', ic:'08'},
+  {id:'processes', label:'Prozesse', ic:'09'},
+  {id:'rulebook', label:'Regelwerk', ic:'10'},
+  {id:'manage', label:'Verwaltung', ic:'11'},
 ];
 
 function renderNav(){
@@ -788,6 +807,7 @@ function render(){
   else if(ROUTE.page==='caseform') main.innerHTML = pageCaseForm(ROUTE.id? DB.cases.find(c=>c.id===ROUTE.id): null);
   else if(ROUTE.page==='cases') main.innerHTML = pageCaseList();
   else if(ROUTE.page==='drivers') main.innerHTML = pageDriverList();
+  else if(ROUTE.page==='drivercases') main.innerHTML = pageDriverCasesOverview();
   else if(ROUTE.page==='driverform') main.innerHTML = pageDriverForm(ROUTE.id? driverById(ROUTE.id): null);
   else if(ROUTE.page==='teams') main.innerHTML = pageTeams();
   else if(ROUTE.page==='transfers') main.innerHTML = pageTransfers();
@@ -1146,12 +1166,31 @@ function renderCaseTable(){
   `;
 }
 
+function pageDriverCasesOverview(){
+  const selectedId=ROUTE.id||DB.drivers[0]?.id||'';
+  const driver=driverById(selectedId);
+  const cases=driver?casesForDriver(driver.id):[];
+  const involved=driver?DB.cases.filter(c=>c.driverInvolved===driver.id):[];
+  const decided=involved.filter(c=>c.status==='Entschieden'||c.status==='Archiviert');
+  const open=cases.filter(c=>c.status!=='Entschieden'&&c.status!=='Archiviert');
+  const penalties=decided.filter(c=>c.decision&&c.decision!=='Keine weitere Untersuchung erforderlich'&&c.decision!=='Fall untersucht – keine Strafe');
+  const penaltyPoints=decided.reduce((sum,c)=>sum+(parseInt(c.penaltyPoints)||0),0);
+  const categoryCounts={}; cases.forEach(c=>{const key=c.category||'Sonstiger Vorfall'; categoryCounts[key]=(categoryCounts[key]||0)+1;});
+  const decisionCounts={}; penalties.forEach(c=>{const key=c.decision||'Sonstige Maßnahme'; decisionCounts[key]=(decisionCounts[key]||0)+1;});
+  const chart=(counts, gold=false)=>{const rows=Object.entries(counts).sort((a,b)=>b[1]-a[1]); const max=Math.max(1,...rows.map(item=>item[1])); return rows.length?`<div class="driver-chart">${rows.map(([label,value])=>`<div class="driver-chart-row"><div class="driver-chart-label" title="${esc(label)}">${esc(label)}</div><div class="driver-chart-track"><div class="driver-chart-fill ${gold?'gold':''}" style="width:${value/max*100}%"></div></div><div class="driver-chart-value">${value}</div></div>`).join('')}</div>`:'<div class="driver-overview-empty">Noch keine Auswertung vorhanden.</div>';};
+  const caseRows=cases.map(c=>`<tr class="rowlink" onclick="go('caseform','${c.id}')"><td class="pts">${esc(c.stw||'—')}</td><td>${esc(c.event||'—')} <span style="color:var(--grey-2);font-size:11.5px;">/ ${esc(c.sessionType||'')}</span></td><td>${esc(c.category||'—')}</td><td>${esc(c.decision||'—')}</td><td class="pts">${parseInt(c.penaltyPoints)||0}</td><td><span class="tag ${statusTagClass(c.status)}">${esc(c.status||'—')}</span></td></tr>`).join('');
+  const team=driver?teamById(driver.teamId):null;
+  return `<div class="pagehead"><div><div class="eyebrow">Fahrerkartei · Aktenanalyse</div><h1>Fahrer Cases Overview</h1></div><div class="actions"><button class="btn" onclick="go('drivers')">← Fahrerübersicht</button><button class="btn primary" onclick="go('driverform','${selectedId}')" ${selectedId?'':'disabled'}>Fahrerakte öffnen</button></div></div>
+  <div class="panel"><div class="driver-overview-head"><div class="field" style="margin:0;flex:1;"><label for="driver_case_driver">Fahrer auswählen</label><select id="driver_case_driver" class="driver-overview-select" onchange="go('drivercases',this.value)"><option value="">— Fahrer auswählen —</option>${DB.drivers.slice().sort((a,b)=>driverName(a).localeCompare(driverName(b))).map(d=>`<option value="${d.id}" ${d.id===selectedId?'selected':''}>${esc(driverName(d))}${d.number?' #'+esc(d.number):''}</option>`).join('')}</select></div><div class="footer-note" style="margin:0;max-width:380px;">Die Auswertung wird automatisch aus den verknüpften Steward-Akten berechnet.</div></div>${driver?`<div class="driver-overview-profile"><div class="driverface">${driver.photoUrl?`<img src="${esc(driver.photoUrl)}" alt="${esc(driverName(driver))}">`:esc((driver.firstName?.[0]||'')+(driver.lastName?.[0]||''))}</div><div><h2>${esc(driverName(driver))}</h2><p>${team?esc(team.name):'Ohne Team'} · Lizenz ${esc(driver.licenseNo||'nicht ausgestellt')} · Status ${esc(driver.licenseStatus||'Nicht ausgestellt')}</p></div></div><div class="driver-overview-summary"><div class="stat"><div class="n">${cases.length}</div><div class="l">Fälle gesamt</div></div><div class="stat amber"><div class="n">${open.length}</div><div class="l">Offen / Prüfung</div></div><div class="stat green"><div class="n">${decided.length}</div><div class="l">Entschieden</div></div><div class="stat red"><div class="n">${penalties.length}</div><div class="l">Strafen</div></div><div class="stat ${penaltyPoints>=8?'amber':''}"><div class="n">${penaltyPoints} / 12</div><div class="l">Strafpunkte</div></div></div>`:'<div class="driver-overview-empty"><b>Noch keine Fahrer erfasst</b><br>Neue Fahrer erscheinen automatisch in dieser Übersicht.</div>'}</div>
+  ${driver?`<div class="grid cols-2"><div class="panel"><h2>Fälle nach <b>Kategorie</b></h2>${chart(categoryCounts)}</div><div class="panel"><h2>Verhängte <b>Strafen</b></h2>${chart(decisionCounts,true)}</div></div><div class="panel"><h2>Verknüpfte <b>Steward-Akten</b></h2><div style="overflow:auto"><table><thead><tr><th>STW-Nr.</th><th>Event / Session</th><th>Kategorie</th><th>Entscheidung</th><th>Punkte</th><th>Status</th></tr></thead><tbody>${caseRows||'<tr><td colspan="6"><div class="driver-overview-empty">Für diesen Fahrer sind noch keine Fälle hinterlegt.</div></td></tr>'}</tbody></table></div><div class="footer-note">Berücksichtigt werden Fälle als betroffener oder geschädigter Fahrer. Strafpunkte und Strafen zählen nur aus entschiedenen bzw. archivierten Fällen, in denen der Fahrer betroffen ist.</div></div>`:''}`;
+}
+
 /* ============================= DRIVERS ============================= */
 function pageDriverList(){
   return `
   <div class="pagehead">
     <div><div class="eyebrow">Fahrerkartei</div><h1>Fahrer</h1></div>
-    <div class="actions"><button class="btn primary" onclick="go('driverform')">+ Neuen Fahrer erfassen</button></div>
+    <div class="actions"><button class="btn" onclick="go('drivercases')">Fahrer Cases Overview</button><button class="btn primary" onclick="go('driverform')">+ Neuen Fahrer erfassen</button></div>
   </div>
   <div class="panel">
     <div class="searchbar">
@@ -1211,7 +1250,7 @@ function pageDriverForm(existing){
   return `
   <div class="pagehead">
     <div><div class="eyebrow">${isNew?'Neue Fahrerakte':'Fahrerakte'}</div><h1>${isNew?'Fahrer erfassen':esc(driverName(d))}</h1></div>
-    <div class="actions"><button class="btn" onclick="go('drivers')">← Zur Übersicht</button></div>
+    <div class="actions"><button class="btn" onclick="go('drivers')">← Zur Übersicht</button>${!isNew?`<button class="btn gold" onclick="go('drivercases','${d.id}')">Cases Overview</button>`:''}</div>
   </div>
 
   <div class="dossier">
