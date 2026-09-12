@@ -216,6 +216,11 @@ tr:hover td{background:rgba(255,255,255,0.02);}
 .tag.suspended{color:var(--amber);border-color:#5a4a1c;}
 .tag.revoked{color:#ff5a6b;border-color:#5a1c26;}
 .tag.none{color:var(--grey-2);border-color:var(--line);}
+.division-badge{display:inline-block;min-width:30px;padding:3px 6px;margin-right:8px;text-align:center;font:700 10px var(--mono);letter-spacing:.5px;border:1px solid;vertical-align:middle;}
+.division-badge.d1{color:#ff7a8a;border-color:#8f0c20;background:rgba(200,16,46,.14);}
+.division-badge.d2{color:#e6c65c;border-color:#806918;background:rgba(201,162,39,.14);}
+.division-badge.d3{color:#7cc3ff;border-color:#1c5a80;background:rgba(46,126,180,.14);}
+.division-badge.unknown{color:var(--grey);border-color:var(--line);background:rgba(255,255,255,.04);}
 .pts{font-family:var(--mono);font-weight:700;}
 .green-text{color:#6bd684;}
 .pts.warn{color:var(--amber);}
@@ -684,8 +689,15 @@ async function sendCaseDiscordNotification(id){
 function teamById(id){ return DB.teams.find(t=>t.id===id); }
 function driverById(id){ return DB.drivers.find(d=>d.id===id); }
 function driverName(d){ return d? (d.firstName+' '+d.lastName).trim() : '—'; }
-function teamOptions(selected, includeNone){
+function divisionBadge(d){
+  const division=String(d?.division||'').trim();
+  const match=division.match(/^(?:Division\s*)?([123])$/i);
+  const code=match?`D${match[1]}`:'—';
+  return `<span class="division-badge ${match?`d${match[1]}`:'unknown'}" title="${esc(division||'Keine Division')}" aria-label="${esc(division||'Keine Division')}">${code}</span>`;
+}
+function teamOptions(selected, includeNone, includeFreeDriver){
   let html = includeNone? `<option value="">— keine Angabe —</option>`:'';
+  if(includeFreeDriver) html = `<option value="" ${selected?'':'selected'}>Free Driver — kein Team</option>` + html;
   DB.teams.forEach(t=> html += `<option value="${t.id}" ${t.id===selected?'selected':''}>${esc(t.name)}</option>`);
   return html;
 }
@@ -1358,8 +1370,8 @@ function renderDriverTable(){
     const ptsClass = pts>=12?'crit':pts>=8?'warn':'';
     const ls = d.licenseStatus || 'Nicht ausgestellt';
     return `<tr class="rowlink" onclick="go('driverform','${d.id}')">
-      <td>${esc(driverName(d))} ${d.number? `<span style="color:var(--grey-2)">#${esc(d.number)}</span>`:''}</td>
-      <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'—'}</td>
+      <td>${divisionBadge(d)}${esc(driverName(d))} ${d.number? `<span style="color:var(--grey-2)">#${esc(d.number)}</span>`:''}</td>
+      <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'<span class="tag none">Free Driver</span>'}</td>
       <td class="pts">${esc(d.licenseNo||'—')}</td>
       <td><span class="tag ${licenseTagClass(ls)}">${esc(ls)}</span></td>
       <td class="pts ${ptsClass}">${pts} / 12</td>
@@ -1375,7 +1387,7 @@ function renderDriverTable(){
 
 function pageDriverForm(existing){
   const d = existing || {
-    id:null, firstName:'', lastName:'', number:'', nationality:'', dob:'', teamId:DB.teams[0]?.id||'',
+    id:null, firstName:'', lastName:'', number:'', nationality:'', dob:'', teamId:'',
     division:DIVISIONS[0], platform:PLATFORMS[0], simId:'', discord:'', email:'', debutDate:today(), licenseClass:LICENSE_CLASS[0],
     photoUrl:'', notes:'', licenseNo:'', licenseStatus:'Nicht ausgestellt', licenseIssued:'', licenseExpiry:'',
     rulesAccepted:false, history:[]
@@ -1417,7 +1429,7 @@ function pageDriverForm(existing){
       <div class="grid cols-3">
         <div class="field"><label>Nationalität</label><input id="d_nationality" type="text" value="${esc(d.nationality)}"></div>
         <div class="field"><label>Geburtsdatum</label><input id="d_dob" type="date" value="${esc(d.dob)}"></div>
-        <div class="field"><label>Team</label><select id="d_teamId" onchange="onDriverTeamChange()">${teamOptions(d.teamId,false)}</select></div>
+        <div class="field"><label>Team</label><select id="d_teamId" onchange="onDriverTeamChange()">${teamOptions(d.teamId,false,true)}</select></div>
       </div>
 
       <div class="sectiontitle">Sim-Racing-Profil</div>
@@ -1531,6 +1543,7 @@ async function setLicenseStatus(id, status){
 
 /* ============================= TEAMS ============================= */
 function pageTeams(){
+  const freeDrivers = DB.drivers.filter(d=>!d.teamId).sort((a,b)=>driverName(a).localeCompare(driverName(b)));
   const cards = DB.teams.map(t=>{
     const roster = DB.drivers.filter(d=>d.teamId===t.id);
     const caseCount = DB.cases.filter(c=>c.teamInvolved===t.id).length;
@@ -1548,15 +1561,32 @@ function pageTeams(){
       </div>
       <div class="sectiontitle" style="margin:14px 0 8px;">Aufstellung (${roster.length})</div>
       ${roster.length? roster.map(d=>`<div class="rowlink" onclick="go('driverform','${d.id}')" style="padding:6px 4px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line);">
-        <span>${esc(driverName(d))} ${d.number?('#'+esc(d.number)):''}</span>
+        <span>${divisionBadge(d)}${esc(driverName(d))} ${d.number?('#'+esc(d.number)):''}</span>
         <span class="tag ${licenseTagClass(d.licenseStatus||'Nicht ausgestellt')}">${esc(d.licenseStatus||'Nicht ausgestellt')}</span>
       </div>`).join('') : `<div style="color:var(--grey-2);font-size:13px;">Noch keine Fahrer zugeordnet.</div>`}
     </div>`;
   }).join('');
+  const freeDriversCard = `<div class="panel" style="border-top:3px solid var(--gold);padding-top:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        <div class="teamchip" style="font-size:16px;font-weight:800;"><span class="dot" style="background:var(--gold)"></span>Free Drivers</div>
+        <div style="color:var(--grey-2);font-size:12px;margin-top:2px;">Noch keinem Team zugeordnet</div>
+      </div>
+      <div style="text-align:right;font-family:var(--mono);">
+        <div style="font-size:20px;font-weight:700;">${freeDrivers.length}</div>
+        <div style="font-size:10px;color:var(--grey-2);text-transform:uppercase;">Fahrer</div>
+      </div>
+    </div>
+    <div class="sectiontitle" style="margin:14px 0 8px;">Fahrerübersicht</div>
+    ${freeDrivers.length? freeDrivers.map(d=>`<div class="rowlink" onclick="go('driverform','${d.id}')" style="padding:6px 4px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line);">
+      <span>${divisionBadge(d)}${esc(driverName(d))} ${d.number?('#'+esc(d.number)):''}</span>
+      <span class="tag ${licenseTagClass(d.licenseStatus||'Nicht ausgestellt')}">${esc(d.licenseStatus||'Nicht ausgestellt')}</span>
+    </div>`).join('') : `<div style="color:var(--grey-2);font-size:13px;">Keine freien Fahrer erfasst.</div>`}
+  </div>`;
 
   return `
   <div class="pagehead"><div><div class="eyebrow">Konstrukteure</div><h1>Teams — Saison 2026</h1></div></div>
-  <div class="grid cols-3">${cards}</div>
+  <div class="grid cols-3">${freeDriversCard}${cards}</div>
   `;
 }
 
