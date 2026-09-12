@@ -117,6 +117,21 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 @media(max-width:760px){.dashboard-hero{margin:-18px -18px 20px;padding:32px 22px;min-height:420px;}.dashboard-hero h1{font-size:42px;}.dashboard-quicklinks{grid-template-columns:repeat(2,1fr);}.dashboard-hero-meta{gap:15px;}}
 @media(max-width:480px){.dashboard-quicklinks{grid-template-columns:1fr;}.dashboard-hero::after{font-size:150px;right:-4px;}.dashboard-hero p{font-size:14px;}}
 
+/* ---------- Jarves case assistant ---------- */
+.jarves-panel{margin:22px 0 24px;padding:0;background:linear-gradient(135deg,rgba(20,25,29,.96),rgba(18,18,21,.94));border:1px solid #36505a;border-left:4px solid #54d9e8;position:relative;overflow:hidden;}
+.jarves-panel::after{content:"J";position:absolute;right:20px;top:-30px;color:rgba(84,217,232,.08);font:900 150px/1 var(--font);font-style:italic;pointer-events:none;}
+.jarves-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;border-bottom:1px solid #2d4148;position:relative;z-index:1;}
+.jarves-identity{display:flex;align-items:center;gap:12px;}
+.jarves-avatar{width:38px;height:38px;display:grid;place-items:center;border:1px solid #54d9e8;color:#54d9e8;font:700 16px var(--mono);box-shadow:0 0 18px rgba(84,217,232,.16);}
+.jarves-head strong{font-size:17px;letter-spacing:.3px;}.jarves-head small{display:block;color:#91a9af;font:10px var(--mono);letter-spacing:1.2px;text-transform:uppercase;margin-top:2px;}
+.jarves-status{color:#79e5ef;font:10px var(--mono);letter-spacing:1px;text-transform:uppercase;}
+.jarves-body{padding:18px;position:relative;z-index:1;}.jarves-body>p{margin:0 0 14px;color:#b9c5c8;font-size:13px;}
+.jarves-input{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;}.jarves-input textarea{min-height:78px;margin:0;background:#111a1e;border-color:#36505a;}.jarves-input .btn{height:42px;white-space:nowrap;}
+.jarves-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}.jarves-actions .btn{font-size:12px;padding:7px 12px;border-color:#36505a;}
+.jarves-result{display:none;margin-top:16px;padding:14px 16px;background:rgba(8,13,15,.58);border:1px solid #2d4148;color:#dce7e9;font-size:13px;line-height:1.55;}.jarves-result.is-visible{display:block;animation:jarvesReveal .24s ease both;}.jarves-result h4{margin:0 0 8px;color:#79e5ef;font:700 11px var(--mono);letter-spacing:1.2px;text-transform:uppercase;}.jarves-result p{margin:7px 0;}.jarves-result ul{margin:7px 0;padding-left:20px;}.jarves-result li{margin:4px 0;}.jarves-note{color:#8ea1a6;font-size:11px;}
+@keyframes jarvesReveal{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:640px){.jarves-head{align-items:flex-start;flex-direction:column;}.jarves-status{margin-left:50px;}.jarves-input{grid-template-columns:1fr;}}
+
 /* ---------- top bar within main ---------- */
 .pagehead{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:14px;}
 .pagehead h1{
@@ -1146,6 +1161,109 @@ function pageDashboard(){
   `;
 }
 
+function jarvesText(value){
+  return String(value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+function jarvesWords(value){
+  return new Set(jarvesText(value).split(/[^a-z0-9äöüß]+/).filter(word=>word.length>3));
+}
+function jarvesCaseDraft(caseData){
+  const value=id=>document.getElementById(id)?.value?.trim()||'';
+  const driverId=document.getElementById('f_driverInvolved')?.value||caseData.driverInvolved||'';
+  return {
+    ...caseData,
+    event:value('f_event')||caseData.event||'',
+    sessionType:value('f_sessionType')||caseData.sessionType||'',
+    category:value('f_category')||caseData.category||'',
+    incidentLap:value('f_incidentLap')||caseData.incidentLap||'',
+    driverInvolved:driverId,
+    description:value('f_description')||caseData.description||'',
+    investigationNotes:value('f_investigationNotes')||caseData.investigationNotes||'',
+    regulationBreach:value('f_regulationBreach')||caseData.regulationBreach||''
+  };
+}
+function jarvesMatchingRules(draft){
+  const source=jarvesText(`${draft.category} ${draft.description} ${draft.investigationNotes}`);
+  const keywordGroups=[
+    ['Überholmanöver',['uberholen','überholen','divebomb','angriff','überlappung']],
+    ['Verteidigung der Position',['verteidigen','blockieren','abwehren','spurwechsel']],
+    ['Verursachen von Kollisionen',['kollision','kontakt','crash','unfall','zusammenstoss','zusammenstoß']],
+    ['Auffahrunfälle',['auffahren','hinten','bremsen','heck']],
+    ['Verlassen der Strecke und Vorteilserlangung',['abkürzen','strecke verlassen','track limits','vorteil']],
+    ['Rückkehr auf die Strecke',['rückkehr','zurück auf die strecke','wieder auf die strecke']],
+    ['Bremsen und Brake Checking',['brake check','bremsprüfung','unerwartet bremsen']],
+    ['Unsportliches Verhalten auf der Strecke',['unsportlich','provokation','absicht','gegen die fahrtrichtung']],
+    ['Rennstart',['start','formation','jump start','frühstart']],
+    ['Turn 1 und erste Rennphase',['erste kurve','turn 1','erste runde','erste phase']]
+  ];
+  const matches=keywordGroups.filter(([,keywords])=>keywords.some(keyword=>source.includes(jarvesText(keyword)))).map(([title])=>RULEBOOK_SECTIONS.find(section=>section.title===title)).filter(Boolean);
+  if(!matches.length){
+    const categoryMatch=RULEBOOK_SECTIONS.find(section=>source.includes(jarvesText(section.title)));
+    if(categoryMatch) matches.push(categoryMatch);
+  }
+  return matches.slice(0,3);
+}
+function jarvesRepeatAnalysis(draft){
+  if(!draft.driverInvolved) return {cases:[],score:0};
+  const currentWords=jarvesWords(`${draft.category} ${draft.description}`);
+  const previous=DB.cases.filter(item=>item.id!==draft.id&&item.driverInvolved===draft.driverInvolved&&(item.status==='Entschieden'||item.status==='Archiviert')).map(item=>{
+    const oldWords=jarvesWords(`${item.category} ${item.description}`);
+    const shared=[...currentWords].filter(word=>oldWords.has(word)).length;
+    const sameCategory=jarvesText(item.category)===jarvesText(draft.category)&&Boolean(draft.category);
+    return {...item,shared,sameCategory,score:(sameCategory?3:0)+Math.min(shared,4)};
+  }).filter(item=>item.score>0).sort((a,b)=>b.score-a.score);
+  return {cases:previous,score:previous[0]?.score||0};
+}
+function jarvesProfessionalText(input,draft){
+  const clean=String(input||'').trim().replace(/\s+/g,' ');
+  if(!clean) return '';
+  const lead=draft.driverInvolved?`Der Fahrer ${driverName(driverById(draft.driverInvolved))} `:'Der betroffene Fahrer ';
+  const context=[draft.event,draft.sessionType,draft.incidentLap].filter(Boolean).join(', ');
+  const opening=context?`Im Rahmen von ${context} kam es zu folgendem Vorfall: `:'Im Rahmen der Rennsession kam es zu folgendem Vorfall: ';
+  let text=opening+clean.charAt(0).toUpperCase()+clean.slice(1);
+  if(!/[.!?]$/.test(text)) text+='.';
+  if(draft.category) text+=` Der Sachverhalt wird der Kategorie „${draft.category}“ zugeordnet und ist anhand der verfügbaren Beweismittel sowie der konkreten Fahrzeugpositionen zu bewerten.`;
+  return text.replace('Der betroffene Fahrer ',lead);
+}
+function jarvesResult(title,content){
+  const result=document.getElementById('jarves_result');
+  if(!result) return;
+  result.innerHTML=`<h4>${esc(title)}</h4>${content}`;
+  result.classList.add('is-visible');
+}
+function jarvesRewrite(){
+  const draft=jarvesCaseDraft(DB.cases.find(item=>item.id===ROUTE.id)||{});
+  const input=document.getElementById('jarves_prompt')?.value.trim()||draft.description;
+  if(!input){ jarvesResult('Jarves wartet auf Text','<p>Bitte zuerst eine kurze Beschreibung eingeben.</p>'); return; }
+  const professional=jarvesProfessionalText(input,draft);
+  const description=document.getElementById('f_description');
+  if(description) description.value=professional;
+  jarvesResult('Professionell formulierte Fassung',`<p>${nl2br(professional)}</p><p class="jarves-note">Der Text wurde in die Beschreibung der Akte übernommen und kann dort weiter angepasst werden.</p>`);
+}
+function jarvesAnalyzeCurrent(){
+  const draft=jarvesCaseDraft(DB.cases.find(item=>item.id===ROUTE.id)||{});
+  const rules=jarvesMatchingRules(draft), repeat=jarvesRepeatAnalysis(draft);
+  const ruleHtml=rules.length?`<p><b>Voraussichtlich relevante Regelstellen:</b></p><ul>${rules.map(rule=>`<li><b>${esc(rule.title)}</b> — ${esc(rule.text)}</li>`).join('')}</ul>`:'<p>Keine eindeutige Regelstelle erkannt. Bitte Sachverhalt und Beweismittel präzisieren.</p>';
+  const repeatHtml=repeat.cases.length?`<p><b>Hinweis auf möglichen Wiederholungsfall:</b> ${repeat.cases.length} frühere Akte mit vergleichbaren Merkmalen.</p><ul>${repeat.cases.slice(0,3).map(item=>`<li>${esc(item.stw||'Akte')} · ${esc(item.category||'ohne Kategorie')} · ${esc(item.status||'ohne Status')}</li>`).join('')}</ul>`:'<p><b>Kein Wiederholungsfall erkannt.</b> Es wurde keine passende entschiedene oder archivierte Akte für diesen Fahrer gefunden.</p>';
+  jarvesResult('Fallanalyse',`${ruleHtml}${repeatHtml}<p class="jarves-note">Jarves liefert eine redaktionelle Vorprüfung. Die endgültige Bewertung bleibt bei den Stewards.</p>`);
+}
+function jarvesApplyRules(){
+  const draft=jarvesCaseDraft(DB.cases.find(item=>item.id===ROUTE.id)||{}), rules=jarvesMatchingRules(draft), field=document.getElementById('f_regulationBreach');
+  if(!rules.length){ jarvesResult('Regelwerk','<p>Keine eindeutige Regelstelle erkannt. Beschreibe Manöver, Kontakt, Strecke und Folge möglichst konkret.</p>'); return; }
+  const value=rules.map(rule=>rule.title).join(' · ');
+  if(field) field.value=value;
+  jarvesResult('Regelwerk zugeordnet',`<p>${rules.map(rule=>`<b>${esc(rule.title)}</b>: ${esc(rule.text)}`).join('</p><p>')}</p><p class="jarves-note">Die Zuordnung wurde in das Feld „Klarer Regelverstoß“ übernommen.</p>`);
+}
+function jarvesAnalyzeAll(){
+  const draft=jarvesCaseDraft(DB.cases.find(item=>item.id===ROUTE.id)||{}), driverId=draft.driverInvolved;
+  if(!driverId){ jarvesResult('Alle Fälle analysieren','<p>Bitte zuerst einen betroffenen Fahrer auswählen.</p>'); return; }
+  const related=casesForDriver(driverId).filter(item=>item.driverInvolved===driverId), decided=related.filter(item=>item.status==='Entschieden'||item.status==='Archiviert'), points=decided.reduce((sum,item)=>sum+(parseInt(item.penaltyPoints)||0),0);
+  jarvesResult('Fahrerakte analysiert',`<p><b>${esc(driverName(driverById(driverId)))}</b> erscheint in ${related.length} Akte(n), davon ${decided.length} entschieden oder archiviert.</p><p>Gesammelte Strafpunkte aus entschiedenen Akten: <b>${points}</b>.</p>${decided.length?`<ul>${decided.slice(0,6).map(item=>`<li>${esc(item.stw||'Akte')} · ${esc(item.category||'ohne Kategorie')} · ${esc(item.decision||'ohne Entscheidung')}</li>`).join('')}</ul>`:'<p>Noch keine abgeschlossenen Fälle zur Wiederholungsprüfung vorhanden.</p>'}<p class="jarves-note">Diese Übersicht unterstützt die Prüfung und ersetzt keine Steward-Entscheidung.</p>`);
+}
+function jarvesCasePanel(caseData){
+  return `<section class="jarves-panel"><div class="jarves-head"><div class="jarves-identity"><div class="jarves-avatar">J</div><div><strong>Jarves</strong><small>Fallanalyse-Agent · lokal verfügbar</small></div></div><span class="jarves-status">Bereit für Analyse</span></div><div class="jarves-body"><p>Gib eine Kurzfassung ein. Jarves formuliert sie professionell, sucht passende Regelstellen und prüft mögliche Wiederholungsfälle.</p><div class="jarves-input"><textarea id="jarves_prompt" placeholder="z. B. Fahrer drängte Gegner in Kurve 4 von der Strecke und behielt die Position"></textarea><button class="btn primary" onclick="jarvesRewrite()">Text formulieren</button></div><div class="jarves-actions"><button class="btn" onclick="jarvesApplyRules()">Regelwerk zuordnen</button><button class="btn" onclick="jarvesAnalyzeCurrent()">Diesen Fall analysieren</button><button class="btn" onclick="jarvesAnalyzeAll()">Alle Fälle des Fahrers</button></div><div id="jarves_result" class="jarves-result" aria-live="polite"></div></div></section>`;
+}
+
 /* ============================= CASE FORM (AKTE) ============================= */
 function pageCaseForm(existing){
   const c = existing || {
@@ -1217,6 +1335,8 @@ function pageCaseForm(existing){
         <div class="field"><label>Klarer Regelverstoß (Artikel-Referenz)</label><input id="f_regulationBreach" type="text" value="${esc(c.regulationBreach)}" placeholder="z. B. Art. 27.3 Sportliches Reglement"></div>
         <div class="field"><label>Vergleichbare frühere Fälle (Präzedenzfall)</label><input id="f_precedent" type="text" value="${esc(c.precedent)}" placeholder="z. B. STW-378945"></div>
       </div>
+
+      ${jarvesCasePanel(c)}
 
       ${isNew ? '<div class="panel" style="margin-top:26px;margin-bottom:0;"><h2>Akte zuerst <b>anlegen</b></h2><p style="margin:0;color:var(--grey);">Trage die Grunddaten und eine objektive Fallbeschreibung ein. Nach dem Anlegen wird die Akte mit Status „Neu“ gespeichert und kann anschließend vollständig ausgewertet werden.</p></div>' : '<div class="sectiontitle">Entscheidung</div>'}
       ${isNew ? '' : `
