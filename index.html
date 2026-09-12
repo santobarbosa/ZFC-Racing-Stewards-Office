@@ -1178,6 +1178,7 @@ function jarvesCaseDraft(caseData){
     incidentLap:value('f_incidentLap')||caseData.incidentLap||'',
     driverInvolved:driverId,
     description:value('f_description')||caseData.description||'',
+    evidenceLink:value('f_evidenceLink')||caseData.evidenceLink||'',
     investigationNotes:value('f_investigationNotes')||caseData.investigationNotes||'',
     regulationBreach:value('f_regulationBreach')||caseData.regulationBreach||''
   };
@@ -1217,13 +1218,14 @@ function jarvesRepeatAnalysis(draft){
 function jarvesProfessionalText(input,draft){
   const clean=String(input||'').trim().replace(/\s+/g,' ');
   if(!clean) return '';
-  const lead=draft.driverInvolved?`Der Fahrer ${driverName(driverById(draft.driverInvolved))} `:'Der betroffene Fahrer ';
+  const driver=draft.driverInvolved?driverName(driverById(draft.driverInvolved)):'der betroffene Fahrer';
   const context=[draft.event,draft.sessionType,draft.incidentLap].filter(Boolean).join(', ');
-  const opening=context?`Im Rahmen von ${context} kam es zu folgendem Vorfall: `:'Im Rahmen der Rennsession kam es zu folgendem Vorfall: ';
-  let text=opening+clean.charAt(0).toUpperCase()+clean.slice(1);
-  if(!/[.!?]$/.test(text)) text+='.';
-  if(draft.category) text+=` Der Sachverhalt wird der Kategorie „${draft.category}“ zugeordnet und ist anhand der verfügbaren Beweismittel sowie der konkreten Fahrzeugpositionen zu bewerten.`;
-  return text.replace('Der betroffene Fahrer ',lead);
+  const setting=context?` während ${context}`:' während der Rennsession';
+  const incident=clean.charAt(0).toUpperCase()+clean.slice(1).replace(/[.!?]+$/,'')+'.';
+  const category=draft.category?` Der Vorgang wird vorläufig der Kategorie „${draft.category}“ zugeordnet.`:'';
+  const evidence=draft.evidenceLink?` Als Beweismittel ist ein Replay- oder Telemetrieverweis hinterlegt; dieser ist bei der abschließenden Würdigung mit den Fahrzeugpositionen, Abständen und Zeitverlusten abzugleichen.`:' Die abschließende Bewertung soll sich auf Replay, Onboard-Aufnahmen, Telemetrie und die feststellbaren Fahrzeugpositionen stützen.';
+  const rule=draft.regulationBreach?` Die Prüfung erfolgt insbesondere im Hinblick auf die eingetragene Regelreferenz „${draft.regulationBreach}“.`:' Die einschlägige Regelstelle und der konkrete Strafrahmen sind im weiteren Prüfungsverlauf zu bestimmen.';
+  return `Sachverhalt\n${driver} war${setting} an dem nachfolgend beschriebenen Vorfall beteiligt. ${incident}${category}\n\nVorläufige Würdigung\nNach derzeitiger Aktenlage ist zu prüfen, ob das beschriebene Verhalten kontrolliert, vorhersehbar und vermeidbar war. Dabei sind die Ausgangssituation, der verfügbare Raum, die Geschwindigkeit, die Reaktion der beteiligten Fahrer und die unmittelbare Folge des Manövers getrennt voneinander zu bewerten.${evidence}${rule}\n\nPrüfhinweis\nDiese Darstellung beruht auf der eingegebenen Kurzfassung und stellt noch keine abschließende Schuld- oder Sanktionsentscheidung dar. Aussagen, Videoaufnahmen und weitere Beweismittel sollten vor der Entscheidung mit dem beschriebenen Ablauf abgeglichen werden.`;
 }
 function jarvesResult(title,content){
   const result=document.getElementById('jarves_result');
@@ -1324,6 +1326,8 @@ function pageCaseForm(existing){
         </div>
       </div>
 
+      ${jarvesCasePanel(c)}
+
       <div class="sectiontitle">Sachverhalt</div>
       <div class="field"><label>Beschreibung des Vorfalls</label><textarea id="f_description" placeholder="Objektive Schilderung des Vorfalls …">${esc(c.description)}</textarea></div>
       <div class="grid cols-2">
@@ -1335,8 +1339,6 @@ function pageCaseForm(existing){
         <div class="field"><label>Klarer Regelverstoß (Artikel-Referenz)</label><input id="f_regulationBreach" type="text" value="${esc(c.regulationBreach)}" placeholder="z. B. Art. 27.3 Sportliches Reglement"></div>
         <div class="field"><label>Vergleichbare frühere Fälle (Präzedenzfall)</label><input id="f_precedent" type="text" value="${esc(c.precedent)}" placeholder="z. B. STW-378945"></div>
       </div>
-
-      ${jarvesCasePanel(c)}
 
       ${isNew ? '<div class="panel" style="margin-top:26px;margin-bottom:0;"><h2>Akte zuerst <b>anlegen</b></h2><p style="margin:0;color:var(--grey);">Trage die Grunddaten und eine objektive Fallbeschreibung ein. Nach dem Anlegen wird die Akte mit Status „Neu“ gespeichert und kann anschließend vollständig ausgewertet werden.</p></div>' : '<div class="sectiontitle">Entscheidung</div>'}
       ${isNew ? '' : `
