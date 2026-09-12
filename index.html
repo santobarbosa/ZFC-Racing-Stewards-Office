@@ -363,7 +363,12 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
 .doc p{font-size:13.5px;line-height:1.55;margin:6px 0;}
 .doc .sig{display:flex;justify-content:space-between;margin-top:50px;gap:20px;}
 .doc .sigbox{flex:1;text-align:center;font-size:12px;}
-.doc .sigline{border-top:1px solid #333;margin-top:46px;padding-top:6px;}
+.doc .sigbox:only-child{max-width:260px;margin-left:auto;margin-right:auto;}
+.doc .signature-animation{height:46px;display:flex;align-items:flex-end;justify-content:center;margin-bottom:4px;}
+.doc .signature-animation svg{width:150px;height:42px;overflow:visible;}
+.doc .signature-animation path{fill:none;stroke:#111;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:360;stroke-dashoffset:360;animation:signatureDraw .9s ease-out forwards;}
+@keyframes signatureDraw{to{stroke-dashoffset:0;}}
+.doc .sigline{border-top:1px solid #333;padding-top:6px;}
 .doc .foot{margin-top:40px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:10px;font-family:'JetBrains Mono',monospace;}
 .doc .stampline{font-family:'JetBrains Mono',monospace;letter-spacing:3px;color:#c8102e;font-weight:700;border:2px solid #c8102e;display:inline-block;padding:4px 12px;margin-top:6px;}
 .license-certificate{border:8px solid #111;padding:18px;outline:2px solid #c9a227;outline-offset:-14px;}
@@ -1852,9 +1857,15 @@ async function resetAllData(){
 function printDoc(html){
   document.getElementById('printArea').innerHTML = html;
   document.body.classList.add('printing');
-  setTimeout(()=>{ window.print(); }, 60);
+  setTimeout(()=>{ window.print(); }, 950);
 }
 window.onafterprint = ()=> document.body.classList.remove('printing');
+
+function signatureHtml(name, role){
+  const cleanName = String(name||'').trim();
+  if(!cleanName) return '';
+  return `<div class="sigbox"><div class="signature-animation" aria-label="Unterschrift ${esc(cleanName)}"><svg viewBox="0 0 180 50" role="img" aria-hidden="true"><path d="M8 35 C18 8 23 42 32 25 S45 11 50 33 C57 45 63 7 70 29 S85 44 91 21 C98 4 101 42 108 29 S122 14 126 30 C132 43 143 14 151 25 C158 33 164 19 172 20"/></svg></div><div class="sigline">${esc(cleanName)}<br>${esc(role)}</div></div>`;
+}
 
 function printCaseReport(id){
   const c = DB.cases.find(x=>x.id===id); if(!c) return;
@@ -1900,16 +1911,13 @@ function printCaseReport(id){
 
     <h3>6. Status der Fahrlizenz</h3>
     <p><span class="stampline">${esc(c.licenseStatusAfter || 'Bleibt aktiv')}</span>${c.licenseStatusDetail? '  — '+esc(c.licenseStatusDetail):''}</p>
-    <h3>7. Aktenverlauf</h3>
-    ${c.history?.length? `<table>${c.history.map(h=>`<tr><td class="k">${fmtDateTime(h.ts)}</td><td>${esc(h.text)}</td></tr>`).join('')}</table>`:'<p>Keine Einträge vorhanden.</p>'}
-
-    <h3>8. Schriftliche Verwarnungen</h3>
+    <h3>7. Schriftliche Verwarnungen</h3>
     ${c.warningDocuments?.length? c.warningDocuments.map(warning=>`<table><tr><td class="k">Datum</td><td>${esc(warning.createdAt||'—')}</td></tr><tr><td class="k">Kategorie</td><td>${esc(warning.category)}</td></tr><tr><td class="k">Fahrer</td><td>${esc(warning.driverName||'—')}</td></tr></table><p>${nl2br(warning.text)||'—'}</p>`).join(''):'<p>Keine schriftliche Verwarnung abgelegt.</p>'}
 
     <div class="sig">
-      <div class="sigbox"><div class="sigline">${esc(c.stewardChairman)||'—'}<br>Vorsitzender Steward</div></div>
-      <div class="sigbox"><div class="sigline">${esc(c.steward2)||'—'}<br>Steward</div></div>
-      <div class="sigbox"><div class="sigline">${esc(c.steward3)||'—'}<br>Steward</div></div>
+      ${signatureHtml(c.stewardChairman,'Vorsitzender Steward')}
+      ${signatureHtml(c.steward2,'Steward')}
+      ${signatureHtml(c.steward3,'Steward')}
     </div>
 
     <div class="foot">ZFC RACING STEWARD-SYSTEM // Automatisch generiert am ${fmtDateTime(Date.now())} // Aktenstatus: ${esc(c.status)}</div>
