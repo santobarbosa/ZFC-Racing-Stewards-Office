@@ -122,10 +122,11 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 .jarves-panel::after{content:"J";position:absolute;right:20px;top:-30px;color:rgba(84,217,232,.08);font:900 150px/1 var(--font);font-style:italic;pointer-events:none;}
 .jarves-panel::before{content:"";position:absolute;inset:-3px;padding:2px;border-radius:4px;background:conic-gradient(from 0deg,transparent 0 72deg,#54d9e8 96deg,#b9fbff 108deg,#54d9e8 120deg,transparent 145deg 360deg);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;animation:jarvesBorderRun 7s linear infinite;pointer-events:none;z-index:2;}
 .jarves-panel.is-closed{display:none;}
-.jarves-launcher{display:flex;align-items:center;gap:12px;margin:22px 0 24px;}
+.jarves-launcher{display:flex;align-items:center;justify-content:center;gap:18px;margin:28px 0 30px;min-height:108px;position:relative;}
 .jarves-launcher.is-hidden{display:none;}
-.jarves-launch-button{width:66px;height:66px;border-radius:50%;border:2px solid #54d9e8;background:radial-gradient(circle,#b9fbff 0 6%,#54d9e8 7% 12%,#10252d 13% 47%,#071116 48%);box-shadow:0 0 0 5px rgba(84,217,232,.08),0 0 24px rgba(84,217,232,.45);cursor:pointer;position:relative;animation:jarvesReactorSpin 8s linear infinite;}
-.jarves-launch-button::after{content:"";position:absolute;inset:10px;border:1px dashed rgba(185,251,255,.8);border-radius:50%;animation:jarvesReactorSpinReverse 4s linear infinite;}
+.jarves-launch-button{width:104px;height:104px;border-radius:50%;border:2px solid #54d9e8;background:radial-gradient(circle,#e8ffff 0 5%,#54d9e8 6% 11%,#10252d 12% 39%,transparent 40%),conic-gradient(from 0deg,#54d9e8 0 7deg,transparent 8deg 24deg,#b9fbff 25deg 28deg,transparent 29deg 48deg,#54d9e8 49deg 54deg,transparent 55deg 88deg,#54d9e8 89deg 96deg,transparent 97deg 120deg,#b9fbff 121deg 124deg,transparent 125deg 180deg,#54d9e8 181deg 188deg,transparent 189deg 240deg,#b9fbff 241deg 244deg,transparent 245deg 300deg,#54d9e8 301deg 308deg,transparent 309deg 360deg);box-shadow:0 0 0 7px rgba(84,217,232,.08),0 0 28px rgba(84,217,232,.5),inset 0 0 18px rgba(84,217,232,.45);cursor:pointer;position:relative;animation:jarvesReactorSpin 5s linear infinite;}
+.jarves-launch-button::before{content:"";position:absolute;inset:18px;border:1px solid rgba(185,251,255,.75);border-radius:50%;box-shadow:0 0 12px rgba(185,251,255,.5);animation:jarvesReactorSpinReverse 2.2s linear infinite;}
+.jarves-launch-button::after{content:"";position:absolute;inset:-10px;border:1px dashed rgba(185,251,255,.8);border-radius:50%;animation:jarvesReactorSpinReverse 3.2s linear infinite;}
 .jarves-launch-copy{color:#b9c5c8;font-size:13px;}.jarves-launch-copy strong{display:block;color:#79e5ef;font-size:15px;}.jarves-launch-copy span{display:block;color:#8ea1a6;font-size:11px;margin-top:2px;}
 .jarves-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;border-bottom:1px solid #2d4148;position:relative;z-index:1;}
 .jarves-identity{display:flex;align-items:center;gap:12px;}
@@ -137,6 +138,7 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 .jarves-input{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;}.jarves-input textarea{min-height:78px;margin:0;background:#111a1e;border-color:#36505a;}.jarves-input .btn{height:42px;white-space:nowrap;}
 .jarves-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}.jarves-actions .btn{font-size:12px;padding:7px 12px;border-color:#36505a;}
 .jarves-result{display:none;margin-top:16px;padding:14px 16px;background:rgba(8,13,15,.58);border:1px solid #2d4148;color:#dce7e9;font-size:13px;line-height:1.55;}.jarves-result.is-visible{display:block;animation:jarvesReveal .24s ease both;}.jarves-result h4{margin:0 0 8px;color:#79e5ef;font:700 11px var(--mono);letter-spacing:1.2px;text-transform:uppercase;}.jarves-result p{margin:7px 0;}.jarves-result ul{margin:7px 0;padding-left:20px;}.jarves-note{color:#8ea1a6;font-size:11px;}
+.jarves-analysis-hints{display:none;margin-top:14px;padding:14px 16px;border:1px solid #36505a;background:rgba(84,217,232,.06);color:#c7e9ed;font-size:13px;line-height:1.55;}.jarves-analysis-hints.is-visible{display:block;animation:jarvesReveal .24s ease both;}.jarves-analysis-hints h4{margin:0 0 8px;color:#79e5ef;font:700 11px var(--mono);letter-spacing:1.2px;text-transform:uppercase;}.jarves-analysis-hints p{margin:7px 0;}.jarves-analysis-hints ul{margin:7px 0;padding-left:20px;}
 .jarves-output{width:100%;min-height:260px;margin-top:16px;background:#0b1215;border:1px solid #36505a;color:#dce7e9;font:13px/1.6 var(--font);padding:14px;resize:vertical;}.jarves-copy-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;}.jarves-copy-row .jarves-note{margin:0;}
 @keyframes jarvesReveal{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 @keyframes jarvesBorderRun{to{transform:rotate(360deg)}}
@@ -144,6 +146,13 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 @keyframes jarvesReactorSpinReverse{to{transform:rotate(-360deg)}}
 @keyframes jarvesWelcome{0%{opacity:0;transform:translateY(8px) scale(.96)}35%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-8px) scale(1.02)}}
 .jarves-welcome{display:none;color:#b9fbff;font:700 13px var(--mono);letter-spacing:.8px;margin:0 0 10px;}.jarves-welcome.is-playing{display:block;animation:jarvesWelcome 2.1s ease both;}
+.case-opening-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(8,28,36,.98),rgba(3,8,11,.99) 68%);color:#dffcff;overflow:hidden;}
+.case-opening-overlay::before{content:"";position:absolute;inset:8%;border:1px solid rgba(84,217,232,.16);box-shadow:0 0 80px rgba(84,217,232,.08) inset;transform:perspective(500px) rotateX(58deg) scale(1.3);animation:openingGrid 3s linear infinite;}
+.case-opening-stage{position:relative;z-index:1;width:min(660px,calc(100% - 36px));text-align:center;}
+.case-opening-reactor{width:190px;height:190px;margin:0 auto 28px;border-radius:50%;position:relative;background:radial-gradient(circle,#f2ffff 0 4%,#54d9e8 5% 10%,#123741 11% 27%,transparent 28%),conic-gradient(from 0deg,transparent 0 8deg,#54d9e8 9deg 14deg,transparent 15deg 33deg,#b9fbff 34deg 39deg,transparent 40deg 62deg,#54d9e8 63deg 71deg,transparent 72deg 102deg,#54d9e8 103deg 110deg,transparent 111deg 153deg,#b9fbff 154deg 160deg,transparent 161deg 208deg,#54d9e8 209deg 216deg,transparent 217deg 270deg,#b9fbff 271deg 277deg,transparent 278deg 330deg,#54d9e8 331deg 340deg,transparent 341deg);border:2px solid #54d9e8;box-shadow:0 0 0 12px rgba(84,217,232,.06),0 0 40px rgba(84,217,232,.68),0 0 110px rgba(84,217,232,.28),inset 0 0 26px rgba(84,217,232,.7);animation:jarvesReactorSpin 4.8s linear infinite;}
+.case-opening-reactor::before,.case-opening-reactor::after{content:"";position:absolute;border:1px solid rgba(185,251,255,.82);border-radius:50%;inset:20px;box-shadow:0 0 18px rgba(185,251,255,.45);animation:jarvesReactorSpinReverse 2.4s linear infinite;}.case-opening-reactor::after{inset:-20px;border-style:dashed;opacity:.7;animation-duration:3.5s;}
+.case-opening-title{margin:0;color:#b9fbff;font:700 clamp(18px,3vw,28px) var(--mono);letter-spacing:1px;text-transform:uppercase;text-shadow:0 0 16px rgba(84,217,232,.65);}.case-opening-copy{max-width:570px;margin:12px auto 0;color:#9fc9ce;font-size:15px;line-height:1.5;}.case-opening-status{margin-top:24px;color:#79e5ef;font:11px var(--mono);letter-spacing:1.4px;text-transform:uppercase;}.case-opening-progress{height:7px;margin:12px auto 0;max-width:470px;border:1px solid #36505a;background:#0b1215;overflow:hidden;}.case-opening-progress span{display:block;width:0;height:100%;background:linear-gradient(90deg,#54d9e8,#b9fbff);box-shadow:0 0 14px #54d9e8;}.case-opening-overlay.is-loading .case-opening-reactor{width:116px;height:116px;margin-bottom:24px;animation-duration:2.2s;}.case-opening-overlay.is-loading .case-opening-title{font-size:18px;}.case-opening-overlay.is-loading .case-opening-copy{font-size:14px;}.case-opening-overlay.is-loading .case-opening-progress span{animation:caseLoading 1.65s ease-out forwards;}.case-opening-overlay.is-loading .case-opening-status{animation:jarvesReveal .5s ease both;}
+@keyframes caseLoading{from{width:0}to{width:100%}}@keyframes openingGrid{from{transform:perspective(500px) rotateX(58deg) translateY(0) scale(1.3)}to{transform:perspective(500px) rotateX(58deg) translateY(32px) scale(1.3)}}
 @media(max-width:640px){.jarves-head{align-items:flex-start;flex-direction:column;}.jarves-status{margin-left:50px;}.jarves-input{grid-template-columns:1fr;}}
 
 /* ---------- top bar within main ---------- */
@@ -500,6 +509,7 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
   <div id="main"></div>
 </div>
 <div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
+<div id="caseOpeningOverlay" class="case-opening-overlay" hidden aria-live="polite"></div>
 
 <div id="printArea"></div>
 
@@ -972,6 +982,7 @@ function deleteEsportSetup(track){ const setup=DB.esportSetups.find(item=>item.t
 /* ============================= ROUTER / APP ============================= */
 const App = {};
 let ROUTE = {page:'dashboard', id:null};
+let CASE_OPENING_SEEN = null;
 
 function go(page, id){ ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
 function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
@@ -1006,6 +1017,11 @@ function renderNav(){
 
 function render(){
   document.body.dataset.page = ROUTE.page;
+  if(ROUTE.page!=='caseform'){
+    CASE_OPENING_SEEN = null;
+    const overlay=document.getElementById('caseOpeningOverlay');
+    if(overlay){ overlay.hidden=true; overlay.innerHTML=''; }
+  }
   renderNav();
   const main = document.getElementById('main');
   if(ROUTE.page==='dashboard') main.innerHTML = pageDashboard();
@@ -1027,10 +1043,35 @@ function render(){
   else if(ROUTE.page==='esport-driverform') main.innerHTML = pageEsportDriverForm(ROUTE.id?driverById(ROUTE.id):null);
   else if(ROUTE.page==='esport-setup') main.innerHTML = pageEsportSetup();
   else main.innerHTML = pageDashboard();
+  if(ROUTE.page==='caseform') showCaseOpening(ROUTE.id);
   if(ROUTE.page==='cases') renderCaseTable();
   if(ROUTE.page==='drivers') renderDriverTable();
   if(ROUTE.page==='manage'){ renderManageBody(); if(MANAGE_TAB==='integrations') renderPublicSharePanel(); }
 }
+
+function showCaseOpening(caseId){
+  const key=caseId||'new';
+  if(CASE_OPENING_SEEN===key) return;
+  CASE_OPENING_SEEN=key;
+  const overlay=document.getElementById('caseOpeningOverlay');
+  if(!overlay) return;
+  const isNew=!caseId;
+  overlay.hidden=false;
+  overlay.className=`case-opening-overlay${isNew?'':' is-loading'}`;
+  overlay.innerHTML=`<div class="case-opening-stage"><div class="case-opening-reactor" aria-hidden="true"></div><h2 class="case-opening-title">${isNew?'Willkommen bei Jarves':'Akte wird geladen'}</h2><p class="case-opening-copy">${isNew?'Mit erweiterten Funktionen kannst du ab sofort Jarves in den Akten nutzen.':'Jarves lädt die bestehende Akte für dich.'}</p><div class="case-opening-status">${isNew?'Jarves System wird initialisiert':'Akte wird geöffnet'}</div><div class="case-opening-progress" aria-hidden="true"><span></span></div></div>`;
+  if(isNew){
+    setTimeout(()=>{
+      if(CASE_OPENING_SEEN!==key||overlay.hidden) return;
+      overlay.classList.add('is-loading');
+      overlay.querySelector('.case-opening-title').textContent='Akte wird geladen';
+      overlay.querySelector('.case-opening-copy').textContent='Jarves bereitet die Aktenansicht vor.';
+      overlay.querySelector('.case-opening-status').textContent='Ladefortschritt';
+      overlay.querySelector('.case-opening-progress span').style.animation='caseLoading 4s ease-out forwards';
+      setTimeout(()=>closeCaseOpening(overlay,key),4000);
+    },6000);
+  } else setTimeout(()=>closeCaseOpening(overlay,key),1650);
+}
+function closeCaseOpening(overlay,key){ if(CASE_OPENING_SEEN!==key) return; overlay.hidden=true; overlay.innerHTML=''; }
 
 /* ============================= FINANCE ============================= */
 const FINANCE_CATEGORIES = ['Startkapital','Sponsoring','Preisgeld','Teilnahmegebühr','Ticketverkauf','Rennveranstaltung','Streckenmiete','Server & Technik','Lizenzen','Marketing','Teamprämien','Reisekosten','Sonstiges'];
@@ -1275,7 +1316,7 @@ function jarvesRewrite(){
   const professional=jarvesProfessionalText(input,draft);
   const output=document.getElementById('jarves_output');
   if(output) output.value=professional;
-  jarvesResult('Sachverhalt erstellt','<p>Der FIA-taugliche Sachverhalt ist bereit. Prüfe ihn und kopiere ihn anschließend manuell in das Beschreibungsfeld der Akte.</p>');
+  jarvesResult('Sachverhalt erstellt','<p>Die ausführliche Fassung ist bereit. Prüfe sie und kopiere sie anschließend manuell in das Beschreibungsfeld der Akte.</p>');
 }
 async function jarvesCopyText(){
   const output=document.getElementById('jarves_output');
@@ -1289,7 +1330,9 @@ function jarvesAnalyzeCurrent(){
   const rules=jarvesMatchingRules(draft), repeat=jarvesRepeatAnalysis(draft);
   const ruleHtml=rules.length?`<p><b>Voraussichtlich relevante Regelstellen:</b></p><ul>${rules.map(rule=>`<li><b>${esc(rule.title)}</b> — ${esc(rule.text)}</li>`).join('')}</ul>`:'<p>Keine eindeutige Regelstelle erkannt. Bitte Sachverhalt und Beweismittel präzisieren.</p>';
   const repeatHtml=repeat.cases.length?`<p><b>Hinweis auf möglichen Wiederholungsfall:</b> ${repeat.cases.length} frühere Akte mit vergleichbaren Merkmalen.</p><ul>${repeat.cases.slice(0,3).map(item=>`<li>${esc(item.stw||'Akte')} · ${esc(item.category||'ohne Kategorie')} · ${esc(item.status||'ohne Status')}</li>`).join('')}</ul>`:'<p><b>Kein Wiederholungsfall erkannt.</b> Es wurde keine passende entschiedene oder archivierte Akte für diesen Fahrer gefunden.</p>';
-  jarvesResult('Fallanalyse',`${ruleHtml}${repeatHtml}<p class="jarves-note">Jarves liefert eine redaktionelle Vorprüfung. Die endgültige Bewertung bleibt bei den Stewards.</p>`);
+  jarvesResult('Fallanalyse',`${ruleHtml}<p class="jarves-note">Jarves liefert eine redaktionelle Vorprüfung. Die endgültige Bewertung bleibt bei den Stewards.</p>`);
+  const hints=document.getElementById('jarves_analysis_hints');
+  if(hints){ hints.innerHTML=`<h4>Weitere Analysepunkte</h4>${repeatHtml}<p>Prüfe zusätzlich Fahrzeugpositionen, Abstand, Reaktion, mögliche Vermeidbarkeit und die unmittelbare Auswirkung auf das Renngeschehen.</p>`; hints.classList.add('is-visible'); }
 }
 function jarvesApplyRules(){
   const draft=jarvesCaseDraft(DB.cases.find(item=>item.id===ROUTE.id)||{}), rules=jarvesMatchingRules(draft), field=document.getElementById('f_regulationBreach');
@@ -1305,7 +1348,7 @@ function jarvesAnalyzeAll(){
   jarvesResult('Fahrerakte analysiert',`<p><b>${esc(driverName(driverById(driverId)))}</b> erscheint in ${related.length} Akte(n), davon ${decided.length} entschieden oder archiviert.</p><p>Gesammelte Strafpunkte aus entschiedenen Akten: <b>${points}</b>.</p>${decided.length?`<ul>${decided.slice(0,6).map(item=>`<li>${esc(item.stw||'Akte')} · ${esc(item.category||'ohne Kategorie')} · ${esc(item.decision||'ohne Entscheidung')}</li>`).join('')}</ul>`:'<p>Noch keine abgeschlossenen Fälle zur Wiederholungsprüfung vorhanden.</p>'}<p class="jarves-note">Diese Übersicht unterstützt die Prüfung und ersetzt keine Steward-Entscheidung.</p>`);
 }
 function jarvesCasePanel(caseData){
-  return `<div id="jarves_launcher" class="jarves-launcher"><button class="jarves-launch-button" aria-label="Jarves öffnen" onclick="jarvesOpen()"></button><div class="jarves-launch-copy"><strong>Jarves öffnen</strong><span>Dein Assistent für Sachverhalt und Fallanalyse</span></div></div><section id="jarves_panel" class="jarves-panel is-closed"><div class="jarves-head"><div class="jarves-identity"><div class="jarves-avatar">J</div><div><strong>Jarves</strong><small>Fallanalyse-Agent · lokal verfügbar</small></div></div><div><span class="jarves-status">Bereit für Analyse</span><button class="btn small" onclick="jarvesClose()" style="display:block;margin-top:7px;margin-left:auto;">Schließen</button></div></div><div class="jarves-body"><div id="jarves_welcome" class="jarves-welcome">Willkommen bei Jarves · dein Assistent</div><div class="jarves-tabs"><button class="jarves-tab active" data-tab="writer" onclick="jarvesTab('writer')">Sachverhalt erstellen</button><button class="jarves-tab" data-tab="analysis" onclick="jarvesTab('analysis')">Akte analysieren</button></div><div class="jarves-view active" data-view="writer"><p>Gib nur eine kurze Zusammenfassung des Vorfalls ein. Jarves erstellt daraus einen professionellen FIA-Sachverhalt.</p><div class="jarves-input"><textarea id="jarves_prompt" placeholder="z. B. Fahrer drängte Gegner in Kurve 4 von der Strecke und behielt die Position"></textarea><button class="btn primary" onclick="jarvesRewrite()">Text erstellen</button></div><textarea id="jarves_output" class="jarves-output" readonly placeholder="Der fertige Sachverhalt erscheint hier. Er wird nicht automatisch in die Akte übernommen."></textarea><div class="jarves-copy-row"><span class="jarves-note">Manuell prüfen und anschließend in die Beschreibung kopieren.</span><button class="btn gold" onclick="jarvesCopyText()">Text kopieren</button></div></div><div class="jarves-view" data-view="analysis"><p>Hier kannst du die aktuelle Akte, passende Regelstellen und mögliche Wiederholungsfälle prüfen.</p><div class="jarves-actions"><button class="btn" onclick="jarvesApplyRules()">Regelwerk zuordnen</button><button class="btn" onclick="jarvesAnalyzeCurrent()">Diesen Fall analysieren</button><button class="btn" onclick="jarvesAnalyzeAll()">Alle Fälle des Fahrers</button></div><div id="jarves_result" class="jarves-result" aria-live="polite"></div></div></div></section>`;
+  return `<div id="jarves_launcher" class="jarves-launcher"><button class="jarves-launch-button" aria-label="Jarves öffnen" onclick="jarvesOpen()"></button><div class="jarves-launch-copy"><strong>Jarves öffnen</strong><span>Dein Assistent für Sachverhalt und Fallanalyse</span></div></div><section id="jarves_panel" class="jarves-panel is-closed"><div class="jarves-head"><div class="jarves-identity"><div class="jarves-avatar">J</div><div><strong>Jarves</strong><small>Fallanalyse-Agent · lokal verfügbar</small></div></div><div><span class="jarves-status">Bereit für Analyse</span><button class="btn small" onclick="jarvesClose()" style="display:block;margin-top:7px;margin-left:auto;">Schließen</button></div></div><div class="jarves-body"><div id="jarves_welcome" class="jarves-welcome">Willkommen bei Jarves · dein Assistent</div><div class="jarves-tabs"><button class="jarves-tab active" data-tab="writer" onclick="jarvesTab('writer')">Sachverhalt erstellen</button><button class="jarves-tab" data-tab="analysis" onclick="jarvesTab('analysis')">Akte analysieren</button></div><div class="jarves-view active" data-view="writer"><p>Gib nur eine kurze, stichwortartige Zusammenfassung des Vorfalls ein. Jarves erstellt daraus eine ausführliche sachliche Fassung.</p><div class="jarves-input"><textarea id="jarves_prompt" placeholder="z. B. Fahrer drängte Gegner in Kurve 4 von der Strecke und behielt die Position"></textarea><button class="btn primary" onclick="jarvesRewrite()">Text erstellen</button></div><textarea id="jarves_output" class="jarves-output" readonly placeholder="Die ausführliche Fassung erscheint hier. Sie wird nicht automatisch in die Akte übernommen."></textarea><div class="jarves-copy-row"><span class="jarves-note">Manuell prüfen und anschließend in die Beschreibung kopieren.</span><button class="btn gold" onclick="jarvesCopyText()">Text kopieren</button></div></div><div class="jarves-view" data-view="analysis"><p>Hier kannst du die aktuelle Akte und passende Regelstellen prüfen.</p><div class="jarves-actions"><button class="btn" onclick="jarvesApplyRules()">Regelwerk zuordnen</button><button class="btn" onclick="jarvesAnalyzeCurrent()">Diesen Fall analysieren</button><button class="btn" onclick="jarvesAnalyzeAll()">Alle Fälle des Fahrers</button></div><div id="jarves_result" class="jarves-result" aria-live="polite"></div><div id="jarves_analysis_hints" class="jarves-analysis-hints" aria-live="polite"></div></div></div></section>`;
 }
 
 /* ============================= CASE FORM (AKTE) ============================= */
