@@ -147,7 +147,7 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 @keyframes jarvesWelcome{0%{opacity:0;transform:translateY(8px) scale(.96)}35%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-8px) scale(1.02)}}
 .jarves-welcome{display:none;color:#b9fbff;font:700 13px var(--mono);letter-spacing:.8px;margin:0 0 10px;}.jarves-welcome.is-playing{display:block;animation:jarvesWelcome 2.1s ease both;}
 .case-opening-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:radial-gradient(circle at center,rgba(8,28,36,.98),rgba(3,8,11,.99) 68%);color:#dffcff;overflow:hidden;}
-.case-opening-overlay[hidden]{display:none !important;}
+.case-opening-overlay[hidden],.case-opening-overlay.is-hidden{display:none !important;pointer-events:none;}
 .case-opening-overlay::before{content:"";position:absolute;inset:8%;border:1px solid rgba(84,217,232,.16);box-shadow:0 0 80px rgba(84,217,232,.08) inset;transform:perspective(500px) rotateX(58deg) scale(1.3);animation:openingGrid 3s linear infinite;}
 .case-opening-stage{position:relative;z-index:1;width:min(660px,calc(100% - 36px));text-align:center;}
 .case-opening-reactor{width:190px;height:190px;margin:0 auto 28px;border-radius:50%;position:relative;background:radial-gradient(circle,#f2ffff 0 4%,#54d9e8 5% 10%,#123741 11% 27%,transparent 28%),conic-gradient(from 0deg,transparent 0 8deg,#54d9e8 9deg 14deg,transparent 15deg 33deg,#b9fbff 34deg 39deg,transparent 40deg 62deg,#54d9e8 63deg 71deg,transparent 72deg 102deg,#54d9e8 103deg 110deg,transparent 111deg 153deg,#b9fbff 154deg 160deg,transparent 161deg 208deg,#54d9e8 209deg 216deg,transparent 217deg 270deg,#b9fbff 271deg 277deg,transparent 278deg 330deg,#54d9e8 331deg 340deg,transparent 341deg);border:2px solid #54d9e8;box-shadow:0 0 0 12px rgba(84,217,232,.06),0 0 40px rgba(84,217,232,.68),0 0 110px rgba(84,217,232,.28),inset 0 0 26px rgba(84,217,232,.7);animation:jarvesReactorSpin 4.8s linear infinite;}
@@ -984,12 +984,15 @@ function deleteEsportSetup(track){ const setup=DB.esportSetups.find(item=>item.t
 const App = {};
 let ROUTE = {page:'dashboard', id:null};
 let CASE_OPENING_SEEN = null;
+let CASE_OPENING_MODE = 'none';
 
-function go(page, id){ ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
+function go(page, id){ CASE_OPENING_MODE=page==='caseform'?(id?'existing':'new'):'none'; ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
 function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
 window.addEventListener('hashchange', ()=>{
   const h = location.hash.replace('#','');
   const [page,id] = h.split('/');
+  if(page===ROUTE.page&&id===(ROUTE.id||null)) return;
+  CASE_OPENING_MODE='none';
   ROUTE = {page: page||'dashboard', id: id||null};
   render();
 });
@@ -1021,7 +1024,7 @@ function render(){
   if(ROUTE.page!=='caseform'){
     CASE_OPENING_SEEN = null;
     const overlay=document.getElementById('caseOpeningOverlay');
-    if(overlay){ overlay.hidden=true; overlay.innerHTML=''; }
+    if(overlay){ overlay.hidden=true; overlay.classList.add('is-hidden'); overlay.innerHTML=''; }
   }
   renderNav();
   const main = document.getElementById('main');
@@ -1044,20 +1047,22 @@ function render(){
   else if(ROUTE.page==='esport-driverform') main.innerHTML = pageEsportDriverForm(ROUTE.id?driverById(ROUTE.id):null);
   else if(ROUTE.page==='esport-setup') main.innerHTML = pageEsportSetup();
   else main.innerHTML = pageDashboard();
-  if(ROUTE.page==='caseform'&&!ROUTE.id) showCaseOpening();
+  if(ROUTE.page==='caseform'&&CASE_OPENING_MODE!=='none') showCaseOpening(CASE_OPENING_MODE,ROUTE.id);
   if(ROUTE.page==='cases') renderCaseTable();
   if(ROUTE.page==='drivers') renderDriverTable();
   if(ROUTE.page==='manage'){ renderManageBody(); if(MANAGE_TAB==='integrations') renderPublicSharePanel(); }
 }
 
-function showCaseOpening(caseId){
-  const key=caseId||'new';
+function showCaseOpening(mode,caseId){
+  if(ROUTE.page!=='caseform') return;
+  const key=mode==='new'?'new':`existing-${caseId}`;
   if(CASE_OPENING_SEEN===key) return;
   CASE_OPENING_SEEN=key;
   const overlay=document.getElementById('caseOpeningOverlay');
   if(!overlay) return;
-  const isNew=!caseId;
+  const isNew=mode==='new';
   overlay.hidden=false;
+  overlay.classList.remove('is-hidden');
   overlay.className=`case-opening-overlay${isNew?'':' is-loading'}`;
   overlay.innerHTML=`<div class="case-opening-stage"><div class="case-opening-reactor" aria-hidden="true"></div><h2 class="case-opening-title">${isNew?'Willkommen bei Jarves':'Akte wird geladen'}</h2><p class="case-opening-copy">${isNew?'Mit erweiterten Funktionen kannst du ab sofort Jarves in den Akten nutzen.':'Jarves lädt die bestehende Akte für dich.'}</p><div class="case-opening-status">${isNew?'Jarves System wird initialisiert':'Akte wird geöffnet'}</div><div class="case-opening-progress" aria-hidden="true"><span></span></div></div>`;
   if(isNew){
