@@ -516,8 +516,8 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
 
 <script>
 /* ============================= DATA LAYER ============================= */
-const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null, esportSetups: [] };
-const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', supabase:'zfc_supabase_config_v1' };
+const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [] };
+const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', supabase:'zfc_supabase_config_v1' };
 let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden' };
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -626,6 +626,8 @@ function loadAll(){
   DB.finance = loadKey(KEYS.finance, []);
   DB.financeSettings = loadKey(KEYS.financeSettings, {season:'2026', startingCapital:0, currency:'EUR', discordWebhookUrl:'', caseWebhookUrl:''});
   DB.esportSetups = loadKey(KEYS.esportSetups, []);
+  DB.marketRequests = loadKey(KEYS.marketRequests, []);
+  DB.escalations = loadKey(KEYS.escalations, []);
 }
 const persist = {
   teams: ()=>{ saveKey(KEYS.teams, DB.teams); return syncAppState(); },
@@ -635,6 +637,8 @@ const persist = {
   finance: ()=>{ saveKey(KEYS.finance, DB.finance); return syncAppState(); },
   financeSettings: ()=>{ saveKey(KEYS.financeSettings, DB.financeSettings); return syncAppState(); },
   esportSetups: ()=>{ saveKey(KEYS.esportSetups, DB.esportSetups); return syncAppState(); },
+  marketRequests: ()=>{ saveKey(KEYS.marketRequests, DB.marketRequests); return syncAppState(); },
+  escalations: ()=>{ saveKey(KEYS.escalations, DB.escalations); return syncAppState(); },
 };
 
 function financeAmount(value){ return Number(value||0).toLocaleString('de-DE',{style:'currency',currency:DB.financeSettings?.currency||'EUR'}); }
@@ -654,8 +658,8 @@ function publicShareUrl(){
   if(!config.url || !config.anonKey) return '';
   return location.origin+location.pathname+'?sb_url='+encodeURIComponent(config.url)+'&sb_key='+encodeURIComponent(config.anonKey)+'#dashboard';
 }
-function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,finance:DB.finance,financeSettings:DB.financeSettings}; }
-function stateRecordCount(state){ return ['drivers','cases','transfers','finance'].reduce((count,key)=>count+(Array.isArray(state?.[key])?state[key].length:0),0); }
+function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,finance:DB.finance,financeSettings:DB.financeSettings,marketRequests:DB.marketRequests,escalations:DB.escalations}; }
+function stateRecordCount(state){ return ['drivers','cases','transfers','finance','marketRequests','escalations'].reduce((count,key)=>count+(Array.isArray(state?.[key])?state[key].length:0),0); }
 async function syncAppState(){
   if(!SUPABASE.client || SUPABASE.applyingRemote) return;
   const result=await SUPABASE.client.from('zfc_app_state').upsert({id:1,state:appState(),updated_at:new Date().toISOString()});
@@ -1003,13 +1007,15 @@ const NAV = [
   {id:'cases', label:'Alle Akten', ic:'03'},
   {id:'drivers', label:'Fahrer', ic:'04'},
   {id:'drivercases', label:'Fahrer Cases', ic:'05'},
-  {id:'teams', label:'Teams', ic:'06'},
-  {id:'transfers', label:'Transfers', ic:'07'},
-  {id:'finance', label:'Finanzen', ic:'08'},
-  {id:'processes', label:'Prozesse', ic:'09'},
-  {id:'rulebook', label:'Regelwerk', ic:'10'},
-  {id:'manage', label:'Verwaltung', ic:'11'},
-  {id:'esport', label:'CFC Esport', ic:'12'},
+  {id:'market', label:'FAHRERMARKT', ic:'06'},
+  {id:'escalations', label:'ESKALIERUNGEN', ic:'07'},
+  {id:'teams', label:'Teams', ic:'08'},
+  {id:'transfers', label:'Transfers', ic:'09'},
+  {id:'finance', label:'Finanzen', ic:'10'},
+  {id:'processes', label:'Prozesse', ic:'11'},
+  {id:'rulebook', label:'Regelwerk', ic:'12'},
+  {id:'manage', label:'Verwaltung', ic:'13'},
+  {id:'esport', label:'CFC Esport', ic:'14'},
 ];
 
 function renderNav(){
@@ -1024,7 +1030,12 @@ function render(){
   if(ROUTE.page!=='caseform'){
     CASE_OPENING_SEEN = null;
     const overlay=document.getElementById('caseOpeningOverlay');
-    if(overlay){ overlay.hidden=true; overlay.classList.add('is-hidden'); overlay.innerHTML=''; }
+    if(overlay){
+      overlay.hidden=true;
+      overlay.classList.add('is-hidden');
+      overlay.classList.remove('is-loading');
+      overlay.innerHTML='';
+    }
   }
   renderNav();
   const main = document.getElementById('main');
@@ -1035,6 +1046,8 @@ function render(){
   else if(ROUTE.page==='drivers') main.innerHTML = pageDriverList();
   else if(ROUTE.page==='drivercases') main.innerHTML = pageDriverCasesOverview();
   else if(ROUTE.page==='driverform') main.innerHTML = pageDriverForm(ROUTE.id? driverById(ROUTE.id): null);
+  else if(ROUTE.page==='market') main.innerHTML = ROUTE.id ? pageMarketRequestDetail(ROUTE.id) : pageMarketOverview();
+  else if(ROUTE.page==='escalations') main.innerHTML = ROUTE.id ? pageEscalationDetail(ROUTE.id) : pageEscalations();
   else if(ROUTE.page==='teams') main.innerHTML = pageTeams();
   else if(ROUTE.page==='transfers') main.innerHTML = pageTransfers();
   else if(ROUTE.page==='finance') main.innerHTML = pageFinance();
@@ -1050,6 +1063,7 @@ function render(){
   if(ROUTE.page==='caseform'&&CASE_OPENING_MODE!=='none') showCaseOpening(CASE_OPENING_MODE,ROUTE.id);
   if(ROUTE.page==='cases') renderCaseTable();
   if(ROUTE.page==='drivers') renderDriverTable();
+  if(ROUTE.page==='market' && !ROUTE.id) renderMarketTable();
   if(ROUTE.page==='manage'){ renderManageBody(); if(MANAGE_TAB==='integrations') renderPublicSharePanel(); }
 }
 
@@ -1063,7 +1077,8 @@ function showCaseOpening(mode,caseId){
   const isNew=mode==='new';
   overlay.hidden=false;
   overlay.classList.remove('is-hidden');
-  overlay.className=`case-opening-overlay${isNew?'':' is-loading'}`;
+  overlay.classList.remove('is-loading');
+  if(!isNew) overlay.classList.add('is-loading');
   overlay.innerHTML=`<div class="case-opening-stage"><div class="case-opening-reactor" aria-hidden="true"></div><h2 class="case-opening-title">${isNew?'Willkommen bei Jarves':'Akte wird geladen'}</h2><p class="case-opening-copy">${isNew?'Mit erweiterten Funktionen kannst du ab sofort Jarves in den Akten nutzen.':'Jarves lädt die bestehende Akte für dich.'}</p><div class="case-opening-status">${isNew?'Jarves System wird initialisiert':'Akte wird geöffnet'}</div><div class="case-opening-progress" aria-hidden="true"><span></span></div></div>`;
   if(isNew){
     setTimeout(()=>{
@@ -1462,7 +1477,7 @@ function pageCaseForm(existing){
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:26px;border-top:1px solid var(--line);padding-top:20px;">
         <button class="btn primary" onclick="saveCase('${c.id||''}', false)">${isNew?'Akte anlegen':'Akte speichern'}</button>
         <button class="btn" onclick="saveCase('${c.id||''}', true)">Speichern &amp; schließen</button>
-        ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button><button class="btn gold" onclick="go('warningform','${c.id}')">Verwarnung setzen</button><button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
+        ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button><button class="btn gold" onclick="go('warningform','${c.id}')">Verwarnung setzen</button><button class="btn gold" onclick="openTier3EscalationDialog('${c.id}')">An Tier 3 eskalieren</button><button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
         ${!isNew? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte löschen</button>` : ''}
       </div>
       ${!isNew ? `<div class="sectiontitle">Verwarnungen in dieser Akte</div>${c.warningDocuments?.length ? `<table><thead><tr><th>Datum</th><th>Kategorie</th><th>Fahrer</th><th></th></tr></thead><tbody>${c.warningDocuments.map((warning,index)=>`<tr><td>${fmtDate(warning.createdAt)}</td><td>${esc(warning.category)}</td><td>${esc(warning.driverName||'—')}</td><td><button class="btn small gold" onclick="printWarning('${c.id}',${index})">PDF öffnen</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Noch keine schriftliche Verwarnung in dieser Akte abgelegt.</div>'}` : ''}
@@ -1724,6 +1739,7 @@ function pageDriverForm(existing){
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:22px 0;">
         <button class="btn primary" onclick="saveDriver('${d.id||''}')">Fahrerakte speichern</button>
+        ${!isNew? `<button class="btn gold" onclick="launchMarketRequest('${d.id}')">Marktwert bestimmen</button>`:''}
         ${!isNew? `<button class="btn danger" onclick="deleteDriver('${d.id}')">Fahrerakte löschen</button>`:''}
       </div>
 
@@ -1765,6 +1781,392 @@ function pageDriverForm(existing){
   `;
 }
 function onDriverTeamChange(){ /* placeholder for future dependent logic */ }
+
+function formatCurrency(value, currency='EUR'){
+  const number = Number(value || 0);
+  return new Intl.NumberFormat('de-DE',{style:'currency',currency:currency||'EUR',maximumFractionDigits:0}).format(number);
+}
+
+function addDriverAudit(driverId, text){
+  const d = driverById(driverId); if(!d) return;
+  d.history = d.history || [];
+  d.history.push({ts:Date.now(), text});
+}
+
+function launchMarketRequest(driverId){
+  const request = createMarketRequestForDriver(driverId);
+  if(!request) return;
+  go('market', request.id);
+}
+
+function createMarketRequestForDriver(driverId){
+  const d = driverById(driverId); if(!d) return null;
+  const existing = DB.marketRequests.find(req=>req.driverId===driverId && req.status!=='Abgeschlossen');
+  if(existing) return existing;
+  const request = {
+    id: uid(),
+    requestId: `FM-${String(DB.marketRequests.length + 101).padStart(4,'0')}`,
+    driverId: d.id,
+    driverName: driverName(d),
+    driverNumber: d.number || '',
+    teamId: d.teamId || '',
+    division: d.division || '',
+    status: 'Neu',
+    createdBy: 'Aktiver Benutzer',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    marketValue: d.marketValue || '',
+    purchasePrice: d.purchasePrice || '',
+    proposal: d.marketValue || '',
+    finalValue: d.marketValue || '',
+    reason: '',
+    responsible: '',
+    approvalDate: '',
+    approvedBy: '',
+    purchaseReason: '',
+    history: [{ts:Date.now(), text:'Marktwert-Anfrage eröffnet'}],
+    auditLog: [{ts:Date.now(), text:'Anfrage erstellt'}]
+  };
+  DB.marketRequests.push(request);
+  d.marketValue = d.marketValue || '';
+  d.purchasePrice = d.purchasePrice || '';
+  d.marketHistory = d.marketHistory || [];
+  persist.marketRequests();
+  return request;
+}
+
+function pageMarketOverview(){
+  const rows = [...DB.marketRequests].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0)).map(req => {
+    const driver = driverById(req.driverId);
+    const team = teamById(req.teamId || driver?.teamId);
+    return `<tr class="rowlink" onclick="go('market','${req.id}')">
+      <td class="pts">${esc(req.requestId || '—')}</td>
+      <td>${esc(driver ? driverName(driver) : (req.driverName || '—'))}</td>
+      <td>${esc(req.driverNumber || driver?.number || '—')}</td>
+      <td>${esc(team?.name || '—')}</td>
+      <td>${esc(req.division || driver?.division || '—')}</td>
+      <td><span class="tag ${statusTagClass(req.status === 'Neu' ? 'open' : req.status === 'Bewertung erforderlich' ? 'invest' : req.status === 'Bestätigt' || req.status === 'Werte festgelegt' ? 'decided' : 'archived')}">${esc(req.status||'Neu')}</span></td>
+      <td>${esc(req.createdBy || '—')}</td>
+      <td>${fmtDateTime(req.createdAt)}</td>
+      <td>${esc(req.finalValue || req.proposal || req.marketValue || '—')}</td>
+      <td>${esc(req.purchasePrice || '—')}</td>
+      <td>${esc(req.responsible || '—')}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="pagehead">
+      <div><div class="eyebrow">Fahrermarkt</div><h1>Marktwert-Anfragen</h1></div>
+      <div class="actions"><button class="btn primary" onclick="go('drivers')">Fahrerübersicht</button></div>
+    </div>
+    <div class="panel">
+      <div class="searchbar">
+        <input id="market_q" type="text" placeholder="Suche nach Fahrer, Team, Anfrage-ID…" oninput="renderMarketTable()">
+        <select id="market_status" onchange="renderMarketTable()">
+          <option value="">Alle Status</option>
+          <option value="Neu">Neu</option>
+          <option value="In Prüfung">In Prüfung</option>
+          <option value="Bewertung erforderlich">Bewertung erforderlich</option>
+          <option value="Werte festgelegt">Werte festgelegt</option>
+          <option value="Zur Bestätigung">Zur Bestätigung</option>
+          <option value="Bestätigt">Bestätigt</option>
+          <option value="Abgelehnt">Abgelehnt</option>
+          <option value="Abgeschlossen">Abgeschlossen</option>
+        </select>
+      </div>
+      <div id="marketTableWrap"></div>
+    </div>
+  `;
+}
+
+function renderMarketTable(){
+  const q = (document.getElementById('market_q')?.value||'').toLowerCase();
+  const st = (document.getElementById('market_status')?.value || '');
+  let list = [...DB.marketRequests].sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
+  list = list.filter(req => {
+    if(st && req.status !== st) return false;
+    if(!q) return true;
+    const hay = [req.requestId, req.driverName, req.driverNumber, req.createdBy, req.status, (teamById(req.teamId || driverById(req.driverId)?.teamId)?.name||'')].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+  const rows = list.map(req => {
+    const driver = driverById(req.driverId);
+    const team = teamById(req.teamId || driver?.teamId);
+    return `<tr class="rowlink" onclick="go('market','${req.id}')">
+      <td class="pts">${esc(req.requestId || '—')}</td>
+      <td>${esc(driver ? driverName(driver) : (req.driverName || '—'))}</td>
+      <td>${esc(req.driverNumber || driver?.number || '—')}</td>
+      <td>${esc(team?.name || '—')}</td>
+      <td>${esc(req.division || driver?.division || '—')}</td>
+      <td><span class="tag ${statusTagClass(req.status === 'Neu' ? 'open' : req.status === 'Bewertung erforderlich' ? 'invest' : req.status === 'Bestätigt' || req.status === 'Werte festgelegt' ? 'decided' : 'archived')}">${esc(req.status || 'Neu')}</span></td>
+      <td>${esc(req.createdBy || '—')}</td>
+      <td>${fmtDateTime(req.createdAt)}</td>
+      <td>${esc(req.finalValue || req.proposal || req.marketValue || '—')}</td>
+      <td>${esc(req.purchasePrice || '—')}</td>
+      <td>${esc(req.responsible || '—')}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('marketTableWrap').innerHTML = `
+    <table>
+      <thead><tr><th>Anfrage-ID</th><th>Fahrer</th><th>Nr.</th><th>Team</th><th>Division</th><th>Status</th><th>Ersteller</th><th>Erstellt</th><th>Marktwert</th><th>Einkaufspreis</th><th>Bearbeiter</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="11"><div class="empty"><b>Keine Marktwert-Anfragen</b>Der erste Fahrermarkt-Antrag erscheint hier automatisch.</div></td></tr>`}</tbody>
+    </table>
+    <div class="footer-note">${list.length} von ${DB.marketRequests.length} Anfragen angezeigt.</div>
+  `;
+}
+
+function pageMarketRequestDetail(id){
+  const request = DB.marketRequests.find(r=>r.id===id);
+  if(!request) return `<div class="panel"><h2>Marktwert-Anfrage nicht gefunden</h2><p class="empty">Diese Anfrage existiert nicht mehr.</p></div>`;
+  const driver = driverById(request.driverId);
+  const team = teamById(request.teamId || driver?.teamId);
+  return `
+    <div class="pagehead">
+      <div><div class="eyebrow">Fahrermarkt / Akte</div><h1>${esc(request.requestId || 'Marktwert-Akte')}</h1></div>
+      <div class="actions"><button class="btn" onclick="go('market')">← Übersicht</button></div>
+    </div>
+    <div class="grid cols-2" style="align-items:start;">
+      <aside class="panel">
+        <h2>Fahrerprofil</h2>
+        <div class="driver-overview-profile" style="margin-bottom:8px;">
+          <div class="driverface">${driver?.photoUrl?`<img src="${esc(driver.photoUrl)}" alt="${esc(driverName(driver))}">`:esc((driver?.firstName?.[0]||'')+(driver?.lastName?.[0]||''))}</div>
+          <div><h2 style="font-size:18px;">${esc(driver ? driverName(driver) : request.driverName)}</h2><p>${esc(team?.name || '—')} · ${esc(request.division || driver?.division || '—')}</p></div>
+        </div>
+        <div class="field"><label>Discord</label><input value="${esc(driver?.discord || '—')}" readonly></div>
+        <div class="field"><label>Fahrernummer</label><input value="${esc(request.driverNumber || driver?.number || '—')}" readonly></div>
+        <div class="field"><label>Nationalität</label><input value="${esc(driver?.nationality || '—')}" readonly></div>
+        <div class="field"><label>Team</label><input value="${esc(team?.name || '—')}" readonly></div>
+        <div class="field"><label>Division</label><input value="${esc(request.division || driver?.division || '—')}" readonly></div>
+        <div class="field"><label>Status</label><input value="${esc(request.status || 'Neu')}" readonly></div>
+        <div class="field"><label>Anfrage-ID</label><input value="${esc(request.requestId)}" readonly></div>
+        <div class="field"><label>Ersteller</label><input value="${esc(request.createdBy)}" readonly></div>
+        <div class="field"><label>Datum</label><input value="${fmtDateTime(request.createdAt)}" readonly></div>
+        <div class="field"><label>Bearbeiter</label><input value="${esc(request.responsible || '—')}" readonly></div>
+        <div class="field"><label>Letzte Änderung</label><input value="${fmtDateTime(request.updatedAt || request.createdAt)}" readonly></div>
+      </aside>
+      <section class="panel">
+        <h2>Bearbeitungsprozess</h2>
+        <div class="field"><label>Begründung für die Marktwertbestimmung</label><textarea id="market_reason" placeholder="Pace, Qualifying Pace, Race Pace, Konstanz, Racecraft, Teamfähigkeit, Entwicklungspotenzial…">${esc(request.reason || '')}</textarea></div>
+        <div class="grid cols-2">
+          <div class="field"><label>Vorgeschlagener Marktwert</label><input id="market_proposal" type="text" value="${esc(request.proposal || request.marketValue || '')}" placeholder="z. B. 8.000.000"></div>
+          <div class="field"><label>Finaler Marktwert</label><input id="market_final" type="text" value="${esc(request.finalValue || request.marketValue || '')}" placeholder="z. B. 9.000.000"></div>
+          <div class="field"><label>Einkaufspreis</label><input id="market_purchase" type="text" value="${esc(request.purchasePrice || '')}" placeholder="z. B. 7.000.000"></div>
+          <div class="field"><label>Verantwortlicher Bearbeiter</label><input id="market_responsible" type="text" value="${esc(request.responsible || '')}"></div>
+        </div>
+        <div class="field"><label>Begründung für den Einkaufspreis</label><textarea id="market_purchase_reason" placeholder="Begründung des Einkaufspreises, Risiken, Potenzial, Vertragssituation…">${esc(request.purchaseReason || '')}</textarea></div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin: 14px 0;">
+          <button class="btn primary" onclick="saveMarketRequest('${request.id}')">Speichern</button>
+          <button class="btn gold" onclick="updateMarketStatus('${request.id}','Zur Bestätigung')">Zur Bestätigung</button>
+          <button class="btn" onclick="updateMarketStatus('${request.id}','Bestätigt')">Bestätigen</button>
+          <button class="btn danger" onclick="updateMarketStatus('${request.id}','Abgelehnt')">Ablehnen</button>
+        </div>
+        <div class="sectiontitle">Audit Log</div>
+        <table><thead><tr><th>Datum</th><th>Ereignis</th></tr></thead>
+          <tbody>${(request.auditLog || []).slice().reverse().map(entry => `<tr><td>${fmtDateTime(entry.ts)}</td><td>${esc(entry.text)}</td></tr>`).join('') || '<tr><td colspan="2"><div class="empty">Noch keine Aktivitäten.</div></td></tr>'}</tbody>
+        </table>
+      </section>
+    </div>
+  `;
+}
+
+function updateMarketStatus(id, status){
+  const request = DB.marketRequests.find(r=>r.id===id); if(!request) return;
+  request.status = status;
+  request.updatedAt = Date.now();
+  request.auditLog = request.auditLog || [];
+  request.auditLog.push({ts:Date.now(), text:`Status geändert auf ${status}`});
+  if(status === 'Bestätigt' && request.finalValue){
+    const driver = driverById(request.driverId);
+    if(driver){
+      driver.marketValue = request.finalValue;
+      driver.purchasePrice = request.purchasePrice || driver.purchasePrice || '';
+      driver.marketValueDate = new Date().toISOString().slice(0,10);
+      driver.marketValueConfirmedBy = request.responsible || request.createdBy || 'System';
+      driver.marketHistory = driver.marketHistory || [];
+      driver.marketHistory.push({date: driver.marketValueDate, marketValue: request.finalValue, purchasePrice: driver.purchasePrice, status: 'Bestätigt', bearbeiter: driver.marketValueConfirmedBy});
+      addDriverAudit(driver.id, `Marktwert bestätigt: ${request.finalValue}`);
+    }
+  }
+  persist.marketRequests();
+  go('market', id);
+}
+
+function saveMarketRequest(id){
+  const request = DB.marketRequests.find(r=>r.id===id); if(!request) return;
+  const reason = document.getElementById('market_reason')?.value.trim();
+  const proposal = document.getElementById('market_proposal')?.value.trim();
+  const finalValue = document.getElementById('market_final')?.value.trim();
+  const purchasePrice = document.getElementById('market_purchase')?.value.trim();
+  const responsible = document.getElementById('market_responsible')?.value.trim();
+  const purchaseReason = document.getElementById('market_purchase_reason')?.value.trim();
+  if(!reason || !proposal || !purchasePrice || !responsible){
+    alert('Begründung, Marktwert, Einkaufspreis und verantwortlicher Bearbeiter müssen vor der Bestätigung eingegeben werden.');
+    return;
+  }
+  request.reason = reason;
+  request.proposal = proposal;
+  request.finalValue = finalValue || proposal;
+  request.purchasePrice = purchasePrice;
+  request.purchaseReason = purchaseReason;
+  request.responsible = responsible;
+  request.marketValue = finalValue || proposal;
+  request.updatedAt = Date.now();
+  request.auditLog = request.auditLog || [];
+  request.auditLog.push({ts:Date.now(), text:'Marktwertdaten gespeichert'});
+  if(request.status === 'Neu') request.status = 'In Prüfung';
+  persist.marketRequests();
+  go('market', id);
+}
+
+function renderCaseTable(){
+  const q = (document.getElementById('cf_q')?.value||'').toLowerCase();
+  const st = document.getElementById('cf_status')?.value||'';
+  const tm = document.getElementById('cf_team')?.value||'';
+  const ct = document.getElementById('cf_cat')?.value||'';
+  let list = [...DB.cases].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  list = list.filter(c=>{
+    if(c.status === 'An Tier 3 eskaliert' || c.status === 'Zurück an Tier 1') {
+      if(st !== 'Eskaliert' && st !== 'Zurück an Tier 1' && st !== '') return false;
+    }
+    if(st && c.status !== st && !(st==='Eskaliert' && c.status==='An Tier 3 eskaliert') && !(st==='Zurück an Tier 1' && c.status==='Zurück an Tier 1')) return false;
+    if(tm && c.teamInvolved!==tm) return false;
+    if(ct && c.category!==ct) return false;
+    if(q){
+      const hay = [c.stw,c.event,c.description,c.category].join(' ').toLowerCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  const rows = list.map(c=>{
+    const t = teamById(c.teamInvolved), d = driverById(c.driverInvolved);
+    return `<tr class="rowlink" onclick="go('caseform','${c.id}')">
+      <td class="pts">${esc(c.stw)}</td>
+      <td>${esc(c.event||'—')} <span style="color:var(--grey-2);font-size:11.5px;">/ ${esc(c.sessionType||'')}</span></td>
+      <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'—'}</td>
+      <td>${esc(driverName(d))}</td>
+      <td>${esc(c.category||'—')}</td>
+      <td>${esc(c.decision||'—')}</td>
+      <td><span class="tag ${statusTagClass(c.status === 'An Tier 3 eskaliert' ? 'archived' : c.status)}">${esc(c.status)}</span></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('caseTableWrap').innerHTML = `
+    <table><thead><tr><th>STW-Nr.</th><th>Event / Session</th><th>Team</th><th>Fahrer</th><th>Kategorie</th><th>Entscheidung</th><th>Status</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="7"><div class="empty"><b>Keine Akten gefunden</b>Passe die Filter an oder eröffne eine neue Akte.</div></td></tr>`}</tbody></table>
+    <div class="footer-note">${list.length} von ${DB.cases.filter(c => c.status !== 'An Tier 3 eskaliert').length} Akten angezeigt.</div>
+  `;
+}
+
+function openTier3EscalationDialog(caseId){
+  const existing = document.getElementById('tier3Modal');
+  if(existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'tier3Modal';
+  modal.style.position = 'fixed'; modal.style.inset = '0'; modal.style.background = 'rgba(0,0,0,.68)'; modal.style.display = 'grid'; modal.style.placeItems = 'center'; modal.style.zIndex = '2000';
+  modal.innerHTML = `
+    <div style="width:min(620px,calc(100vw - 32px));background:var(--black-2);border:1px solid var(--line);padding:24px 22px;box-shadow:0 20px 50px rgba(0,0,0,.45);">
+      <div class="eyebrow">Steward-System</div>
+      <h2 style="margin:8px 0 16px; font-size:27px;">Fall an Tier 3 eskalieren</h2>
+      <div class="field"><label>Grund der Eskalierung</label><textarea id="tier3_reason" placeholder="Komplexe Regelauslegung, unklare Beweislage, schwerwiegender Vorfall, ..." required></textarea></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; margin-top:18px;">
+        <button class="btn" onclick="document.getElementById('tier3Modal').remove()">Abbrechen</button>
+        <button class="btn primary" onclick="submitTier3Escalation('${caseId}')">Eskalierung durchführen</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+function submitTier3Escalation(caseId){
+  const reason = document.getElementById('tier3_reason')?.value.trim();
+  if(!reason){ alert('Bitte einen Grund für die Eskalierung angeben.'); return; }
+  const c = DB.cases.find(item=>item.id===caseId); if(!c) return;
+  c.status = 'An Tier 3 eskaliert';
+  c.updatedAt = Date.now();
+  c.history = c.history || [];
+  c.history.push({ts:Date.now(), text:`Fall an Tier 3 eskaliert – ${reason}`});
+  const escalation = {
+    id: uid(),
+    caseId: c.id,
+    stw: c.stw,
+    caseName: c.event || 'Steward-Fall',
+    drivers: [driverName(driverById(c.driverInvolved)), driverName(driverById(c.driverAffected))].filter(Boolean).join(', ') || '—',
+    type: c.category || 'Steward-Fall',
+    reason,
+    originalSteward: c.stewardChairman || 'Steward Team',
+    escalatedAt: Date.now(),
+    status: 'An Tier 3 eskaliert',
+    tier3User: 'Tier 3',
+    updatedAt: Date.now(),
+    feedback: ''
+  };
+  DB.escalations.push(escalation);
+  DB.marketRequests = DB.marketRequests || [];
+  persist.cases(); persist.escalations();
+  document.getElementById('tier3Modal')?.remove();
+  go('cases');
+}
+
+function pageEscalations(){
+  return `
+    <div class="pagehead">
+      <div><div class="eyebrow">Tier 3</div><h1>Eskalierungen</h1></div>
+    </div>
+    <div class="panel">
+      <table>
+        <thead><tr><th>STW-Nummer</th><th>Fallname</th><th>beteiligte Fahrer</th><th>Falltyp</th><th>Eskalierungsgrund</th><th>ursprünglicher Steward</th><th>Eskalierungsdatum</th><th>Status</th><th>Tier-3-Bearbeiter</th><th>Letzte Änderung</th></tr></thead>
+        <tbody>${DB.escalations.length? DB.escalations.map(e=>`<tr class="rowlink" onclick="go('escalations','${e.id}')"><td class="pts">${esc(e.stw || '—')}</td><td>${esc(e.caseName || '—')}</td><td>${esc(e.drivers || '—')}</td><td>${esc(e.type || '—')}</td><td>${esc(e.reason || '—')}</td><td>${esc(e.originalSteward || '—')}</td><td>${fmtDateTime(e.escalatedAt)}</td><td><span class="tag ${e.status === 'Zurück an Tier 1' ? 'open' : 'invest'}">${esc(e.status || 'An Tier 3 eskaliert')}</span></td><td>${esc(e.tier3User || '—')}</td><td>${fmtDateTime(e.updatedAt || e.escalatedAt)}</td></tr>`).join('') : '<tr><td colspan="10"><div class="empty"><b>Keine Eskalierungen</b>Aus einer offenen Akte kann ein Fall an Tier 3 übergeben werden.</div></td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function pageEscalationDetail(id){
+  const e = DB.escalations.find(item=>item.id===id); if(!e) return `<div class="panel"><h2>Eskalierung nicht gefunden</h2></div>`;
+  const caseData = DB.cases.find(item=>item.id===e.caseId);
+  return `
+    <div class="pagehead">
+      <div><div class="eyebrow">Tier 3 / Akte</div><h1>${esc(e.stw || 'Eskalierung')}</h1></div>
+      <div class="actions"><button class="btn" onclick="go('escalations')">← Übersicht</button></div>
+    </div>
+    <div class="grid cols-2" style="align-items:start;">
+      <div class="panel">
+        <h2>Fallinformationen</h2>
+        <div class="field"><label>STW-Nummer</label><input value="${esc(e.stw || '—')}" readonly></div>
+        <div class="field"><label>Fallname</label><input value="${esc(e.caseName || '—')}" readonly></div>
+        <div class="field"><label>beteiligte Fahrer</label><input value="${esc(e.drivers || '—')}" readonly></div>
+        <div class="field"><label>Falltyp</label><input value="${esc(e.type || '—')}" readonly></div>
+        <div class="field"><label>ursprünglicher Steward</label><input value="${esc(e.originalSteward || '—')}" readonly></div>
+        <div class="field"><label>Tier-3-Bearbeiter</label><input value="${esc(e.tier3User || '—')}" readonly></div>
+      </div>
+      <div class="panel">
+        <h2>Tier-3-Bearbeitung</h2>
+        <div class="field"><label>Eskalierungsgrund</label><textarea readonly>${esc(e.reason || '')}</textarea></div>
+        <div class="field"><label>Tier-3-Feedback</label><textarea id="tier3_feedback" placeholder="Entscheidung, Hinweise, notwendige Korrekturen, zusätzliche Untersuchungen, Prozesshinweise…">${esc(e.feedback || '')}</textarea></div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn primary" onclick="returnTier3ToSteward('${e.id}')">An Tier 1 zurückgeben</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function returnTier3ToSteward(id){
+  const escalation = DB.escalations.find(item=>item.id===id); if(!escalation) return;
+  const caseData = DB.cases.find(item=>item.id===escalation.caseId); if(!caseData) return;
+  if(caseData) {
+    caseData.status = 'Zurück an Tier 1';
+    caseData.updatedAt = Date.now();
+    caseData.history = caseData.history || [];
+    caseData.history.push({ts:Date.now(), text:'Fall durch Tier 3 an Tier 1 zurückgegeben'});
+  }
+  escalation.status = 'Zurück an Tier 1';
+  escalation.feedback = document.getElementById('tier3_feedback')?.value.trim() || escalation.feedback || '';
+  escalation.updatedAt = Date.now();
+  escalation.auditLog = escalation.auditLog || [];
+  escalation.auditLog.push({ts:Date.now(), text:'Rückgabe an Tier 1 durchgeführt'});
+  persist.cases(); persist.escalations();
+  go('escalations', id);
+}
 
 async function saveDriver(id){
   const v = i=>document.getElementById(i).value;
