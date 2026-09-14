@@ -1734,8 +1734,14 @@ function pageDriverForm(existing){
         <div class="field"><label>Debüt in der Liga</label><input id="d_debutDate" type="date" value="${esc(d.debutDate)}"></div>
         <div class="field"><label>Fahrerklasse</label><input id="d_licenseClass" type="text" value="F1 26" readonly></div>
       </div>
-      <div class="field"><label>Foto-URL (optional)</label><input id="d_photoUrl" type="text" value="${esc(d.photoUrl)}" placeholder="https://…"></div>
-      <div class="field"><label>Bemerkungen der Stewards</label><textarea id="d_notes" placeholder="Interne Notizen zum Fahrer …">${esc(d.notes)}</textarea></div>
+      <div class="grid cols-2">
+        <div class="field"><label>Foto-URL (optional)</label><input id="d_photoUrl" type="text" value="${esc(d.photoUrl)}" placeholder="https://…"></div>
+        <div class="field"><label>Marktwert (Startwert)</label><input id="d_marketValue" type="text" value="${esc(d.marketValue || '')}" placeholder="z. B. 8.500.000"></div>
+      </div>
+      <div class="grid cols-2">
+        <div class="field"><label>Einkaufspreis (Startwert)</label><input id="d_purchasePrice" type="text" value="${esc(d.purchasePrice || '')}" placeholder="z. B. 6.900.000"></div>
+        <div class="field"><label>Bemerkungen der Stewards</label><textarea id="d_notes" placeholder="Interne Notizen zum Fahrer …">${esc(d.notes)}</textarea></div>
+      </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin:22px 0;">
         <button class="btn primary" onclick="saveDriver('${d.id||''}')">Fahrerakte speichern</button>
@@ -2010,6 +2016,13 @@ function saveMarketRequest(id){
   request.purchaseReason = purchaseReason;
   request.responsible = responsible;
   request.marketValue = finalValue || proposal;
+  const driver = driverById(request.driverId);
+  if(driver){
+    driver.marketValue = finalValue || proposal;
+    driver.purchasePrice = purchasePrice;
+    driver.updatedAt = Date.now();
+    addDriverAudit(driver.id, `Marktwert und Einkaufspreis aktualisiert: ${driver.marketValue} / ${driver.purchasePrice}`);
+  }
   request.updatedAt = Date.now();
   request.auditLog = request.auditLog || [];
   request.auditLog.push({ts:Date.now(), text:'Marktwertdaten gespeichert'});
@@ -2183,6 +2196,7 @@ async function saveDriver(id){
     division:v('d_division'),
     platform:v('d_platform'), simId:v('d_simId'), discord:v('d_discord'), email:v('d_email'),
     debutDate:v('d_debutDate'), licenseClass:'F1 26', photoUrl:v('d_photoUrl'),
+    marketValue:v('d_marketValue').trim(), purchasePrice:v('d_purchasePrice').trim(),
     notes:v('d_notes'), updatedAt:Date.now(),
   });
   if(!isNew && document.getElementById('d_rulesAccepted')) d.rulesAccepted = document.getElementById('d_rulesAccepted').checked;
