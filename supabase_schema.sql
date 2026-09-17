@@ -112,6 +112,66 @@ grant select, insert, update, delete on public.zfc_app_state to anon;
 grant select, insert, update, delete on public.zfc_finance_settings to anon;
 grant select, insert, update, delete on public.zfc_finance_transactions to anon;
 
+-- Atomarer Merge für parallele Browser-Schreibvorgänge. Neue oder geänderte
+-- Datensätze werden anhand ihrer ID zusammengeführt, statt einen Snapshot zu überschreiben.
+create or replace function public.zfc_merge_json_arrays(existing jsonb, incoming jsonb)
+returns jsonb
+language sql
+immutable
+as $$
+	select coalesce(jsonb_agg(item order by item->>'id'), '[]'::jsonb)
+	from (
+		select distinct on (item->>'id') item
+		from (
+			select value as item, 0 as source
+			from jsonb_array_elements(coalesce(existing, '[]'::jsonb))
+			where value ? 'id'
+			union all
+			select value as item, 1 as source
+			from jsonb_array_elements(coalesce(incoming, '[]'::jsonb))
+			where value ? 'id'
+		) candidates
+		order by item->>'id', source desc
+	) merged_items;
+$$;
+
+create or replace function public.zfc_merge_app_state(incoming_state jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+	current_state jsonb;
+	merged_state jsonb;
+	state_key text;
+begin
+	insert into public.zfc_app_state (id, state)
+	values (1, '{}'::jsonb)
+	on conflict (id) do nothing;
+
+	select state into current_state
+	from public.zfc_app_state
+	where id = 1
+	for update;
+
+	merged_state := coalesce(current_state, '{}'::jsonb) || coalesce(incoming_state, '{}'::jsonb);
+	foreach state_key in array array['teams','drivers','cases','transfers','finance','esportSetups','marketRequests','escalations','caseActivityLog','deletedCaseLog'] loop
+		if coalesce(incoming_state, '{}'::jsonb) ? state_key then
+			merged_state := jsonb_set(merged_state, array[state_key], public.zfc_merge_json_arrays(current_state->state_key, incoming_state->state_key));
+		end if;
+	end loop;
+
+	update public.zfc_app_state
+	set state = merged_state, updated_at = now()
+	where id = 1;
+	return merged_state;
+end;
+$$;
+
+grant execute on function public.zfc_merge_app_state(jsonb) to anon;
+revoke all on function public.zfc_merge_json_arrays(jsonb, jsonb) from public, anon;
+
 -- Supabase Realtime für alle Tabellen aktivieren.
 do $$
 begin

@@ -519,7 +519,7 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
 /* ============================= DATA LAYER ============================= */
 const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
-let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden' };
+let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null };
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -665,6 +665,35 @@ function publicShareUrl(){
   return location.origin+location.pathname+'?sb_url='+encodeURIComponent(config.url)+'&sb_key='+encodeURIComponent(config.anonKey)+'#dashboard';
 }
 function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,finance:DB.finance,financeSettings:DB.financeSettings,esportSetups:DB.esportSetups,marketRequests:DB.marketRequests,escalations:DB.escalations,caseActivityLog:DB.caseActivityLog,deletedCaseLog:DB.deletedCaseLog}; }
+function cloneState(state){ return state ? JSON.parse(JSON.stringify(state)) : null; }
+function sameState(left,right){ return JSON.stringify(left)===JSON.stringify(right); }
+function mergeState(base,local,remote){
+  if(!base) return cloneState(local||remote||{});
+  const merged={};
+  const keys=new Set([...Object.keys(base||{}),...Object.keys(local||{}),...Object.keys(remote||{})]);
+  keys.forEach(key=>{
+    const baseValue=base[key], localValue=local?.[key], remoteValue=remote?.[key];
+    if(sameState(localValue,baseValue)){ merged[key]=cloneState(remoteValue); return; }
+    if(sameState(remoteValue,baseValue)||sameState(localValue,remoteValue)){ merged[key]=cloneState(localValue); return; }
+    if(Array.isArray(localValue)&&Array.isArray(remoteValue)){
+      const baseItems=Array.isArray(baseValue)?baseValue:[];
+      const byId=list=>new Map(list.filter(item=>item&&item.id).map(item=>[item.id,item]));
+      const baseItemsById=byId(baseItems), localItemsById=byId(localValue), remoteItemsById=byId(remoteValue);
+      const ids=new Set([...baseItemsById.keys(),...localItemsById.keys(),...remoteItemsById.keys()]);
+      merged[key]=[...ids].map(id=>{
+        const baseItem=baseItemsById.get(id), localItem=localItemsById.get(id), remoteItem=remoteItemsById.get(id);
+        if(sameState(localItem,baseItem)) return remoteItem;
+        if(sameState(remoteItem,baseItem)||sameState(localItem,remoteItem)) return localItem;
+        if(localItem===undefined && remoteItem!==undefined) return remoteItem;
+        if(remoteItem===undefined && localItem!==undefined) return localItem;
+        return localItem;
+      }).filter(Boolean);
+      return;
+    }
+    merged[key]=cloneState(localValue);
+  });
+  return merged;
+}
 function applyRemoteState(state){
   if(!state || typeof state!=='object') return;
   Object.assign(DB,state);
@@ -685,9 +714,18 @@ async function syncAppState(){
   if(!SUPABASE.client || SUPABASE.applyingRemote) return;
   syncQueue=syncQueue.then(async()=>{
     if(!SUPABASE.client || SUPABASE.applyingRemote) return;
-    const result=await SUPABASE.client.from('zfc_app_state').upsert({id:1,state:appState(),updated_at:new Date().toISOString()});
+    const latest=await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
+    if(latest.error) throw latest.error;
+    const localState=appState();
+    const nextState=latest.data?.state ? mergeState(SUPABASE.baseState,localState,latest.data.state) : localState;
+    SUPABASE.applyingRemote=true;
+    applyRemoteState(nextState);
+    SUPABASE.applyingRemote=false;
+    const result=await SUPABASE.client.rpc('zfc_merge_app_state',{incoming_state:nextState});
     if(result.error){ SUPABASE.status='Synchronisierung fehlgeschlagen'; console.warn('Supabase-State konnte nicht synchronisiert werden',result.error); }
+    else { applyRemoteState(result.data||nextState); SUPABASE.baseState=cloneState(result.data||nextState); }
   }).catch(error=>{
+    SUPABASE.applyingRemote=false;
     SUPABASE.status='Synchronisierung fehlgeschlagen';
     console.warn('Supabase-State konnte nicht synchronisiert werden',error);
   });
@@ -705,14 +743,15 @@ async function initSupabase(){
   try{
     setSupabaseStatus('Verbinde …');
     SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
-    const localState=appState();
     const shared = await SUPABASE.client.from('zfc_app_state').select('state,updated_at').eq('id',1).maybeSingle();
     if(shared.error) throw shared.error;
     const remoteState=shared.data?.state;
     if(remoteState && Object.keys(remoteState).length){
       applyRemoteState(remoteState);
+      SUPABASE.baseState=cloneState(remoteState);
     }else{
       await syncAppState();
+      SUPABASE.baseState=cloneState(appState());
     }
     const settings = await SUPABASE.client.from('zfc_finance_settings').select('*').order('updated_at',{ascending:false}).limit(1).maybeSingle();
     if(settings.data){ DB.financeSettings={...DB.financeSettings,season:settings.data.season,startingCapital:Number(settings.data.starting_capital||0),currency:settings.data.currency||'EUR',discordWebhookUrl:settings.data.discord_webhook_url||'',caseWebhookUrl:settings.data.case_webhook_url||'',siteUrl:settings.data.site_url||DB.financeSettings.siteUrl}; persist.financeSettings(); }
@@ -721,7 +760,9 @@ async function initSupabase(){
     SUPABASE.channel = SUPABASE.client.channel('zfc-racing-realtime')
       .on('postgres_changes',{event:'*',schema:'public',table:'zfc_app_state'}, payload=>{
         if(!payload.new?.state) return;
-        SUPABASE.applyingRemote=true; applyRemoteState(payload.new.state); SUPABASE.applyingRemote=false;
+        const merged=mergeState(SUPABASE.baseState,appState(),payload.new.state);
+        SUPABASE.applyingRemote=true; applyRemoteState(merged); SUPABASE.applyingRemote=false;
+        SUPABASE.baseState=cloneState(merged);
         render();
       })
       .on('postgres_changes',{event:'*',schema:'public',table:'zfc_finance_transactions'}, payload=>{
