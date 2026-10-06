@@ -8,7 +8,7 @@ const SUPABASE_CONFIG = {
 const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
 let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null };
-let AUTH = { session:null, profile:null, authSubscription:null };
+let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -234,6 +234,23 @@ async function syncAppState(){
   return syncQueue;
 }
 function fromSupabaseTransaction(t){ return {id:t.id, season:t.season, teamId:t.team_id||'', race:t.race, date:t.transaction_date, type:t.type, category:t.category, description:t.description, amount:Number(t.amount||0), counterparty:t.counterparty, status:t.status, createdAt:t.created_at, updatedAt:t.updated_at}; }
+function playLoginIntro(){
+  const overlay=document.getElementById('loginIntro');
+  if(!overlay) return Promise.resolve();
+  overlay.hidden=false;
+  overlay.classList.remove('is-booting');
+  void overlay.offsetWidth;
+  return new Promise(resolve=>{
+    setTimeout(()=>{
+      overlay.classList.add('is-booting');
+      setTimeout(()=>{
+        overlay.hidden=true;
+        overlay.classList.remove('is-booting');
+        resolve();
+      },4000);
+    },3600);
+  });
+}
 function setSupabaseStatus(status){
   SUPABASE.status=status;
   const el=document.getElementById('sb_status');
@@ -258,7 +275,7 @@ async function initSupabase(){
     SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
     const authState=await SUPABASE.client.auth.getSession();
     if(authState.error) throw authState.error;
-    if(!authState.data.session){ AUTH.session=null; AUTH.profile=null; showLogin(); return; }
+    if(!authState.data.session){ AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false; showLogin(); return; }
     AUTH.session=authState.data.session;
     const profileResult=await SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier').eq('id',AUTH.session.user.id).single();
     if(profileResult.error){
@@ -272,7 +289,7 @@ async function initSupabase(){
     document.getElementById('loginScreen').style.display='none';
     renderAccountBadge();
     const authListener=SUPABASE.client.auth.onAuthStateChange((event,session)=>{
-      if(event==='SIGNED_OUT'){ AUTH.session=null; AUTH.profile=null; showLogin(); }
+      if(event==='SIGNED_OUT'){ AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false; showLogin(); }
     });
     SUPABASE.authSubscription=authListener.data.subscription;
     const shared = await SUPABASE.client.from('zfc_app_state').select('state,updated_at').eq('id',1).maybeSingle();
@@ -326,10 +343,15 @@ async function initSupabase(){
         else if(status==='TIMED_OUT') setSupabaseStatus('Zeitüberschreitung beim Realtime-Start');
       });
     setSupabaseStatus('Verbunden · Synchronisierung läuft');
-    document.getElementById('loadingScreen').style.display='none';
+      if(AUTH.loginIntroRequested){
+        AUTH.loginIntroRequested=false;
+        await playLoginIntro();
+      }
+      document.getElementById('loadingScreen').style.display='none';
     document.getElementById('shell').style.display='flex';
     render();
   }catch(error){
+    AUTH.loginIntroRequested=false;
     SUPABASE.client=null;
     setSupabaseStatus('Verbindung fehlgeschlagen');
     showLogin(error.message||'Supabase-Verbindung fehlgeschlagen.');
@@ -352,6 +374,7 @@ async function handleLogin(){
     const client=window.supabase.createClient(config.url,config.anonKey);
     const result=await client.auth.signInWithPassword({email:document.getElementById('loginEmail').value.trim(),password:document.getElementById('loginPassword').value});
     if(result.error) throw result.error;
+    AUTH.loginIntroRequested=true;
     SUPABASE.client=client;
     await initSupabase();
   }catch(error){

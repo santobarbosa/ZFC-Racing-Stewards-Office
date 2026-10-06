@@ -24,6 +24,57 @@
   <div id="main"></div>
 </div>
 <div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
+<section id="loginIntro" class="login-intro-overlay" hidden aria-label="ZFC Racing Stewards Office startet" role="status" aria-live="polite">
+  <div class="intro-grid" aria-hidden="true"></div>
+  <div class="intro-topline" aria-hidden="true"><span>ZFC RACING <i>/</i> STEWARDS OFFICE</span><span>RACE CONTROL <b>● ONLINE</b></span></div>
+  <div class="intro-scene" aria-hidden="true">
+    <div class="intro-telemetry intro-telemetry-left">
+      <span>SESSION <b>STEWARD ACCESS</b></span><span>TELEMETRY <b>LIVE</b></span><span>SECTOR <b>01 / 03</b></span>
+      <div class="intro-spark"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <span>LATENCY <b>12.84 ms</b></span><span>DATA LINK <b>ENCRYPTED</b></span>
+    </div>
+    <div class="intro-brand">
+      <div class="intro-mark">ZFC</div>
+      <div class="intro-brand-rule"></div>
+      <div class="intro-brand-name">STEWARD<br><span>OFFICE</span></div>
+      <p>RACE CONTROL SYSTEM</p>
+    </div>
+    <div class="intro-telemetry intro-telemetry-right">
+      <span>VEHICLE <b>F1 / 26</b></span><span>ENGINE <b>10,240 RPM</b></span><span>TYRE TEMP <b>94 °C</b></span>
+      <div class="intro-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <span>DRS <b>AVAILABLE</b></span><span>ERS <b>98.6%</b></span>
+    </div>
+    <div class="intro-track"><i></i><i></i><i></i></div>
+    <svg class="intro-racecar" viewBox="0 0 560 150" focusable="false">
+      <defs>
+        <linearGradient id="carPaint" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#ff425b"/><stop offset=".55" stop-color="#d10e31"/><stop offset="1" stop-color="#71091c"/></linearGradient>
+        <linearGradient id="carWing" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#ff6478"/><stop offset="1" stop-color="#9e0924"/></linearGradient>
+      </defs>
+      <ellipse cx="286" cy="130" rx="225" ry="10" fill="#ff173b" opacity=".34"/>
+      <path d="M54 105h34l15-22h80l29-37q12-15 34-17l66-2q24 1 42 20l34 36h92l21 22h41v10H54z" fill="url(#carPaint)" stroke="#ff8494" stroke-width="2"/>
+      <path d="m216 48 22-14q8-5 24-5h41q19 1 31 14l17 19H198z" fill="#11171d" stroke="#ff536a" stroke-width="2"/>
+      <path d="m244 36 39-2v26h-61z" fill="#294050" opacity=".9"/><path d="m288 34 15 1q15 1 25 12l10 13h-50z" fill="#354e5d" opacity=".85"/>
+      <path d="M103 81h91l23 10H96zM355 80h90l11 11h-91z" fill="#ff6a7d" opacity=".8"/>
+      <path d="M53 100H18l9-8h41zM475 92h49l20 10h-68z" fill="url(#carWing)" stroke="#ff6478" stroke-width="2"/>
+      <path d="M70 109h-46v-5h50M469 106h69v5h-73" fill="none" stroke="#17191e" stroke-width="7"/>
+      <circle cx="151" cy="109" r="25" fill="#090a0d" stroke="#55565b" stroke-width="5"/><circle cx="151" cy="109" r="9" fill="#b5b7bc"/>
+      <circle cx="422" cy="109" r="25" fill="#090a0d" stroke="#55565b" stroke-width="5"/><circle cx="422" cy="109" r="9" fill="#b5b7bc"/>
+      <path d="M218 86h117" stroke="#ffb5be" stroke-width="2" opacity=".7"/><text x="256" y="84" fill="#fff" font-size="19" font-weight="900" font-family="sans-serif" font-style="italic">ZFC</text>
+      <path d="M88 74h-41M470 74h38" stroke="#f7f4ed" stroke-width="2" opacity=".75"/>
+    </svg>
+    <div class="intro-speedline"></div>
+    <div class="intro-data-stamp">FIA // RACE STEWARDS<br><b>AUTHENTICATED</b></div>
+  </div>
+  <div class="intro-footer" aria-hidden="true"><span>PRECISION <i>·</i> FAIRNESS <i>·</i> CONTROL</span><span>SYS 26.10 <b>///</b> ZFC-RCO</span></div>
+  <div class="intro-boot" aria-hidden="true">
+    <div class="boot-emblem">ZFC<span>RACING</span></div>
+    <p class="boot-kicker">SECURE SESSION ESTABLISHED</p>
+    <h2>Steward Office <span>wird gestartet</span></h2>
+    <p class="boot-status">Systemmodule werden initialisiert <b>...</b></p>
+    <div class="boot-progress"><i></i></div>
+    <div class="boot-modules"><span>RACE CONTROL</span><span>CASE DATA</span><span>SECURE LINK</span><span>READY</span></div>
+  </div>
+</section>
 <section id="loginScreen" aria-label="Anmeldung">
   <form class="login-panel" onsubmit="event.preventDefault();handleLogin();">
     <div class="login-topline"><span class="eyebrow">ZFC Racing</span><span class="login-access"><i></i> Secure access</span></div>
