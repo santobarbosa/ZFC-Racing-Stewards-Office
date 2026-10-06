@@ -26,13 +26,19 @@
 <div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
 <section id="loginScreen" aria-label="Anmeldung">
   <form class="login-panel" onsubmit="event.preventDefault();handleLogin();">
-    <div class="eyebrow">ZFC Racing</div>
-    <h1>Stewards Office</h1>
-    <p class="login-subtitle">Interner Zugang</p>
-    <div class="field"><label>E-Mail</label><input id="loginEmail" type="email" autocomplete="username" required></div>
-    <div class="field"><label>Passwort</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+    <div class="login-topline"><span class="eyebrow">ZFC Racing</span><span class="login-access"><i></i> Secure access</span></div>
+    <div class="login-heading">
+      <div class="login-monogram" aria-hidden="true">ZFC</div>
+      <p class="login-subtitle">Interner Zugang</p>
+      <h1>Stewards<br><span>Office</span></h1>
+      <p class="login-intro">Melde dich mit deinem autorisierten Konto an.</p>
+    </div>
+    <div class="login-fields">
+      <div class="field"><label for="loginEmail">E-Mail</label><input id="loginEmail" type="email" autocomplete="username" placeholder="name@zfc-racing.de" required></div>
+      <div class="field"><label for="loginPassword">Passwort</label><input id="loginPassword" type="password" autocomplete="current-password" placeholder="Dein Passwort" required></div>
+    </div>
     <p id="loginMessage" class="login-message" role="alert"></p>
-    <button class="btn primary" type="submit" style="width:100%">Anmelden</button>
+    <button class="btn primary login-submit" type="submit">Anmelden <span aria-hidden="true">→</span></button>
     <p class="footer-note">Benutzerkonten werden durch Tier 3 eingerichtet.</p>
   </form>
 </section>
