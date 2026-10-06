@@ -640,7 +640,31 @@ let ROUTE = {page:'dashboard', id:null};
 let CASE_OPENING_SEEN = null;
 let CASE_OPENING_MODE = 'none';
 
-const PAGE_TIERS={escalations:2,'tier-office':2,archive:2,finance:3,'finance-pay':3,manage:3};
+const PAGE_TIERS={
+  dashboard:1,
+  'tier-office':2,
+  caseform:1,
+  cases:1,
+  drivers:1,
+  drivercases:2,
+  market:2,
+  escalations:2,
+  'escalations-t2':2,
+  'escalations-t3':3,
+  teams:1,
+  transfers:2,
+  finance:3,
+  'finance-pay':3,
+  processes:2,
+  rulebook:2,
+  manage:3,
+  archive:3,
+  esport:3,
+  'esport-drivers':3,
+  'esport-driverform':3,
+  'esport-setup':3,
+  'esport-presentation':3,
+};
 function canAccessPage(page){
   const requiredTier=PAGE_TIERS[page]??1;
   return Number(AUTH.profile?.access_tier||0)>=requiredTier;
@@ -671,7 +695,9 @@ const NAV = [
   {id:'drivers', label:'Fahrer', ic:'04'},
   {id:'drivercases', label:'Fahrer Cases', ic:'05'},
   {id:'market', label:'FAHRERMARKT', ic:'06'},
-  {id:'escalations', label:'ESKALIERUNGEN', ic:'07'},
+  {id:'escalations-t2', label:'ESKALIERUNG T2', ic:'07'},
+  {id:'escalations', label:'ESKALIERUNGEN', ic:'07a'},
+  {id:'escalations-t3', label:'ESKALIERUNG T3', ic:'07b'},
   {id:'teams', label:'Teams', ic:'08'},
   {id:'transfers', label:'Transfers', ic:'09'},
   {id:'finance', label:'Finanzen', ic:'10'},
@@ -723,7 +749,9 @@ function render(){
   else if(ROUTE.page==='drivercases') main.innerHTML = pageDriverCasesOverview();
   else if(ROUTE.page==='driverform') main.innerHTML = pageDriverForm(ROUTE.id? driverById(ROUTE.id): null);
   else if(ROUTE.page==='market') main.innerHTML = ROUTE.id ? pageMarketRequestDetail(ROUTE.id) : pageMarketOverview();
-  else if(ROUTE.page==='escalations') main.innerHTML = ROUTE.id ? pageEscalationDetail(ROUTE.id) : pageEscalations();
+  else if(ROUTE.page==='escalations') main.innerHTML = ROUTE.id ? pageEscalationDetail(ROUTE.id) : pageEscalationHub();
+  else if(ROUTE.page==='escalations-t2') main.innerHTML = ROUTE.id ? pageEscalationDetail(ROUTE.id) : pageEscalations(2);
+  else if(ROUTE.page==='escalations-t3') main.innerHTML = ROUTE.id ? pageEscalationDetail(ROUTE.id) : pageEscalations(3);
   else if(ROUTE.page==='teams') main.innerHTML = pageTeams();
   else if(ROUTE.page==='transfers') main.innerHTML = pageTransfers();
   else if(ROUTE.page==='finance') main.innerHTML = pageFinance();
@@ -1771,11 +1799,12 @@ function openTier3EscalationDialog(caseId){
   modal.id = 'tier3Modal';
   modal.style.position = 'fixed'; modal.style.inset = '0'; modal.style.background = 'rgba(0,0,0,.68)'; modal.style.display = 'grid'; modal.style.placeItems = 'center'; modal.style.zIndex = '2000';
   modal.innerHTML = `
-    <div style="width:min(620px,calc(100vw - 32px));background:var(--black-2);border:1px solid var(--line);padding:24px 22px;box-shadow:0 20px 50px rgba(0,0,0,.45);">
+    <div style="width:min(700px,calc(100vw - 32px));background:var(--black-2);border:1px solid var(--line);padding:24px 22px;box-shadow:0 20px 50px rgba(0,0,0,.45);">
       <div class="eyebrow">Steward-System</div>
-      <h2 style="margin:8px 0 16px; font-size:27px;">Fall weiterleiten</h2>
-      <div class="field"><label>Zuständiges Tier</label><select id="tier3_target"><option value="2">Tier 2 · Fachprüfung</option><option value="3" selected>Tier 3 · Leitung</option></select></div>
-      <div class="field"><label>Grund der Eskalierung</label><textarea id="tier3_reason" placeholder="Komplexe Regelauslegung, unklare Beweislage, schwerwiegender Vorfall, ..." required></textarea></div>
+      <h2 style="margin:8px 0 16px; font-size:27px;">Fall eskalieren</h2>
+      <div class="field"><label>Ziel der Eskalierung</label><select id="tier3_target"><option value="2">Tier 2 · Fachprüfung</option><option value="3" selected>Tier 3 · Leitung</option></select></div>
+      <div class="field"><label>Warum wird eskaliert?</label><textarea id="tier3_reason" placeholder="Bitte die konkrete Ursache, Beweislage, Regelauslegung oder weitere Prüfung nennen." required></textarea></div>
+      <div class="field"><label>Was wird benötigt?</label><textarea id="tier3_needed" placeholder="z. B. Entscheidung, Prüfung, Beweismittel, Freigabe, Finanzabwicklung, Team-Koordination, zusätzliche Analyse…" required></textarea></div>
       <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; margin-top:18px;">
         <button class="btn" onclick="document.getElementById('tier3Modal').remove()">Abbrechen</button>
         <button class="btn primary" onclick="submitTier3Escalation('${caseId}')">Eskalierung durchführen</button>
@@ -1787,7 +1816,8 @@ function openTier3EscalationDialog(caseId){
 
 function submitTier3Escalation(caseId){
   const reason = document.getElementById('tier3_reason')?.value.trim();
-  if(!reason){ alert('Bitte einen Grund für die Eskalierung angeben.'); return; }
+  const needed = document.getElementById('tier3_needed')?.value.trim();
+  if(!reason || !needed){ alert('Bitte sowohl den Eskalierungsgrund als auch die benötigten Unterlagen bzw. die benötigte Unterstützung angeben.'); return; }
   const targetTier=Number(document.getElementById('tier3_target')?.value||3);
   const c = DB.cases.find(item=>item.id===caseId); if(!c) return;
   c.status = `An Tier ${targetTier} eskaliert`;
@@ -1797,11 +1827,13 @@ function submitTier3Escalation(caseId){
   const escalation = {
     id: uid(),
     caseId: c.id,
+    sourceType: 'case',
     stw: c.stw,
     caseName: c.event || 'Steward-Fall',
     drivers: [driverName(driverById(c.driverInvolved)), driverName(driverById(c.driverAffected))].filter(Boolean).join(', ') || '—',
     type: c.category || 'Steward-Fall',
     reason,
+    requiredSupport: needed,
     originalSteward: c.stewardChairman || 'Steward Team',
     escalatedAt: Date.now(),
     status: `An Tier ${targetTier} eskaliert`,
@@ -1815,19 +1847,69 @@ function submitTier3Escalation(caseId){
   DB.marketRequests = DB.marketRequests || [];
   persist.cases(); persist.escalations();
   document.getElementById('tier3Modal')?.remove();
-  go('cases');
+  go(targetTier===3 ? 'escalations-t3' : 'escalations-t2', escalation.id);
 }
 
-function pageEscalations(){
-  const visibleEscalations=DB.escalations.filter(item=>Number(AUTH.profile?.access_tier)>=3||Number(item.targetTier||3)===Number(AUTH.profile?.access_tier));
+function pageEscalationHub(){
+  const tier2Count = DB.escalations.filter(item=>Number(item.targetTier||3)===2).length;
+  const tier3Count = DB.escalations.filter(item=>Number(item.targetTier||3)===3).length;
   return `
     <div class="pagehead">
-      <div><div class="eyebrow">Tier ${Number(AUTH.profile?.access_tier)}</div><h1>Eskalierungen</h1></div>
+      <div><div class="eyebrow">Steward-Workflow</div><h1>Eskalierungen</h1></div>
+    </div>
+    <div class="grid cols-2">
+      <div class="panel" style="cursor:pointer;" onclick="go('escalations-t2')">
+        <div class="eyebrow">Tier 2</div>
+        <h2>Fachprüfung</h2>
+        <p>Für komplexe technische Fälle, Fahrerprüfungen und fachliche Rückfragen an Tier 2.</p>
+        <div class="stat red" style="margin-top:12px;">
+          <div class="n">${tier2Count}</div>
+          <div class="l">offene Eskalierungen</div>
+        </div>
+      </div>
+      <div class="panel" style="cursor:pointer;" onclick="go('escalations-t3')">
+        <div class="eyebrow">Tier 3</div>
+        <h2>Leitung / Finale Freigabe</h2>
+        <p>Für Leitung, Finalentscheidung, Transfers mit Freigabe und finanzielle Abwicklung.</p>
+        <div class="stat gold" style="margin-top:12px;">
+          <div class="n">${tier3Count}</div>
+          <div class="l">offene Eskalierungen</div>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Regel für Eskalierungen</h2>
+      <p>Jede Eskalierung muss immer einen klaren Kommentar enthalten: <strong>Warum wird eskaliert?</strong> und <strong>Was wird benötigt?</strong>. So bleibt der Ablauf sauber, nachvollziehbar und schnell bearbeitbar.</p>
+    </div>
+  `;
+}
+
+function pageEscalations(targetTier = null){
+  const tier = Number(targetTier || AUTH.profile?.access_tier || 2);
+  const visibleEscalations = DB.escalations.filter(item => Number(item.targetTier || 3) === tier);
+  const rows = visibleEscalations.length ? visibleEscalations.map(e => {
+    const targetPage = tier === 3 ? 'escalations-t3' : 'escalations-t2';
+    return `<tr class="rowlink" onclick="go('${targetPage}','${e.id}')">
+      <td class="pts">${esc(e.stw || '—')}</td>
+      <td>${esc(e.caseName || '—')}</td>
+      <td>${esc(e.drivers || '—')}</td>
+      <td>${esc(e.type || '—')}</td>
+      <td>Tier ${Number(e.targetTier || 3)}</td>
+      <td>${esc(e.reason || '—')}</td>
+      <td>${esc(e.requiredSupport || '—')}</td>
+      <td>${esc(e.originalSteward || '—')}</td>
+      <td>${fmtDateTime(e.escalatedAt)}</td>
+      <td><span class="tag ${e.status === 'Zurück an Tier 1' ? 'open' : 'invest'}">${esc(e.status || 'An Tier '+(e.targetTier||3)+' eskaliert')}</span></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="10"><div class="empty"><b>Keine Eskalierungen</b>In diesem Bereich sind derzeit keine Fälle offen.</div></td></tr>';
+  return `
+    <div class="pagehead">
+      <div><div class="eyebrow">Tier ${tier}</div><h1>Eskalierungen an Tier ${tier}</h1></div>
     </div>
     <div class="panel">
       <table>
-        <thead><tr><th>STW-Nummer</th><th>Fallname</th><th>beteiligte Fahrer</th><th>Falltyp</th><th>Eskalierungsgrund</th><th>ursprünglicher Steward</th><th>Eskalierungsdatum</th><th>Status</th><th>Tier-3-Bearbeiter</th><th>Letzte Änderung</th></tr></thead>
-        <tbody>${visibleEscalations.length? visibleEscalations.map(e=>`<tr class="rowlink" onclick="go('escalations','${e.id}')"><td class="pts">${esc(e.stw || '—')}</td><td>${esc(e.caseName || '—')}</td><td>${esc(e.drivers || '—')}</td><td>${esc(e.type || '—')}</td><td>${esc(e.reason || '—')}</td><td>${esc(e.originalSteward || '—')}</td><td>${fmtDateTime(e.escalatedAt)}</td><td><span class="tag ${e.status === 'Zurück an Tier 1' ? 'open' : 'invest'}">${esc(e.status || `An Tier ${e.targetTier||3} eskaliert`)}</span></td><td>${esc(e.tier3User || '—')}</td><td>${fmtDateTime(e.updatedAt || e.escalatedAt)}</td></tr>`).join('') : '<tr><td colspan="10"><div class="empty"><b>Keine Eskalierungen</b>In diesem Tier sind derzeit keine Fälle offen.</div></td></tr>'}</tbody>
+        <thead><tr><th>STW-Nummer</th><th>Fallname</th><th>beteiligte Fahrer</th><th>Falltyp</th><th>Ziel</th><th>Eskalierungsgrund</th><th>Benötigt</th><th>Steward</th><th>Eskalierungsdatum</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
       </table>
     </div>
   `;
@@ -1835,11 +1917,13 @@ function pageEscalations(){
 
 function pageEscalationDetail(id){
   const e = DB.escalations.find(item=>item.id===id); if(!e) return `<div class="panel"><h2>Eskalierung nicht gefunden</h2></div>`;
-  const caseData = DB.cases.find(item=>item.id===e.caseId);
+  const targetTier = Number(e.targetTier || 3);
+  const backPage = ROUTE.page === 'escalations-t3' ? 'escalations-t3' : ROUTE.page === 'escalations-t2' ? 'escalations-t2' : 'escalations';
+  const isTransferEscalation = e.sourceType === 'transfer';
   return `
     <div class="pagehead">
-      <div><div class="eyebrow">Tier 3 / Akte</div><h1>${esc(e.stw || 'Eskalierung')}</h1></div>
-      <div class="actions"><button class="btn" onclick="go('escalations')">← Übersicht</button></div>
+      <div><div class="eyebrow">${targetTier === 2 ? 'Tier 2 / Fachprüfung' : 'Tier 3 / Leitung'}</div><h1>${esc(e.stw || 'Eskalierung')}</h1></div>
+      <div class="actions"><button class="btn" onclick="go('${backPage}')">← Übersicht</button></div>
     </div>
     <div class="grid cols-2" style="align-items:start;">
       <div class="panel">
@@ -1848,15 +1932,17 @@ function pageEscalationDetail(id){
         <div class="field"><label>Fallname</label><input value="${esc(e.caseName || '—')}" readonly></div>
         <div class="field"><label>beteiligte Fahrer</label><input value="${esc(e.drivers || '—')}" readonly></div>
         <div class="field"><label>Falltyp</label><input value="${esc(e.type || '—')}" readonly></div>
+        <div class="field"><label>Ziel der Eskalierung</label><input value="Tier ${targetTier}" readonly></div>
         <div class="field"><label>ursprünglicher Steward</label><input value="${esc(e.originalSteward || '—')}" readonly></div>
-        <div class="field"><label>Tier-3-Bearbeiter</label><input value="${esc(e.tier3User || '—')}" readonly></div>
       </div>
       <div class="panel">
-        <h2>Tier-3-Bearbeitung</h2>
-        <div class="field"><label>Eskalierungsgrund</label><textarea readonly>${esc(e.reason || '')}</textarea></div>
-        <div class="field"><label>Tier-3-Feedback</label><textarea id="tier3_feedback" placeholder="Entscheidung, Hinweise, notwendige Korrekturen, zusätzliche Untersuchungen, Prozesshinweise…">${esc(e.feedback || '')}</textarea></div>
+        <h2>${targetTier === 3 ? 'Tier-3-Bearbeitung' : 'Tier-2-Bearbeitung'}</h2>
+        <div class="field"><label>Warum wird eskaliert?</label><textarea readonly>${esc(e.reason || '')}</textarea></div>
+        <div class="field"><label>Was wird benötigt?</label><textarea readonly>${esc(e.requiredSupport || '')}</textarea></div>
+        <div class="field"><label>${targetTier === 3 ? 'Tier-3' : 'Tier-2'}-Feedback</label><textarea id="tier3_feedback" placeholder="Entscheidung, Hinweise, notwendige Korrekturen, zusätzliche Untersuchungen, Prozesshinweise…">${esc(e.feedback || '')}</textarea></div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn primary" onclick="returnTier3ToSteward('${e.id}')">An Tier 1 zurückgeben</button>
+          ${isTransferEscalation && targetTier === 3 ? '<button class="btn primary" onclick="confirmTransferEscalation(\'${e.id}\')">Transfer bestätigen &amp; Finanzabwicklung erstellen</button>' : ''}
+          <button class="btn" onclick="returnTier3ToSteward('${e.id}')">An Tier 1 zurückgeben</button>
         </div>
       </div>
     </div>
@@ -1992,6 +2078,7 @@ function pageTransfers(){
       <td>${esc(teamById(t.fromTeamId)?.name || '—')}</td>
       <td>${esc(teamById(t.toTeamId)?.name || '—')}</td>
       <td>${esc(t.note||'—')}</td>
+      <td>${esc(t.status || 'Erfasst')}</td>
       <td><button class="btn small danger" onclick="deleteTransfer('${t.id}')">Löschen</button></td>
     </tr>`;
   }).join('');
@@ -2015,8 +2102,8 @@ function pageTransfers(){
 
   <div class="panel">
     <h2>Transfer<b>historie</b></h2>
-    <table><thead><tr><th>Datum</th><th>Fahrer</th><th>Von</th><th>Nach</th><th>Notiz</th><th></th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6"><div class="empty">Noch keine Transfers erfasst.</div></td></tr>`}</tbody></table>
+    <table><thead><tr><th>Datum</th><th>Fahrer</th><th>Von</th><th>Nach</th><th>Notiz</th><th>Status</th><th></th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="7"><div class="empty">Noch keine Transfers erfasst.</div></td></tr>`}</tbody></table>
   </div>
   `;
 }
@@ -2025,17 +2112,84 @@ async function createTransfer(){
   const driverId = document.getElementById('t_driver').value;
   const toTeamId = document.getElementById('t_toTeam').value;
   const date = document.getElementById('t_date').value;
-  const note = document.getElementById('t_note').value;
+  const note = document.getElementById('t_note').value.trim();
   if(!driverId || !toTeamId){ alert('Bitte Fahrer und Zielteam auswählen.'); return; }
   const d = driverById(driverId);
   const fromTeamId = d.teamId;
   if(fromTeamId===toTeamId){ alert('Der Fahrer steht bereits bei diesem Team.'); return; }
-  DB.transfers.push({id:uid(), driverId, fromTeamId, toTeamId, date, note, createdAt:Date.now()});
-  d.teamId = toTeamId;
-  d.history = d.history||[]; d.history.push({ts:Date.now(), text:`Transfer: ${teamById(fromTeamId)?.name||'—'} → ${teamById(toTeamId)?.name||'—'}`});
+  const transferId = uid();
+  const transfer = {
+    id: transferId,
+    driverId,
+    fromTeamId,
+    toTeamId,
+    date,
+    note,
+    status: 'An Tier 3 eskaliert',
+    createdAt: Date.now(),
+    escalationId: null
+  };
+  const escalation = {
+    id: uid(),
+    caseId: `transfer-${transferId}`,
+    sourceType: 'transfer',
+    sourceId: transferId,
+    stw: `TR-${Math.floor(1000 + Math.random()*9000)}`,
+    caseName: `Transfer ${driverName(d)}`,
+    drivers: driverName(d),
+    type: 'Transfer',
+    reason: `Transferantrag für ${driverName(d)}: ${teamById(fromTeamId)?.name || 'Aktuelles Team'} → ${teamById(toTeamId)?.name || 'Zielteam'}.`,
+    requiredSupport: 'Bestätigung durch Tier 3 und Erstellung der Finanzabwicklung für den Transfer.',
+    originalSteward: AUTH.profile?.display_name || 'Steward Team',
+    escalatedAt: Date.now(),
+    status: 'An Tier 3 eskaliert',
+    targetTier: 3,
+    tier3User: 'Tier 3',
+    updatedAt: Date.now(),
+    feedback: '',
+    transferId
+  };
+  transfer.escalationId = escalation.id;
+  DB.transfers.push(transfer);
+  DB.escalations.push(escalation);
+  d.history = d.history||[]; d.history.push({ts:Date.now(), text:`Transfer eingereicht: ${teamById(fromTeamId)?.name||'—'} → ${teamById(toTeamId)?.name||'—'} · wartet auf Tier-3-Freigabe`});
   await persist.transfers();
   await persist.drivers();
-  go('transfers');
+  await persist.escalations();
+  go('escalations-t3', escalation.id);
+}
+async function confirmTransferEscalation(id){
+  const escalation = DB.escalations.find(item=>item.id===id); if(!escalation) return;
+  const transfer = DB.transfers.find(item=>item.id===escalation.sourceId); if(!transfer) return;
+  const d = driverById(transfer.driverId); if(!d) return;
+  d.teamId = transfer.toTeamId;
+  transfer.status = 'Bestätigt';
+  transfer.approvedBy = AUTH.profile?.display_name || 'Tier 3';
+  transfer.confirmedAt = Date.now();
+  d.history = d.history||[]; d.history.push({ts:Date.now(), text:`Transfer bestätigt: ${teamById(transfer.fromTeamId)?.name||'—'} → ${teamById(transfer.toTeamId)?.name||'—'}`});
+  DB.finance.push({
+    id: uid(),
+    season: DB.financeSettings?.season || '2026',
+    teamId: transfer.toTeamId,
+    race: 'Transfer',
+    date: transfer.date || today(),
+    type: 'Transfer',
+    category: 'Transfer',
+    description: `Transfer bestätigt: ${driverName(d)} • ${teamById(transfer.fromTeamId)?.name || '—'} → ${teamById(transfer.toTeamId)?.name || '—'}`,
+    amount: 0,
+    counterparty: 'Steward Office',
+    status: 'Erfasst',
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  });
+  escalation.status = 'Bestätigt durch Tier 3';
+  escalation.feedback = escalation.feedback || 'Transfer freigegeben. Finanzabwicklung angelegt.';
+  escalation.updatedAt = Date.now();
+  await persist.transfers();
+  await persist.drivers();
+  await persist.escalations();
+  await persist.finance();
+  go('escalations-t3', id);
 }
 async function deleteTransfer(id){
   if(!confirm('Diesen Transfer-Eintrag löschen? (Team-Zuordnung des Fahrers bleibt unverändert.)')) return;
