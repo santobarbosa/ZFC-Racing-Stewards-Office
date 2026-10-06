@@ -319,7 +319,7 @@ async function initSupabase(){
         if(payload.eventType==='DELETE') DB.escalations=DB.escalations.filter(item=>item.id!==row.id);
         else { const item={...row.data,targetTier:row.target_tier}; const index=DB.escalations.findIndex(entry=>entry.id===row.id); if(index<0) DB.escalations.push(item); else DB.escalations[index]=item; }
         saveKey(KEYS.escalations,DB.escalations);
-        if(ROUTE.page==='tier-office'||ROUTE.page==='escalations') render();
+        if(ROUTE.page.startsWith('tier-office')||ROUTE.page==='escalations') render();
       }).subscribe((status)=>{
         if(status==='SUBSCRIBED') setSupabaseStatus('Verbunden · Live-Sync aktiv');
         else if(status==='CHANNEL_ERROR') setSupabaseStatus('Fehler: Realtime nicht aktiv');
@@ -643,6 +643,8 @@ let CASE_OPENING_MODE = 'none';
 const PAGE_TIERS={
   dashboard:1,
   'tier-office':2,
+  'tier-office-t2':2,
+  'tier-office-t3':3,
   caseform:1,
   cases:1,
   drivers:1,
@@ -667,19 +669,55 @@ const PAGE_TIERS={
 };
 function canAccessPage(page){
   const requiredTier=PAGE_TIERS[page]??1;
+  if(page==='tier-office-t2'||page==='tier-office-t3') return Number(AUTH.profile?.access_tier||0)===requiredTier;
   return Number(AUTH.profile?.access_tier||0)>=requiredTier;
 }
-function go(page, id){ if(!canAccessPage(page)){ alert(`Dieser Bereich ist erst ab Tier ${PAGE_TIERS[page]||1} freigegeben.`); return; } CASE_OPENING_MODE=page==='caseform'?(id?'existing':'new'):'none'; ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
+function go(page, id){ if(page==='tier-office') page=Number(AUTH.profile?.access_tier)===3?'tier-office-t3':'tier-office-t2'; if(!canAccessPage(page)){ alert(page.startsWith('tier-office-')?`Dieser Arbeitsplatz ist ausschließlich für Tier ${PAGE_TIERS[page]} freigegeben.`:`Dieser Bereich ist erst ab Tier ${PAGE_TIERS[page]||1} freigegeben.`); return; } CASE_OPENING_MODE=page==='caseform'?(id?'existing':'new'):'none'; ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
 function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
-function pageTierOffice(){
-  const tier=Number(AUTH.profile?.access_tier||2);
-  const escalations=DB.escalations.filter(item=>tier>=3||Number(item.targetTier||3)===tier);
-  const open=escalations.filter(item=>!['Zurück an Tier 1','Abgeschlossen'].includes(item.status));
-  return `<div class="pagehead"><div><div class="eyebrow">Interne Prozesse · Tier ${tier}</div><h1>Tier-Arbeitsplatz</h1></div></div><div class="grid cols-3"><div class="stat red"><div class="n">${open.length}</div><div class="l">Offene Eskalierungen</div></div><div class="stat"><div class="n">${escalations.length}</div><div class="l">Zugewiesener Einblick</div></div><div class="stat green"><div class="n">${esc(AUTH.profile?.position||'Position offen')}</div><div class="l">Deine Position</div></div></div><section class="panel"><h2>Arbeitsbereich <b>Tier ${tier}</b></h2><p>Angemeldet als <strong>${esc(AUTH.profile?.display_name||AUTH.profile?.email)}</strong> · ${esc(AUTH.profile?.position||'Position nicht zugewiesen')}</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 20px"><button class="btn primary" onclick="go('escalations')">Eskalierungen öffnen</button>${tier>=3?'<button class="btn gold" onclick="MANAGE_TAB=\'users\';go(\'manage\')">Benutzer &amp; Rollen</button>':''}</div><div style="overflow:auto"><table><thead><tr><th>Ziel</th><th>Fall</th><th>Grund</th><th>Status</th><th>Erstellt</th><th></th></tr></thead><tbody>${escalations.length?escalations.map(item=>`<tr><td>Tier ${Number(item.targetTier||3)}</td><td>${esc(item.stw||item.caseName||'Fall')}</td><td>${esc(item.reason||'—')}</td><td>${esc(item.status||'Offen')}</td><td>${fmtDateTime(item.escalatedAt)}</td><td><button class="btn small" onclick="go('escalations','${item.id}')">Öffnen</button></td></tr>`).join(''):'<tr><td colspan="6"><div class="empty">Keine Eskalierungen für dieses Tier.</div></td></tr>'}</tbody></table></div></section>`;
+function pageTierOffice(tier){
+  const otherTier=tier===2?3:2;
+  const tierEscalations=DB.escalations.filter(item=>Number(item.targetTier||3)===tier);
+  const openEscalations=tierEscalations.filter(item=>!['Zurück an Tier 1','Abgeschlossen'].includes(item.status));
+  const escalationPage=tier===2?'escalations-t2':'escalations-t3';
+  return `<div class="tier-office-page">
+    <div class="pagehead"><div><div class="eyebrow">Interner Arbeitsbereich · Tier ${tier}</div><h1>Tier ${tier} <b>Arbeitsplatz</b></h1></div><span class="tier-office-badge">ZUGANG: TIER ${tier}</span></div>
+    <div class="grid cols-3 tier-office-stats">
+      <div class="stat red"><div class="n">${openEscalations.length}</div><div class="l">Offene Eskalierungen</div></div>
+      <div class="stat"><div class="n">${tierEscalations.length}</div><div class="l">Zugewiesene Vorgänge</div></div>
+      <div class="stat green"><div class="n">${esc(AUTH.profile?.position||'—')}</div><div class="l">Deine Position</div></div>
+    </div>
+    <div class="grid cols-2 tier-office-panels">
+      <section class="panel tier-office-card">
+        <div class="eyebrow">Fallverwaltung</div><h2>Fälle &amp; Aufgaben</h2>
+        <p>Hier werden künftig die Fälle und Aufgaben für Tier ${tier} gesammelt und bearbeitet.</p>
+        <div class="workspace-placeholder"><strong>Arbeitsliste wird vorbereitet</strong><span>Fallzuweisung und Aufgabenbearbeitung folgen später.</span></div>
+        <button class="btn" type="button" disabled aria-disabled="true">Fälle und Aufgaben öffnen</button>
+      </section>
+      <section class="panel tier-office-card">
+        <div class="eyebrow">Übergabe</div><h2>Mit Tier ${otherTier} abstimmen</h2>
+        <p>Vorgänge sollen künftig zwischen Tier ${tier} und Tier ${otherTier} übergeben werden können.</p>
+        <div class="workspace-placeholder"><strong>Übergaben werden später aktiviert</strong><span>Die Weitergabe von Fällen und Aufgaben ist noch nicht verfügbar.</span></div>
+        <button class="btn" type="button" disabled aria-disabled="true">Fall an Tier ${otherTier} übergeben</button>
+      </section>
+      <section class="panel tier-office-card">
+        <div class="eyebrow">Kommunikation</div><h2>Nachrichten</h2>
+        <p>Nachrichten und Rückfragen zu den Vorgängen dieses Arbeitsbereichs.</p>
+        <div class="workspace-placeholder"><strong>Noch keine Nachrichtenfunktion</strong><span>Nachrichten werden in einem späteren Schritt ergänzt.</span></div>
+        <button class="btn" type="button" disabled aria-disabled="true">Nachricht verfassen</button>
+      </section>
+      <section class="panel tier-office-card tier-office-escalations">
+        <div class="eyebrow">Bestehender Ablauf</div><h2>Eskalierungen</h2>
+        <p>Die vorhandenen Eskalierungen an Tier ${tier} bleiben über die bestehende Übersicht erreichbar.</p>
+        <div class="workspace-placeholder"><strong>${openEscalations.length} offene Eskalierungen</strong><span>Details und Rückmeldungen werden in der Eskalierungsübersicht bearbeitet.</span></div>
+        <button class="btn primary" type="button" onclick="go('${escalationPage}')">Eskalierungen öffnen</button>
+      </section>
+    </div>
+  </div>`;
 }
 window.addEventListener('hashchange', ()=>{
   const h = location.hash.replace('#','');
-  const [page,id] = h.split('/');
+  let [page,id] = h.split('/');
+  if(page==='tier-office') page=Number(AUTH.profile?.access_tier)===3?'tier-office-t3':'tier-office-t2';
   if(page===ROUTE.page&&id===(ROUTE.id||null)) return;
   if(!canAccessPage(page||'dashboard')){ ROUTE={page:'dashboard',id:null}; location.hash='#dashboard'; render(); return; }
   CASE_OPENING_MODE='none';
@@ -689,7 +727,8 @@ window.addEventListener('hashchange', ()=>{
 
 const NAV = [
   {id:'dashboard', label:'Dashboard', ic:'01'},
-  {id:'tier-office', label:'Tier-Arbeitsplatz', ic:'00'},
+  {id:'tier-office-t2', label:'Arbeitsplatz Tier 2', ic:'00'},
+  {id:'tier-office-t3', label:'Arbeitsplatz Tier 3', ic:'00'},
   {id:'caseform', label:'Neue Akte', ic:'02'},
   {id:'cases', label:'Alle Akten', ic:'03'},
   {id:'drivers', label:'Fahrer', ic:'04'},
@@ -740,7 +779,8 @@ function render(){
   }
   renderNav();
   const main = document.getElementById('main');
-  if(ROUTE.page==='tier-office') main.innerHTML = pageTierOffice();
+  if(ROUTE.page==='tier-office-t2') main.innerHTML = pageTierOffice(2);
+  else if(ROUTE.page==='tier-office-t3') main.innerHTML = pageTierOffice(3);
   else if(ROUTE.page==='dashboard') main.innerHTML = pageDashboard();
   else if(ROUTE.page==='caseform') main.innerHTML = pageCaseForm(ROUTE.id? DB.cases.find(c=>c.id===ROUTE.id): null);
   else if(ROUTE.page==='warningform') main.innerHTML = pageWarningForm(ROUTE.id);
