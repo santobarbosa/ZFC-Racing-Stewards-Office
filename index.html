@@ -89,6 +89,17 @@ nav.mainnav .navitem:hover{color:var(--white);background:var(--black-3);}
 nav.mainnav .navitem.active{color:var(--white);border-left-color:var(--red);background:var(--black-3);}
 nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);color:var(--gold);font-size:12px;}
 #sidebar-foot{padding:14px 18px;border-top:1px solid var(--line);font-size:11px;color:var(--grey-2);font-family:var(--mono);}
+#accountBadge{color:var(--grey);line-height:1.6;overflow-wrap:anywhere;}
+#accountBadge strong{display:block;color:var(--white);font-size:12px;}
+#accountBadge .account-tier{color:var(--gold-2);}
+#accountBadge button{margin-top:8px;padding:5px 8px;font:10px var(--mono);}
+#loginScreen{position:relative;z-index:2;min-height:100vh;display:none;place-items:center;padding:24px;background:linear-gradient(115deg,rgba(8,8,10,.92),rgba(8,8,10,.72)),url('https://images.unsplash.com/photo-1503736334956-4c8f8e92946d?auto=format&fit=crop&w=2200&q=85') center/cover;}
+.login-panel{width:min(460px,100%);padding:28px;background:rgba(20,20,22,.96);border:1px solid var(--line);border-top:3px solid var(--red);}
+.login-panel h1{margin:0 0 5px;font-size:25px;text-transform:uppercase;}
+.login-panel .login-subtitle{margin:0 0 22px;color:var(--grey);font:11px var(--mono);letter-spacing:1.4px;text-transform:uppercase;}
+.login-panel .login-message{min-height:20px;margin:10px 0;color:#ff8b96;font-size:13px;}
+.login-panel [hidden]{display:none!important;}
+.tier-workspace{border-top:3px solid var(--gold);}
 
 #main{flex:1;min-width:0;padding:26px 34px 60px;max-width:1280px;background:linear-gradient(90deg,rgba(10,10,11,.42),rgba(10,10,11,.08));}
 
@@ -506,20 +517,43 @@ body.printing #printArea{display:block;background:#fff;color:#111;font-family:'T
       <div class="sub">Stewards Office</div>
     </div>
     <nav class="mainnav" id="mainnav"></nav>
-    <div id="sidebar-foot">SIM RACING SPORT<br>REGLEMENT SYSTEM</div>
+    <div id="sidebar-foot"><div id="accountBadge"></div></div>
   </div>
   <div id="main"></div>
 </div>
 <div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
+<section id="loginScreen" aria-label="Anmeldung">
+  <form class="login-panel" onsubmit="event.preventDefault();handleLogin();">
+    <div class="eyebrow">ZFC Racing</div>
+    <h1>Stewards Office</h1>
+    <p class="login-subtitle">Interner Zugang</p>
+    <div id="loginConfig">
+      <div class="field"><label>Supabase Project URL</label><input id="loginUrl" type="url" autocomplete="url" placeholder="https://xxxx.supabase.co"></div>
+      <div class="field"><label>Supabase anon public key</label><input id="loginAnonKey" type="text" autocomplete="off"></div>
+    </div>
+    <div class="field"><label>E-Mail</label><input id="loginEmail" type="email" autocomplete="username" required></div>
+    <div class="field"><label>Passwort</label><input id="loginPassword" type="password" autocomplete="current-password" required></div>
+    <p id="loginMessage" class="login-message" role="alert"></p>
+    <button class="btn primary" type="submit" style="width:100%">Anmelden</button>
+    <p class="footer-note">Benutzerkonten werden durch Tier 3 eingerichtet.</p>
+  </form>
+</section>
 <div id="caseOpeningOverlay" class="case-opening-overlay" hidden aria-live="polite"></div>
 
 <div id="printArea"></div>
 
 <script>
 /* ============================= DATA LAYER ============================= */
+// Supabase-Verbindung hier eintragen (Project Settings > API):
+// Nur den anon/public-Key verwenden, niemals den service_role-Key.
+const SUPABASE_CONFIG = {
+  url: 'https://ktvcwyrsayoggjiapnln.supabase.co', // Project URL, z. B. https://xxxx.supabase.co
+  anonKey: 'sb_publishable_EEM214FLVj0CA3hkPq4BCg_1dFAZmvr' // anon/public key
+};
 const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
 let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null };
+let AUTH = { session:null, profile:null, authSubscription:null };
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -642,17 +676,30 @@ const persist = {
   financeSettings: ()=>{ saveKey(KEYS.financeSettings, DB.financeSettings); return syncAppState(); },
   esportSetups: ()=>{ saveKey(KEYS.esportSetups, DB.esportSetups); return syncAppState(); },
   marketRequests: ()=>{ saveKey(KEYS.marketRequests, DB.marketRequests); return syncAppState(); },
-  escalations: ()=>{ saveKey(KEYS.escalations, DB.escalations); return syncAppState(); },
+  escalations: ()=>{ saveKey(KEYS.escalations, DB.escalations); return syncTierEscalations(); },
   caseActivityLog: ()=>{ saveKey(KEYS.caseActivityLog, DB.caseActivityLog); return syncAppState(); },
   deletedCaseLog: ()=>{ saveKey(KEYS.deletedCaseLog, DB.deletedCaseLog); return syncAppState(); },
 };
+async function syncTierEscalations(){
+  if(!SUPABASE.client) return;
+  const rows=DB.escalations.map(item=>({id:item.id,case_id:item.caseId||null,target_tier:Number(item.targetTier||3),data:item,updated_at:new Date().toISOString()}));
+  if(!rows.length) return;
+  const result=await SUPABASE.client.from('zfc_tier_escalations').upsert(rows);
+  if(result.error){ SUPABASE.status='Eskalierung konnte nicht synchronisiert werden'; console.warn('Tier-Eskalierungen konnten nicht gespeichert werden',result.error); }
+}
 
 function financeAmount(value){ return Number(value||0).toLocaleString('de-DE',{style:'currency',currency:DB.financeSettings?.currency||'EUR'}); }
 function financeForTeam(teamId){ return DB.finance.filter(t=>!teamId || !t.teamId || t.teamId===teamId); }
 function financeBalance(teamId){ return Number(DB.financeSettings?.startingCapital||0) + financeForTeam(teamId).filter(t=>t.status==='Gebucht').reduce((sum,t)=>sum+(t.type==='income'?1:-1)*Number(t.amount||0),0); }
 function financeIncome(teamId){ return financeForTeam(teamId).filter(t=>t.type==='income'&&t.status==='Gebucht').reduce((sum,t)=>sum+Number(t.amount||0),0); }
 function financeExpense(teamId){ return financeForTeam(teamId).filter(t=>t.type==='expense'&&t.status==='Gebucht').reduce((sum,t)=>sum+Number(t.amount||0),0); }
-function supabaseConfig(){ return loadKey(KEYS.supabase, {url:'', anonKey:''}); }
+function supabaseConfig(){
+  const saved=loadKey(KEYS.supabase, {url:'', anonKey:''});
+  return {
+    url:SUPABASE_CONFIG.url.trim() || saved.url || '',
+    anonKey:SUPABASE_CONFIG.anonKey.trim() || saved.anonKey || ''
+  };
+}
 function readSupabaseConfigFromUrl(){
   const params=new URLSearchParams(location.search), url=params.get('sb_url'), anonKey=params.get('sb_key');
   if(!url || !anonKey) return;
@@ -664,7 +711,7 @@ function publicShareUrl(){
   if(!config.url || !config.anonKey) return '';
   return location.origin+location.pathname+'?sb_url='+encodeURIComponent(config.url)+'&sb_key='+encodeURIComponent(config.anonKey)+'#dashboard';
 }
-function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,finance:DB.finance,financeSettings:DB.financeSettings,esportSetups:DB.esportSetups,marketRequests:DB.marketRequests,escalations:DB.escalations,caseActivityLog:DB.caseActivityLog,deletedCaseLog:DB.deletedCaseLog}; }
+function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,esportSetups:DB.esportSetups,marketRequests:DB.marketRequests,caseActivityLog:DB.caseActivityLog,deletedCaseLog:DB.deletedCaseLog}; }
 function cloneState(state){ return state ? JSON.parse(JSON.stringify(state)) : null; }
 function sameState(left,right){ return JSON.stringify(left)===JSON.stringify(right); }
 function mergeState(base,local,remote){
@@ -739,10 +786,27 @@ function setSupabaseStatus(status){
 }
 async function initSupabase(){
   const config = supabaseConfig();
-  if(!config.url || !config.anonKey || !window.supabase){ setSupabaseStatus('Nicht konfiguriert'); return; }
+  if(!config.url || !config.anonKey || !window.supabase){ setSupabaseStatus('Nicht konfiguriert'); showLogin(); return; }
   try{
     setSupabaseStatus('Verbinde …');
+    if(SUPABASE.authSubscription) await SUPABASE.authSubscription.unsubscribe();
+    if(SUPABASE.channel && SUPABASE.client) await SUPABASE.client.removeChannel(SUPABASE.channel);
     SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
+    const authState=await SUPABASE.client.auth.getSession();
+    if(authState.error) throw authState.error;
+    if(!authState.data.session){ AUTH.session=null; AUTH.profile=null; showLogin(); return; }
+    AUTH.session=authState.data.session;
+    const profileResult=await SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier').eq('id',AUTH.session.user.id).single();
+    if(profileResult.error) throw profileResult.error;
+    AUTH.profile=profileResult.data;
+    if(new URLSearchParams(location.search).get('flow')==='set-password') ROUTE={page:'set-password',id:null};
+    document.getElementById('loginScreen').style.display='none';
+    document.getElementById('shell').style.display='flex';
+    renderAccountBadge();
+    const authListener=SUPABASE.client.auth.onAuthStateChange((event,session)=>{
+      if(event==='SIGNED_OUT'){ AUTH.session=null; AUTH.profile=null; showLogin(); }
+    });
+    SUPABASE.authSubscription=authListener.data.subscription;
     const shared = await SUPABASE.client.from('zfc_app_state').select('state,updated_at').eq('id',1).maybeSingle();
     if(shared.error) throw shared.error;
     const remoteState=shared.data?.state;
@@ -753,10 +817,19 @@ async function initSupabase(){
       await syncAppState();
       SUPABASE.baseState=cloneState(appState());
     }
+    const tierEscalations=await SUPABASE.client.from('zfc_tier_escalations').select('id,target_tier,data,updated_at').order('updated_at',{ascending:false});
+    if(tierEscalations.error) throw tierEscalations.error;
+    DB.escalations=tierEscalations.data.map(row=>({...row.data,targetTier:row.target_tier}));
+    saveKey(KEYS.escalations,DB.escalations);
     const settings = await SUPABASE.client.from('zfc_finance_settings').select('*').order('updated_at',{ascending:false}).limit(1).maybeSingle();
     if(settings.data){ DB.financeSettings={...DB.financeSettings,season:settings.data.season,startingCapital:Number(settings.data.starting_capital||0),currency:settings.data.currency||'EUR',discordWebhookUrl:settings.data.discord_webhook_url||'',caseWebhookUrl:settings.data.case_webhook_url||'',siteUrl:settings.data.site_url||DB.financeSettings.siteUrl}; persist.financeSettings(); }
     const transactions = await SUPABASE.client.from('zfc_finance_transactions').select('*').order('transaction_date',{ascending:false});
-    if(!transactions.error && transactions.data?.length) DB.finance = transactions.data.map(fromSupabaseTransaction);
+    if(!transactions.error) DB.finance = (transactions.data||[]).map(fromSupabaseTransaction);
+    if(Number(AUTH.profile.access_tier)<3){
+      DB.finance=[];
+      DB.financeSettings={season:'2026',startingCapital:0,currency:'EUR',discordWebhookUrl:'',caseWebhookUrl:'',siteUrl:''};
+      saveKey(KEYS.finance,DB.finance); saveKey(KEYS.financeSettings,DB.financeSettings);
+    }
     SUPABASE.channel = SUPABASE.client.channel('zfc-racing-realtime')
       .on('postgres_changes',{event:'*',schema:'public',table:'zfc_app_state'}, payload=>{
         if(!payload.new?.state) return;
@@ -772,6 +845,13 @@ async function initSupabase(){
         saveKey(KEYS.finance,DB.finance); if(ROUTE.page==='finance') render();
       }).on('postgres_changes',{event:'*',schema:'public',table:'zfc_finance_settings'}, payload=>{
         if(payload.new){ DB.financeSettings={...DB.financeSettings,season:payload.new.season,startingCapital:Number(payload.new.starting_capital||0),currency:payload.new.currency||'EUR',discordWebhookUrl:payload.new.discord_webhook_url||'',caseWebhookUrl:payload.new.case_webhook_url||'',siteUrl:payload.new.site_url||DB.financeSettings.siteUrl}; saveKey(KEYS.financeSettings,DB.financeSettings); if(ROUTE.page==='finance'||ROUTE.page==='manage') render(); }
+      }).on('postgres_changes',{event:'*',schema:'public',table:'zfc_tier_escalations'}, payload=>{
+        const row=payload.new||payload.old;
+        if(!row?.id) return;
+        if(payload.eventType==='DELETE') DB.escalations=DB.escalations.filter(item=>item.id!==row.id);
+        else { const item={...row.data,targetTier:row.target_tier}; const index=DB.escalations.findIndex(entry=>entry.id===row.id); if(index<0) DB.escalations.push(item); else DB.escalations[index]=item; }
+        saveKey(KEYS.escalations,DB.escalations);
+        if(ROUTE.page==='tier-office'||ROUTE.page==='escalations') render();
       }).subscribe((status)=>{
         if(status==='SUBSCRIBED') setSupabaseStatus('Verbunden · Live-Sync aktiv');
         else if(status==='CHANNEL_ERROR') setSupabaseStatus('Fehler: Realtime nicht aktiv');
@@ -782,8 +862,35 @@ async function initSupabase(){
   }catch(error){
     SUPABASE.client=null;
     setSupabaseStatus('Verbindung fehlgeschlagen');
+    showLogin(error.message||'Supabase-Verbindung fehlgeschlagen.');
     console.warn('Supabase nicht verfügbar',error);
   }
+}
+function showLogin(message=''){
+  document.getElementById('shell').style.display='none';
+  document.getElementById('loadingScreen').style.display='none';
+  const config=supabaseConfig();
+  document.getElementById('loginConfig').hidden=!!(config.url&&config.anonKey);
+  document.getElementById('loginUrl').value=config.url||'';
+  document.getElementById('loginAnonKey').value=config.anonKey||'';
+  document.getElementById('loginMessage').textContent=message;
+  document.getElementById('loginScreen').style.display='grid';
+}
+async function handleLogin(){
+  const url=document.getElementById('loginUrl').value.trim().replace(/\/$/,''), anonKey=document.getElementById('loginAnonKey').value.trim();
+  if(url&&anonKey) saveKey(KEYS.supabase,{url,anonKey});
+  const config=supabaseConfig();
+  if(!config.url||!config.anonKey||!window.supabase){ showLogin('Bitte Supabase URL, anon-Key, E-Mail und Passwort angeben.'); return; }
+  const client=window.supabase.createClient(config.url,config.anonKey);
+  const result=await client.auth.signInWithPassword({email:document.getElementById('loginEmail').value.trim(),password:document.getElementById('loginPassword').value});
+  if(result.error){ showLogin(result.error.message); document.getElementById('loginEmail').value=result.data?.user?.email||''; return; }
+  SUPABASE.client=client;
+  await initSupabase();
+}
+async function logout(){ if(SUPABASE.client) await SUPABASE.client.auth.signOut(); }
+function renderAccountBadge(){
+  const badge=document.getElementById('accountBadge'); if(!badge||!AUTH.profile) return;
+  badge.innerHTML=`<strong>${esc(AUTH.profile.display_name||AUTH.profile.email)}</strong><span>${esc(AUTH.profile.position||'Position offen')}</span><br><span class="account-tier">Tier ${Number(AUTH.profile.access_tier)}</span><br><button class="btn small" onclick="logout()">Abmelden</button>`;
 }
 async function syncFinanceTransaction(t){
   if(!SUPABASE.client) return;
@@ -1059,12 +1166,24 @@ let ROUTE = {page:'dashboard', id:null};
 let CASE_OPENING_SEEN = null;
 let CASE_OPENING_MODE = 'none';
 
-function go(page, id){ CASE_OPENING_MODE=page==='caseform'?(id?'existing':'new'):'none'; ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
+const PAGE_TIERS={escalations:2,'tier-office':2,archive:2,finance:3,'finance-pay':3,manage:3};
+function canAccessPage(page){
+  const requiredTier=PAGE_TIERS[page]??1;
+  return Number(AUTH.profile?.access_tier||0)>=requiredTier;
+}
+function go(page, id){ if(!canAccessPage(page)){ alert(`Dieser Bereich ist erst ab Tier ${PAGE_TIERS[page]||1} freigegeben.`); return; } CASE_OPENING_MODE=page==='caseform'?(id?'existing':'new'):'none'; ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
 function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
+function pageTierOffice(){
+  const tier=Number(AUTH.profile?.access_tier||2);
+  const escalations=DB.escalations.filter(item=>tier>=3||Number(item.targetTier||3)===tier);
+  const open=escalations.filter(item=>!['Zurück an Tier 1','Abgeschlossen'].includes(item.status));
+  return `<div class="pagehead"><div><div class="eyebrow">Interne Prozesse · Tier ${tier}</div><h1>Tier-Arbeitsplatz</h1></div></div><div class="grid cols-3"><div class="stat red"><div class="n">${open.length}</div><div class="l">Offene Eskalierungen</div></div><div class="stat"><div class="n">${escalations.length}</div><div class="l">Zugewiesener Einblick</div></div><div class="stat green"><div class="n">${esc(AUTH.profile?.position||'Position offen')}</div><div class="l">Deine Position</div></div></div><section class="panel"><h2>Arbeitsbereich <b>Tier ${tier}</b></h2><p>Angemeldet als <strong>${esc(AUTH.profile?.display_name||AUTH.profile?.email)}</strong> · ${esc(AUTH.profile?.position||'Position nicht zugewiesen')}</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 20px"><button class="btn primary" onclick="go('escalations')">Eskalierungen öffnen</button>${tier>=3?'<button class="btn gold" onclick="MANAGE_TAB=\'users\';go(\'manage\')">Benutzer &amp; Rollen</button>':''}</div><div style="overflow:auto"><table><thead><tr><th>Ziel</th><th>Fall</th><th>Grund</th><th>Status</th><th>Erstellt</th><th></th></tr></thead><tbody>${escalations.length?escalations.map(item=>`<tr><td>Tier ${Number(item.targetTier||3)}</td><td>${esc(item.stw||item.caseName||'Fall')}</td><td>${esc(item.reason||'—')}</td><td>${esc(item.status||'Offen')}</td><td>${fmtDateTime(item.escalatedAt)}</td><td><button class="btn small" onclick="go('escalations','${item.id}')">Öffnen</button></td></tr>`).join(''):'<tr><td colspan="6"><div class="empty">Keine Eskalierungen für dieses Tier.</div></td></tr>'}</tbody></table></div></section>`;
+}
 window.addEventListener('hashchange', ()=>{
   const h = location.hash.replace('#','');
   const [page,id] = h.split('/');
   if(page===ROUTE.page&&id===(ROUTE.id||null)) return;
+  if(!canAccessPage(page||'dashboard')){ ROUTE={page:'dashboard',id:null}; location.hash='#dashboard'; render(); return; }
   CASE_OPENING_MODE='none';
   ROUTE = {page: page||'dashboard', id: id||null};
   render();
@@ -1072,6 +1191,7 @@ window.addEventListener('hashchange', ()=>{
 
 const NAV = [
   {id:'dashboard', label:'Dashboard', ic:'01'},
+  {id:'tier-office', label:'Tier-Arbeitsplatz', ic:'00'},
   {id:'caseform', label:'Neue Akte', ic:'02'},
   {id:'cases', label:'Alle Akten', ic:'03'},
   {id:'drivers', label:'Fahrer', ic:'04'},
@@ -1089,13 +1209,15 @@ const NAV = [
 ];
 
 function renderNav(){
-  document.getElementById('mainnav').innerHTML = NAV.map(n=>`
+  document.getElementById('mainnav').innerHTML = NAV.filter(n=>canAccessPage(n.id)).map(n=>`
     <div class="navitem ${(ROUTE.page===n.id||(n.id==='esport'&&ROUTE.page.startsWith('esport')))?'active':''}" onclick="go('${n.id}')">
       <span class="ic">${n.ic}</span><span class="lbl">${n.label}</span>
     </div>`).join('');
 }
 
 function render(){
+  if(!AUTH.profile){ showLogin(); return; }
+  if(!canAccessPage(ROUTE.page)){ ROUTE={page:'dashboard',id:null}; location.hash='#dashboard'; }
   document.body.dataset.page = ROUTE.page;
   if(ROUTE.page!=='caseform'){
     CASE_OPENING_SEEN = null;
@@ -1109,7 +1231,8 @@ function render(){
   }
   renderNav();
   const main = document.getElementById('main');
-  if(ROUTE.page==='dashboard') main.innerHTML = pageDashboard();
+  if(ROUTE.page==='tier-office') main.innerHTML = pageTierOffice();
+  else if(ROUTE.page==='dashboard') main.innerHTML = pageDashboard();
   else if(ROUTE.page==='caseform') main.innerHTML = pageCaseForm(ROUTE.id? DB.cases.find(c=>c.id===ROUTE.id): null);
   else if(ROUTE.page==='warningform') main.innerHTML = pageWarningForm(ROUTE.id);
   else if(ROUTE.page==='cases') main.innerHTML = pageCaseList();
@@ -1124,6 +1247,7 @@ function render(){
   else if(ROUTE.page==='finance-pay') main.innerHTML = pageFinancePayment(ROUTE.id);
   else if(ROUTE.page==='processes') main.innerHTML = pageProcesses();
   else if(ROUTE.page==='manage') main.innerHTML = pageManage();
+  else if(ROUTE.page==='set-password') main.innerHTML = pageSetPassword();
   else if(ROUTE.page==='archive') main.innerHTML = ROUTE.id ? pageArchiveCase(ROUTE.id) : pageArchive();
   else if(ROUTE.page==='rulebook') main.innerHTML = pageRulebook();
   else if(ROUTE.page==='esport') main.innerHTML = ROUTE.id==='presentation' ? pageEsportPresentation() : pageEsport();
@@ -1548,7 +1672,7 @@ function pageCaseForm(existing){
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:26px;border-top:1px solid var(--line);padding-top:20px;">
         <button class="btn primary" onclick="saveCase('${c.id||''}', false)">${isNew?'Akte anlegen':'Akte speichern'}</button>
         <button class="btn" onclick="saveCase('${c.id||''}', true)">Speichern &amp; schließen</button>
-        ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button><button class="btn gold" onclick="go('warningform','${c.id}')">Verwarnung setzen</button><button class="btn gold" onclick="openTier3EscalationDialog('${c.id}')">An Tier 3 eskalieren</button><button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
+        ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button><button class="btn gold" onclick="go('warningform','${c.id}')">Verwarnung setzen</button><button class="btn gold" onclick="openTier3EscalationDialog('${c.id}')">Fall weiterleiten</button><button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
         ${!isNew? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte löschen</button>` : ''}
       </div>
       ${!isNew ? `<div class="sectiontitle">Verwarnungen in dieser Akte</div>${c.warningDocuments?.length ? `<table><thead><tr><th>Datum</th><th>Kategorie</th><th>Fahrer</th><th></th></tr></thead><tbody>${c.warningDocuments.map((warning,index)=>`<tr><td>${fmtDate(warning.createdAt)}</td><td>${esc(warning.category)}</td><td>${esc(warning.driverName||'—')}</td><td><button class="btn small gold" onclick="printWarning('${c.id}',${index})">PDF öffnen</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Noch keine schriftliche Verwarnung in dieser Akte abgelegt.</div>'}` : ''}
@@ -2126,10 +2250,10 @@ function renderCaseTable(){
   const ct = document.getElementById('cf_cat')?.value||'';
   let list = [...DB.cases].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   list = list.filter(c=>{
-    if(c.status === 'An Tier 3 eskaliert' || c.status === 'Zurück an Tier 1') {
+    if(String(c.status||'').startsWith('An Tier ') || c.status === 'Zurück an Tier 1') {
       if(st !== 'Eskaliert' && st !== 'Zurück an Tier 1' && st !== '') return false;
     }
-    if(st && c.status !== st && !(st==='Eskaliert' && c.status==='An Tier 3 eskaliert') && !(st==='Zurück an Tier 1' && c.status==='Zurück an Tier 1')) return false;
+    if(st && c.status !== st && !(st==='Eskaliert' && String(c.status||'').startsWith('An Tier ')) && !(st==='Zurück an Tier 1' && c.status==='Zurück an Tier 1')) return false;
     if(tm && c.teamInvolved!==tm) return false;
     if(ct && c.category!==ct) return false;
     if(q){
@@ -2147,13 +2271,13 @@ function renderCaseTable(){
       <td>${esc(driverName(d))}</td>
       <td>${esc(c.category||'—')}</td>
       <td>${esc(c.decision||'—')}</td>
-      <td><span class="tag ${statusTagClass(c.status === 'An Tier 3 eskaliert' ? 'archived' : c.status)}">${esc(c.status)}</span></td>
+      <td><span class="tag ${statusTagClass(String(c.status||'').startsWith('An Tier ') ? 'archived' : c.status)}">${esc(c.status)}</span></td>
     </tr>`;
   }).join('');
   document.getElementById('caseTableWrap').innerHTML = `
     <table><thead><tr><th>STW-Nr.</th><th>Event / Session</th><th>Team</th><th>Fahrer</th><th>Kategorie</th><th>Entscheidung</th><th>Status</th></tr></thead>
     <tbody>${rows || `<tr><td colspan="7"><div class="empty"><b>Keine Akten gefunden</b>Passe die Filter an oder eröffne eine neue Akte.</div></td></tr>`}</tbody></table>
-    <div class="footer-note">${list.length} von ${DB.cases.filter(c => c.status !== 'An Tier 3 eskaliert').length} Akten angezeigt.</div>
+    <div class="footer-note">${list.length} von ${DB.cases.filter(c => !String(c.status||'').startsWith('An Tier ')).length} Akten angezeigt.</div>
   `;
 }
 
@@ -2166,7 +2290,8 @@ function openTier3EscalationDialog(caseId){
   modal.innerHTML = `
     <div style="width:min(620px,calc(100vw - 32px));background:var(--black-2);border:1px solid var(--line);padding:24px 22px;box-shadow:0 20px 50px rgba(0,0,0,.45);">
       <div class="eyebrow">Steward-System</div>
-      <h2 style="margin:8px 0 16px; font-size:27px;">Fall an Tier 3 eskalieren</h2>
+      <h2 style="margin:8px 0 16px; font-size:27px;">Fall weiterleiten</h2>
+      <div class="field"><label>Zuständiges Tier</label><select id="tier3_target"><option value="2">Tier 2 · Fachprüfung</option><option value="3" selected>Tier 3 · Leitung</option></select></div>
       <div class="field"><label>Grund der Eskalierung</label><textarea id="tier3_reason" placeholder="Komplexe Regelauslegung, unklare Beweislage, schwerwiegender Vorfall, ..." required></textarea></div>
       <div style="display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; margin-top:18px;">
         <button class="btn" onclick="document.getElementById('tier3Modal').remove()">Abbrechen</button>
@@ -2180,11 +2305,12 @@ function openTier3EscalationDialog(caseId){
 function submitTier3Escalation(caseId){
   const reason = document.getElementById('tier3_reason')?.value.trim();
   if(!reason){ alert('Bitte einen Grund für die Eskalierung angeben.'); return; }
+  const targetTier=Number(document.getElementById('tier3_target')?.value||3);
   const c = DB.cases.find(item=>item.id===caseId); if(!c) return;
-  c.status = 'An Tier 3 eskaliert';
+  c.status = `An Tier ${targetTier} eskaliert`;
   c.updatedAt = Date.now();
   c.history = c.history || [];
-  c.history.push({ts:Date.now(), text:`Fall an Tier 3 eskaliert – ${reason}`});
+  c.history.push({ts:Date.now(), text:`Fall an Tier ${targetTier} eskaliert – ${reason}`});
   const escalation = {
     id: uid(),
     caseId: c.id,
@@ -2195,13 +2321,14 @@ function submitTier3Escalation(caseId){
     reason,
     originalSteward: c.stewardChairman || 'Steward Team',
     escalatedAt: Date.now(),
-    status: 'An Tier 3 eskaliert',
-    tier3User: 'Tier 3',
+    status: `An Tier ${targetTier} eskaliert`,
+    targetTier,
+    tier3User: targetTier===3?'Tier 3':'',
     updatedAt: Date.now(),
     feedback: ''
   };
   DB.escalations.push(escalation);
-  addCaseActivity(c,`An Tier 3 eskaliert: ${reason}`);
+  addCaseActivity(c,`An Tier ${targetTier} eskaliert: ${reason}`);
   DB.marketRequests = DB.marketRequests || [];
   persist.cases(); persist.escalations();
   document.getElementById('tier3Modal')?.remove();
@@ -2209,14 +2336,15 @@ function submitTier3Escalation(caseId){
 }
 
 function pageEscalations(){
+  const visibleEscalations=DB.escalations.filter(item=>Number(AUTH.profile?.access_tier)>=3||Number(item.targetTier||3)===Number(AUTH.profile?.access_tier));
   return `
     <div class="pagehead">
-      <div><div class="eyebrow">Tier 3</div><h1>Eskalierungen</h1></div>
+      <div><div class="eyebrow">Tier ${Number(AUTH.profile?.access_tier)}</div><h1>Eskalierungen</h1></div>
     </div>
     <div class="panel">
       <table>
         <thead><tr><th>STW-Nummer</th><th>Fallname</th><th>beteiligte Fahrer</th><th>Falltyp</th><th>Eskalierungsgrund</th><th>ursprünglicher Steward</th><th>Eskalierungsdatum</th><th>Status</th><th>Tier-3-Bearbeiter</th><th>Letzte Änderung</th></tr></thead>
-        <tbody>${DB.escalations.length? DB.escalations.map(e=>`<tr class="rowlink" onclick="go('escalations','${e.id}')"><td class="pts">${esc(e.stw || '—')}</td><td>${esc(e.caseName || '—')}</td><td>${esc(e.drivers || '—')}</td><td>${esc(e.type || '—')}</td><td>${esc(e.reason || '—')}</td><td>${esc(e.originalSteward || '—')}</td><td>${fmtDateTime(e.escalatedAt)}</td><td><span class="tag ${e.status === 'Zurück an Tier 1' ? 'open' : 'invest'}">${esc(e.status || 'An Tier 3 eskaliert')}</span></td><td>${esc(e.tier3User || '—')}</td><td>${fmtDateTime(e.updatedAt || e.escalatedAt)}</td></tr>`).join('') : '<tr><td colspan="10"><div class="empty"><b>Keine Eskalierungen</b>Aus einer offenen Akte kann ein Fall an Tier 3 übergeben werden.</div></td></tr>'}</tbody>
+        <tbody>${visibleEscalations.length? visibleEscalations.map(e=>`<tr class="rowlink" onclick="go('escalations','${e.id}')"><td class="pts">${esc(e.stw || '—')}</td><td>${esc(e.caseName || '—')}</td><td>${esc(e.drivers || '—')}</td><td>${esc(e.type || '—')}</td><td>${esc(e.reason || '—')}</td><td>${esc(e.originalSteward || '—')}</td><td>${fmtDateTime(e.escalatedAt)}</td><td><span class="tag ${e.status === 'Zurück an Tier 1' ? 'open' : 'invest'}">${esc(e.status || `An Tier ${e.targetTier||3} eskaliert`)}</span></td><td>${esc(e.tier3User || '—')}</td><td>${fmtDateTime(e.updatedAt || e.escalatedAt)}</td></tr>`).join('') : '<tr><td colspan="10"><div class="empty"><b>Keine Eskalierungen</b>In diesem Tier sind derzeit keine Fälle offen.</div></td></tr>'}</tbody>
       </table>
     </div>
   `;
@@ -2466,6 +2594,7 @@ function pageManage(){
     <div class="tab ${MANAGE_TAB==='finance'?'active':''}" onclick="setManageTab('finance')">Finanzen</div>
     <div class="tab ${MANAGE_TAB==='integrations'?'active':''}" onclick="setManageTab('integrations')">Integrationen</div>
     <div class="tab ${MANAGE_TAB==='data'?'active':''}" onclick="setManageTab('data')">Daten &amp; Backup</div>
+    <div class="tab ${MANAGE_TAB==='users'?'active':''}" onclick="setManageTab('users')">Benutzer &amp; Rollen</div>
     <div class="tab ${MANAGE_TAB==='esport'?'active':''}" onclick="setManageTab('esport')">CFC Esport</div>
   </div>
   <div id="manageBody"></div>
@@ -2482,11 +2611,12 @@ function renderPublicSharePanel(){
   if(!el) return;
   const panel=document.createElement('div');
   panel.className='panel';
-  panel.innerHTML=`<h2>Öffentlicher <b>Team-Link</b></h2><p style="color:var(--grey);font-size:13.5px;">Sende diesen Link an deine Mitarbeiter. Es ist kein Benutzerkonto nötig; alle arbeiten am selben öffentlichen Supabase-Datenbestand.</p><div class="field"><label>Freigabelink</label><input id="public_share_url" type="url" readonly value="${esc(publicShareUrl())}" placeholder="Nach dem Verbinden wird der Link erzeugt"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn gold" onclick="copyPublicShareUrl()">Link kopieren</button><button class="btn" onclick="openPublicShareUrl()">Link öffnen</button><button class="btn" onclick="createPublicQr()">QR-Code erzeugen</button></div><div id="public_qr" style="margin-top:16px"></div>`;
+  panel.innerHTML='<h2>Benutzerzugang</h2><p style="color:var(--grey);font-size:13.5px;">Jede Person benötigt ein persönliches Supabase-Auth-Konto. Neue Konten erhalten automatisch Tier 1; Position und höhere Rechte weist Tier 3 unter „Benutzer & Rollen“ zu.</p>';
   el.insertBefore(panel,el.firstChild);
 }
 function renderManageBody(){
   const el = document.getElementById('manageBody');
+  if(MANAGE_TAB==='users'){ loadUserProfiles(el); return; }
   if(MANAGE_TAB==='cases'){
     el.innerHTML = `<div class="panel"><table><thead><tr><th>STW-Nr.</th><th>Event</th><th>Kategorie</th><th>Status</th><th></th></tr></thead><tbody>
       ${DB.cases.map(c=>`<tr><td class="pts">${esc(c.stw)}</td><td>${esc(c.event||'—')}</td><td>${esc(c.category||'—')}</td>
@@ -2547,6 +2677,48 @@ function renderManageBody(){
     const driverRows=esportDrivers.map(driver=>{const profile=esportProfile(driver);const analysisCount=Object.keys(profile.trackAnalysis||{}).length;return `<tr><td><b>${esc(driverName(driver))}</b><div style="color:var(--grey);font-size:12px;">${esc(profile.role||'Esport-Fahrer')}</div></td><td>${esc(teamById(driver.teamId)?.name||'—')}</td><td><span class="tag ${profile.status==='Aktiv'?'active':profile.status==='Pausiert'?'suspended':'open'}">${esc(profile.status||'Assessment')}</span></td><td>${analysisCount} / ${ESPORT_TRACKS.length}</td><td style="white-space:nowrap"><button class="btn small" onclick="go('esport-driverform','${driver.id}')">Bearbeiten</button><button class="btn small danger" onclick="removeEsportProfile('${driver.id}')">Esport-Profil entfernen</button></td></tr>`;}).join('');
     el.innerHTML=`<div class="panel" style="border-top:3px solid #54d9e8"><h2>CFC Esport <b>Verwaltung</b></h2><p style="color:var(--grey);font-size:13.5px;margin-top:-4px;">Dieser Bereich enthält ausschließlich Esport-Daten. Stammdaten, Coaching, Streckenanalysen und Setups können hier direkt bearbeitet werden.</p><div class="esport-status"><span class="tag">${esportDrivers.length} Fahrerprofile</span><span class="tag">${DB.esportSetups.length} Strecken-Setups</span><span class="tag">${ESPORT_TRACKS.length} Strecken verfügbar</span></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn primary" onclick="go('esport-driverform')">+ Esport-Fahrer erfassen</button><button class="btn gold" onclick="go('esport-setup')">+ Setup bearbeiten</button><button class="btn" onclick="go('esport')">Esport-Bereich öffnen</button></div></div><div class="panel"><h2>Esport-Fahrer <b>Profile</b></h2><div style="overflow:auto"><table><thead><tr><th>Fahrer</th><th>Team</th><th>Status</th><th>Streckenanalyse</th><th></th></tr></thead><tbody>${driverRows||'<tr><td colspan="5"><div class="empty"><b>Keine Esport-Profile</b>Lege ein Profil im CFC Esport Driver Room an.</div></td></tr>'}</tbody></table></div></div><div class="panel"><h2>F1 26 <b>Strecken-Setups</b></h2><div style="overflow:auto"><table><thead><tr><th>Strecke</th><th>Setup</th><th>Zuletzt geändert</th><th></th></tr></thead><tbody>${setupRows||'<tr><td colspan="4"><div class="empty"><b>Keine Setups gespeichert</b>Öffne das F1 26 Setup Lab, um ein Strecken-Setup zu erstellen.</div></td></tr>'}</tbody></table></div></div>`;
   }
+}
+async function loadUserProfiles(container){
+  if(Number(AUTH.profile?.access_tier)<3){ container.innerHTML='<div class="panel"><h2>Zugriff verweigert</h2></div>'; return; }
+  container.innerHTML='<div class="panel"><div class="loading">Benutzerprofile werden geladen …</div></div>';
+  const result=await SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier,created_at').order('created_at');
+  if(result.error){ container.innerHTML=`<div class="panel"><h2>Profile konnten nicht geladen werden</h2><p>${esc(result.error.message)}</p></div>`; return; }
+  container.innerHTML=`<div class="panel"><h2>Neues Konto <b>einladen</b></h2><p class="footer-note">Die Person erhält einen einmaligen Bestätigungslink per E-Mail und wählt nach der Bestätigung ein eigenes Passwort.</p><div class="grid cols-4"><div class="field"><label>Name</label><input id="new_user_name" autocomplete="name" required></div><div class="field"><label>E-Mail</label><input id="new_user_email" type="email" autocomplete="email" required></div><div class="field"><label>Position</label><input id="new_user_position" placeholder="z. B. Steward" required></div><div class="field"><label>Tier</label><select id="new_user_tier"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select></div></div><button class="btn primary" onclick="createManagedUser()">Einladung senden</button><span id="new_user_status" class="footer-note" role="status" style="margin-left:10px"></span><p class="footer-note">Voraussetzung: Edge Function „admin-create-user“ ist deployed und mit APP_URL sowie SUPABASE_SERVICE_ROLE_KEY konfiguriert.</p></div><div class="panel"><h2>Benutzer <b>und Berechtigungen</b></h2><div style="overflow:auto"><table><thead><tr><th>Benutzer</th><th>Position</th><th>Tier</th><th></th></tr></thead><tbody>${result.data.map(profile=>`<tr><td><strong>${esc(profile.display_name||profile.email)}</strong><div class="footer-note">${esc(profile.email)}</div></td><td><input id="position_${profile.id}" value="${esc(profile.position||'Steward')}" aria-label="Position"></td><td><select id="tier_${profile.id}" aria-label="Tier"><option value="1" ${Number(profile.access_tier)===1?'selected':''}>Tier 1</option><option value="2" ${Number(profile.access_tier)===2?'selected':''}>Tier 2</option><option value="3" ${Number(profile.access_tier)===3?'selected':''}>Tier 3</option></select></td><td><button class="btn small primary" onclick="saveUserProfile('${profile.id}')">Speichern</button></td></tr>`).join('')||'<tr><td colspan="4">Noch keine Benutzerprofile vorhanden.</td></tr>'}</tbody></table></div></div>`;
+}
+async function createManagedUser(){
+  const status=document.getElementById('new_user_status');
+  const payload={email:document.getElementById('new_user_email')?.value.trim(),displayName:document.getElementById('new_user_name')?.value.trim(),position:document.getElementById('new_user_position')?.value.trim(),accessTier:Number(document.getElementById('new_user_tier')?.value||1)};
+  if(!payload.email||!payload.displayName||!payload.position){ if(status) status.textContent='Name, E-Mail und Position sind erforderlich.'; return; }
+  if(status) status.textContent='Einladung wird gesendet …';
+  const {data,error}=await SUPABASE.client.functions.invoke('admin-create-user',{body:payload});
+  if(error){ if(status) status.textContent=`Einladung fehlgeschlagen: ${error.message}`; return; }
+  await loadUserProfiles(document.getElementById('manageBody'));
+  const refreshedStatus=document.getElementById('new_user_status');
+  if(refreshedStatus) refreshedStatus.textContent=`Einladung an ${data.user.email} gesendet.`;
+}
+function pageSetPassword(){
+  return `<div class="pagehead"><div><div class="eyebrow">Einladung bestätigt</div><h1>Eigenes Passwort setzen</h1></div></div><div class="panel"><h2>Passwort <b>festlegen</b></h2><p>Wähle ein persönliches Passwort für dein Konto.</p><div class="grid cols-2"><div class="field"><label>Neues Passwort</label><input id="invite_password" type="password" autocomplete="new-password" minlength="12" required></div><div class="field"><label>Passwort wiederholen</label><input id="invite_password_confirm" type="password" autocomplete="new-password" minlength="12" required></div></div><p id="invite_password_status" class="footer-note" role="status"></p><button class="btn primary" onclick="saveInvitedPassword()">Passwort speichern</button></div>`;
+}
+async function saveInvitedPassword(){
+  const password=document.getElementById('invite_password')?.value||'';
+  const confirmation=document.getElementById('invite_password_confirm')?.value||'';
+  const status=document.getElementById('invite_password_status');
+  if(password.length<12){ if(status) status.textContent='Das Passwort muss mindestens 12 Zeichen lang sein.'; return; }
+  if(password!==confirmation){ if(status) status.textContent='Die Passwörter stimmen nicht überein.'; return; }
+  const {error}=await SUPABASE.client.auth.updateUser({password});
+  if(error){ if(status) status.textContent=`Passwort konnte nicht gespeichert werden: ${error.message}`; return; }
+  const url=new URL(location.href); url.searchParams.delete('flow');
+  history.replaceState(null,'',url.pathname+url.search+'#dashboard');
+  go('dashboard');
+}
+async function saveUserProfile(id){
+  const position=document.getElementById(`position_${id}`)?.value.trim()||'Steward';
+  const access_tier=Number(document.getElementById(`tier_${id}`)?.value||1);
+  const result=await SUPABASE.client.from('zfc_user_profiles').update({position,access_tier,updated_at:new Date().toISOString()}).eq('id',id);
+  if(result.error){ alert(`Profil konnte nicht gespeichert werden: ${result.error.message}`); return; }
+  if(id===AUTH.profile.id){ AUTH.profile={...AUTH.profile,position,access_tier}; renderAccountBadge(); }
+  alert('Benutzerprofil gespeichert.');
+  render();
 }
 function removeEsportProfile(id){
   const driver=driverById(id); if(!driver || !confirm(`Esport-Profil von ${driverName(driver)} entfernen? Die normale Fahrerakte bleibt erhalten.`)) return;
