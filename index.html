@@ -93,6 +93,7 @@
     <p class="footer-note">Benutzerkonten werden durch Tier 3 eingerichtet.</p>
   </form>
 </section>
+<button id="floatingCaseLauncher" class="floating-case-launcher" type="button" aria-label="Force anlegen">Force anlegen</button>
 <main id="knowledgePortal" class="knowledge-portal" aria-label="ZFC Wissensportal">
   <section class="knowledge-hero">
     <p class="eyebrow">ZFC / CFC / Steward Office</p>
@@ -312,10 +313,287 @@
   </section>
 </main>
 
+<div id="caseLauncherModal" class="case-launcher-modal" hidden>
+  <div class="case-launcher-window" role="dialog" aria-modal="true" aria-labelledby="caseLauncherTitle">
+    <div class="case-launcher-header">
+      <div>
+        <p class="eyebrow">ZFC / CFC / Steward Office</p>
+        <h2 id="caseLauncherTitle">Force anlegen</h2>
+      </div>
+      <button type="button" class="case-launcher-close" aria-label="Schließen" data-close-launcher>×</button>
+    </div>
+    <div class="case-launcher-layout">
+      <aside class="case-launcher-sidebar">
+        <h3>Kategorien</h3>
+        <div id="caseLauncherCategories"></div>
+      </aside>
+      <section class="case-launcher-main">
+        <div id="caseLauncherContent"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
 <div id="caseOpeningOverlay" class="case-opening-overlay" hidden aria-live="polite"></div>
 
 <div id="printArea"></div>
 
+<script>
+  const CASE_LAUNCHER_CATEGORIES = [
+    {
+      id: 'discipline',
+      name: 'Disziplin & Prüfung',
+      description: 'Verfahren, Anhörungen, Befangenheit, Einspruch und Maßnahmen.',
+      processes: [
+        { code: '35', title: 'Disziplinarverfahren', status: 'Freigegeben', lead: 'Anlass, Sachverhalt, Prüfung und Abschluss' },
+        { code: 'D9', title: 'Erweitertes Disziplinarverfahren', status: 'Freigegeben', lead: 'Erweiterte Untersuchung und Leitungsprüfung' },
+        { code: '07b', title: 'Eskalierung Tier 3', status: 'Freigegeben', lead: 'Übergabe, Rückfragen und Entscheidung' },
+        { code: 'D1', title: 'Meldung eines möglichen Regelverstoßes', status: 'Entwurf', lead: 'Meldeweg und Eingangskontrolle' }
+      ]
+    },
+    {
+      id: 'race',
+      name: 'Rennorganisation',
+      description: 'Anmeldung, Race Control, Startliste und Ergebnisverwaltung.',
+      processes: [
+        { code: 'R1', title: 'Rennanmeldung und Abmeldung', status: 'Freigegeben', lead: 'Teilnahme, Abmeldung und Startliste' },
+        { code: 'R4', title: 'Race Control und Rennunterbrechung', status: 'Freigegeben', lead: 'Unterbrechung, Restart und Protokoll' },
+        { code: 'R5', title: 'Steward-Prüfung eines Rennvorfalls', status: 'Freigegeben', lead: 'Meldung, Analyse und finale Entscheidung' },
+        { code: 'R7', title: 'Lizenzverwaltung', status: 'Freigegeben', lead: 'Prüfung, Sperre und Wiederfreigabe' }
+      ]
+    },
+    {
+      id: 'admin',
+      name: 'Verwaltung & Archiv',
+      description: 'Akten, Vorlagen, Freigaben und dokumentierte Entscheidungen.',
+      processes: [
+        { code: 'D2', title: 'Beweissicherung', status: 'Freigegeben', lead: 'Annahme, Bewertung und Aufbewahrung' },
+        { code: 'D3', title: 'Anhörung und Stellungnahme', status: 'Freigegeben', lead: 'Zustellung, Frist und Bewertung' },
+        { code: 'D7', title: 'Befangenheit und Bearbeiterwechsel', status: 'Entwurf', lead: 'Interessenkonflikt und Übergabe' },
+        { code: 'V3', title: 'Archiv & Entscheidungssicherung', status: 'Freigegeben', lead: 'Abschluss und Aufbewahrung' }
+      ]
+    },
+    {
+      id: 'esport',
+      name: 'CFC Esport',
+      description: 'Team-Management, Setups und Operations-Workflows.',
+      processes: [
+        { code: 'C1', title: 'Esport-Fahrerprofil', status: 'Freigegeben', lead: 'Profil, Rollen und Coach-Daten' },
+        { code: 'C2', title: 'Setup-Labor', status: 'Freigegeben', lead: 'Aerodynamik und Rennanalyse' },
+        { code: 'C3', title: 'Team-Review', status: 'Entwurf', lead: 'Leistungsbewertung und Maßnahmen' }
+      ]
+    },
+    {
+      id: 'finance',
+      name: 'Finanzen',
+      description: 'Budget, Zahlungen, Freigaben und Abrechnungsprozesse.',
+      processes: [
+        { code: 'F1', title: 'Rechnungsfreigabe', status: 'Freigegeben', lead: 'Budget, Belege und Zahlung' },
+        { code: 'F2', title: 'Finanzprüfung', status: 'Freigegeben', lead: 'Zahlungsfluss und Nachweis' },
+        { code: 'F3', title: 'Sponsoring & Vertragsprüfung', status: 'Entwurf', lead: 'Abrechnung und Einhaltung' }
+      ]
+    }
+  ];
+
+  function openCaseLauncher() {
+    const modal = document.getElementById('caseLauncherModal');
+    if (!modal) return;
+    modal.hidden = false;
+    renderCaseLauncherCategories();
+    renderCaseLauncherContent(CASE_LAUNCHER_CATEGORIES[0]);
+  }
+
+  function closeCaseLauncher() {
+    const modal = document.getElementById('caseLauncherModal');
+    if (!modal) return;
+    modal.hidden = true;
+  }
+
+  function renderCaseLauncherCategories() {
+    const target = document.getElementById('caseLauncherCategories');
+    if (!target) return;
+    target.innerHTML = CASE_LAUNCHER_CATEGORIES.map((category, index) => `
+      <button type="button" class="case-launcher-category ${index === 0 ? 'active' : ''}" data-open-category="${category.id}">
+        <strong>${category.name}</strong>
+        <span>${category.description}</span>
+      </button>
+    `).join('');
+
+    target.querySelectorAll('[data-open-category]').forEach(button => {
+      button.addEventListener('click', () => {
+        const category = CASE_LAUNCHER_CATEGORIES.find(item => item.id === button.dataset.openCategory);
+        if (category) {
+          target.querySelectorAll('.case-launcher-category').forEach(item => item.classList.toggle('active', item === button));
+          renderCaseLauncherContent(category);
+        }
+      });
+    });
+  }
+
+  function renderCaseLauncherContent(category) {
+    const target = document.getElementById('caseLauncherContent');
+    if (!target) return;
+    const cards = category.processes.map(process => `
+      <article class="case-launcher-process">
+        <div class="process-head">
+          <div>
+            <span class="process-code">${process.code}</span>
+            <h3>${process.title}</h3>
+          </div>
+          <span class="process-status ${process.status === 'Freigegeben' ? 'released' : 'draft'}">${process.status}</span>
+        </div>
+        <p>${process.lead}</p>
+        <div class="process-actions">
+          <button type="button" class="case-launcher-link" data-open-process="${category.id}|${process.code}|${encodeURIComponent(process.title)}">Vorgang anlegen</button>
+          <button type="button" class="case-launcher-secondary" data-view-process="${category.id}|${process.code}|${encodeURIComponent(process.title)}">Ansehen</button>
+        </div>
+      </article>
+    `).join('');
+
+    target.innerHTML = `
+      <div class="case-launcher-headline">
+        <div>
+          <p class="eyebrow">Kategorie</p>
+          <h3>${category.name}</h3>
+        </div>
+        <span>${category.processes.length} Prozesse</span>
+      </div>
+      <p class="case-launcher-intro">${category.description}</p>
+      <div class="case-launcher-processes">${cards}</div>
+    `;
+
+    target.querySelectorAll('[data-open-process]').forEach(button => {
+      button.addEventListener('click', () => {
+        const [catId, processCode, processTitle] = button.dataset.openProcess.split('|');
+        const process = CASE_LAUNCHER_CATEGORIES.find(item => item.id === catId)?.processes.find(item => item.code === processCode);
+        if (!process) return;
+        openProcessForm(catId, processCode, decodeURIComponent(processTitle), process.title);
+      });
+    });
+
+    target.querySelectorAll('[data-view-process]').forEach(button => {
+      button.addEventListener('click', () => {
+        const [catId, processCode, processTitle] = button.dataset.viewProcess.split('|');
+        const process = CASE_LAUNCHER_CATEGORIES.find(item => item.id === catId)?.processes.find(item => item.code === processCode);
+        if (!process) return;
+        openProcessForm(catId, processCode, decodeURIComponent(processTitle), process.title, true);
+      });
+    });
+  }
+
+  function openProcessForm(categoryId, processCode, processTitle, label, readOnly = false) {
+    const target = document.getElementById('caseLauncherContent');
+    if (!target) return;
+
+    const categoryName = CASE_LAUNCHER_CATEGORIES.find(item => item.id === categoryId)?.name || 'Kategorie';
+    const presetTitle = `${processTitle} · ${processCode}`;
+
+    target.innerHTML = `
+      <div class="case-launcher-headline">
+        <div>
+          <p class="eyebrow">Vorgang starten</p>
+          <h3>${categoryName}</h3>
+        </div>
+        <span>${processCode}</span>
+      </div>
+      <form class="case-launcher-form" data-launch-form>
+        <div class="field-row two-col">
+          <label>
+            <span>Prozess</span>
+            <input type="text" value="${processTitle}" readonly>
+          </label>
+          <label>
+            <span>Kennung</span>
+            <input type="text" value="${processCode}" readonly>
+          </label>
+        </div>
+        <div class="field-row two-col">
+          <label>
+            <span>Vorgangstitel</span>
+            <input type="text" value="${presetTitle}" required>
+          </label>
+          <label>
+            <span>Priorität</span>
+            <select>
+              <option>Normal</option>
+              <option>Wichtig</option>
+              <option>Dringend</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row two-col">
+          <label>
+            <span>Verantwortlich</span>
+            <input type="text" value="Steward Office" required>
+          </label>
+          <label>
+            <span>Abteilung</span>
+            <select>
+              <option>${categoryName}</option>
+              <option>Race Control</option>
+              <option>Verwaltung</option>
+              <option>Finanzen</option>
+              <option>CFC Esport</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          <span>Beschreibung</span>
+          <textarea rows="6" placeholder="Kurzbeschreibung des Vorgangs, Einleitung, betroffene Personen, Ablage und nächste Schritte.">${process.lead}</textarea>
+        </label>
+        <div class="form-footer">
+          <button type="button" class="case-launcher-secondary" data-back-to-list>Zurück</button>
+          <button type="submit" class="case-launcher-link">${readOnly ? 'Vorgang öffnen' : 'Vorgang anlegen'}</button>
+        </div>
+      </form>
+    `;
+
+    const form = target.querySelector('[data-launch-form]');
+    if (form) {
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const title = form.querySelector('input[type="text"]').value.trim() || `${processTitle} · ${processCode}`;
+        const status = document.createElement('div');
+        status.className = 'case-launcher-success';
+        status.textContent = `Vorgang angelegt: ${title}`;
+        const wrapper = target.querySelector('.case-launcher-form');
+        if (wrapper) {
+          wrapper.innerHTML = status.outerHTML;
+        }
+        if (typeof window.go === 'function') {
+          setTimeout(() => {
+            window.go('caseform');
+            closeCaseLauncher();
+          }, 600);
+        } else {
+          setTimeout(() => closeCaseLauncher(), 600);
+        }
+      });
+    }
+
+    const backButton = target.querySelector('[data-back-to-list]');
+    if (backButton) {
+      backButton.addEventListener('click', () => renderCaseLauncherContent(CASE_LAUNCHER_CATEGORIES.find(item => item.id === categoryId) || CASE_LAUNCHER_CATEGORIES[0]));
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const trigger = document.getElementById('floatingCaseLauncher');
+    const firstButton = document.querySelector('.knowledge-hero .hero-actions button');
+    if (trigger) trigger.addEventListener('click', openCaseLauncher);
+    if (firstButton) firstButton.addEventListener('click', openCaseLauncher);
+    document.querySelectorAll('[data-close-launcher]').forEach(button => {
+      button.addEventListener('click', closeCaseLauncher);
+    });
+    const modal = document.getElementById('caseLauncherModal');
+    if (modal) {
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) closeCaseLauncher();
+      });
+    }
+    renderCaseLauncherCategories();
+  });
+</script>
 <script src="./app.js"></script>
 </body>
 </html>
