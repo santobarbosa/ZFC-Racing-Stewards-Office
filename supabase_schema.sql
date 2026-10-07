@@ -1332,7 +1332,7 @@ begin
 	if old.status in ('Freigegeben','Finalisiert','Ersetzt')
 		and (new.content is distinct from old.content
 			or new.record_snapshot is distinct from old.record_snapshot
-			or new.pdf_path is distinct from old.pdf_path
+			or (old.pdf_path is not null and new.pdf_path is distinct from old.pdf_path)
 			or new.document_type is distinct from old.document_type) then
 		raise exception 'Abgeschlossene Dokumentfassungen und ihre gespeicherten PDFs dürfen nicht überschrieben werden.';
 	end if;
