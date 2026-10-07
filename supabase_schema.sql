@@ -259,6 +259,10 @@ begin
 		raise exception 'Anmeldung und gültiges Tier-Profil sind erforderlich.';
 	end if;
 
+	if actor_tier >= 3 then
+		return new;
+	end if;
+
 	if tg_op = 'UPDATE' then
 		old_state := coalesce(old.state, '{}'::jsonb);
 	end if;
@@ -331,10 +335,6 @@ begin
 					raise exception 'Die Eröffnung muss mit einem unveränderlichen Protokolleintrag dokumentiert werden.';
 				end if;
 			end if;
-			continue;
-		end if;
-
-		if actor_tier = 3 then
 			continue;
 		end if;
 

@@ -83,3 +83,16 @@ test('early closure uses its own five real-document tasks', () => {
     assert.ok(ALL_DOCUMENT_TYPES.some(type => type.title === event.document), `${event.event} references a missing ${event.document} type`);
   }
 });
+
+test('Tier 3 bypasses app-state workflow restrictions for inserts and updates', () => {
+  const validator = schema.slice(
+    schema.indexOf('create or replace function public.zfc_validate_app_state_tier_workflow()'),
+    schema.indexOf('drop trigger if exists zfc_validate_app_state_tier_workflow')
+  );
+  const tier3Bypass = validator.indexOf('if actor_tier >= 3 then\n\t\treturn new;\n\tend if;');
+  const firstCaseValidation = validator.indexOf('for case_item in');
+  assert.ok(tier3Bypass >= 0, 'Tier 3 must return from the validator without process restrictions');
+  assert.ok(tier3Bypass < firstCaseValidation, 'Tier 3 bypass must occur before validating any case');
+  assert.match(schema, /create policy zfc_app_state_authenticated_insert[\s\S]*?with check \(public\.zfc_current_tier\(\) >= 1\)/);
+  assert.match(schema, /create policy zfc_app_state_authenticated_update[\s\S]*?using \(public\.zfc_current_tier\(\) >= 1\) with check \(public\.zfc_current_tier\(\) >= 1\)/);
+});
