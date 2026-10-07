@@ -772,6 +772,7 @@ function processRequiredTier(code){
 }
 function canStartProcess(code){
   const tier=currentTier();
+  if(tier>=3) return true;
   if(tier>=processRequiredTier(code)) return true;
   return tier===1&&TIER1_PROCESS_CODES.has(code);
 }
@@ -801,7 +802,7 @@ function makeProcessWorkflow(code){
   return {
     createdById:userId,createdByName:AUTH.profile?.display_name||AUTH.profile?.email||'',
     createdByTier:tier,ownerTier:initialTier,approvalStatus,
-    nextAction:tier===1?'Unterlagen vervollständigen und an Tier 2 senden':'Unabhängige Prüfung und dokumentierte Freigabe',
+    nextAction:tier===1?'Unterlagen vervollständigen und an Tier 2 senden':tier>=3?'Vorgang prüfen oder direkt freigeben':'Unabhängige Prüfung und dokumentierte Freigabe',
     requiredApprovalTier:workflowApprovalTier(code),requiresCeoApproval:processNeedsCeoApproval(code),
     history:[{id:uid(),action:'created',actorId:userId,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',actorTier:tier,reason:`Prozess ${code} eröffnet.`,ts:Date.now()}]
   };
@@ -821,17 +822,20 @@ function processWorkflowPanel(c){
     else buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','submit_tier2')">Zur Tier-2-Prüfung senden</button>`);
   }
   if(tier>=2&&workflow.ownerTier===2&&pending==='Tier-2-Prüfung ausstehend'){
-    if(tier===2&&!ownCase&&Number(workflow.requiredApprovalTier||2)<=2) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','approve_t2')">Prüfung abschließen</button>`);
+    if((tier===3||!ownCase)&&Number(workflow.requiredApprovalTier||2)<=2) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','approve_t2')">Prüfung abschließen</button>`);
     buttons.push(`<button class="btn gold" onclick="actOnProcessCase('${c.id}','escalate_t3')">An Tier 3 eskalieren</button>`);
     buttons.push(`<button class="btn" onclick="actOnProcessCase('${c.id}','return_t1')">Zur Ergänzung zurückgeben</button>`);
   }
   if(canTier3&&workflow.ownerTier===3&&pending==='Tier-3-Prüfung ausstehend'){
-    if(!ownCase) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','approve_t3')">Tier-3-Prüfung abschließen</button>`);
+    buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','approve_t3')">Tier-3-Prüfung abschließen</button>`);
     buttons.push(`<button class="btn gold" onclick="actOnProcessCase('${c.id}','send_ceo')">CEO-Entscheidung anfordern</button>`);
     buttons.push(`<button class="btn" onclick="actOnProcessCase('${c.id}','return_t1')">Zur Ergänzung zurückgeben</button>`);
   }
-  if(isCeoProfile()&&workflow.ownerTier===3&&pending==='CEO-Entscheidung ausstehend'){
-    if(!ownCase&&last?.actorId!==actorId) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','ceo_decide')">CEO-Entscheidung dokumentieren</button>`);
+  if(canTier3&&!['Freigegeben','Abgelehnt'].includes(pending)){
+    buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','admin_approve')">Als Tier 3 direkt freigeben</button>`);
+  }
+  if((isCeoProfile()||canTier3)&&workflow.ownerTier===3&&pending==='CEO-Entscheidung ausstehend'){
+    if((!ownCase&&last?.actorId!==actorId)||canTier3) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','ceo_decide')">CEO-Entscheidung dokumentieren</button>`);
     buttons.push(`<button class="btn" onclick="actOnProcessCase('${c.id}','return_t1')">Zur weiteren Prüfung zurückgeben</button>`);
   }
   if(tier===1&&c.processCode==='D5'&&pending==='Freigegeben'&&workflow.implementationStatus!=='Umgesetzt'){
@@ -842,8 +846,8 @@ function processWorkflowPanel(c){
   const decisionNote=workflow.decision?`<p><strong>Dokumentiertes Ergebnis:</strong> ${esc(workflow.decision)}</p>`:'';
   return `<section class="panel process-workflow-panel"><div class="sectiontitle">Zuständigkeit &amp; Freigabe</div>
     <div class="process-workflow-summary"><div><span>Prozess</span><strong>${esc(c.processCode)} · ${esc(c.processTitle||'')}</strong></div><div><span>Aktuelle Prüfstufe</span><strong>${workflow.ownerTier?`Tier ${esc(workflow.ownerTier)}`:['Freigegeben','Abgelehnt'].includes(pending)?'Abgeschlossen':'Noch offen'}</strong></div><div><span>Freigabestatus</span><strong>${esc(pending)}</strong></div><div><span>Nächster Schritt</span><strong>${esc(nextAction)}</strong></div></div>
-    ${workflow.requiresCeoApproval?'<p class="note">Dieser Vorgang benötigt eine dokumentierte CEO-Freigabe. Der CEO bleibt im System eine gesondert gekennzeichnete Tier-3-Rolle.</p>':''}
-    ${ownCase&&pending!=='Noch nicht vorgelegt'&&!['Freigegeben','Abgelehnt'].includes(pending)?'<p class="note">Du kannst deine eigene Akte nicht unabhängig freigeben. Die Prüfung muss durch eine andere berechtigte Person erfolgen.</p>':''}
+    ${workflow.requiresCeoApproval&&tier<3?'<p class="note">Dieser Vorgang benötigt eine dokumentierte CEO-Freigabe. Der CEO bleibt im System eine gesondert gekennzeichnete Tier-3-Rolle.</p>':''}
+    ${tier<3&&ownCase&&pending!=='Noch nicht vorgelegt'&&!['Freigegeben','Abgelehnt'].includes(pending)?'<p class="note">Du kannst deine eigene Akte nicht unabhängig freigeben. Die Prüfung muss durch eine andere berechtigte Person erfolgen.</p>':''}
     ${decisionNote}<div class="process-workflow-actions"><button class="btn gold" onclick="printProcessWorkflowReport('${c.id}')">Prüf- / Übergabevermerk als PDF</button>${buttons.join('')}</div>
     ${historyRows?`<details class="process-workflow-history"><summary>Übergaben und Prüfverlauf</summary><div class="table-scroll"><table><thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Bearbeitung</th><th>Begründung / Auftrag</th></tr></thead><tbody>${historyRows}</tbody></table></div></details>`:''}
   </section>`;
@@ -856,11 +860,12 @@ async function actOnProcessCase(caseId,action){
   const ownCase=workflow.createdById===actorId;
   const permitted={
     submit_tier2:tier===1&&workflow.ownerTier===1&&['Noch nicht vorgelegt','Zur Ergänzung zurückgegeben'].includes(workflow.approvalStatus),
-    approve_t2:tier===2&&workflow.ownerTier===2&&workflow.approvalStatus==='Tier-2-Prüfung ausstehend'&&!ownCase&&Number(workflow.requiredApprovalTier||2)<=2,
+    approve_t2:tier>=2&&workflow.ownerTier===2&&workflow.approvalStatus==='Tier-2-Prüfung ausstehend'&&(tier===3||!ownCase)&&Number(workflow.requiredApprovalTier||2)<=2,
     escalate_t3:(tier>=2&&workflow.ownerTier===2&&workflow.approvalStatus==='Tier-2-Prüfung ausstehend')||(tier===1&&c.processCode==='07b'&&workflow.ownerTier===1&&['Noch nicht vorgelegt','Zur Ergänzung zurückgegeben'].includes(workflow.approvalStatus)),
-    approve_t3:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='Tier-3-Prüfung ausstehend'&&!ownCase,
+    approve_t3:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='Tier-3-Prüfung ausstehend',
+    admin_approve:tier===3&&!['Freigegeben','Abgelehnt'].includes(workflow.approvalStatus),
     send_ceo:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='Tier-3-Prüfung ausstehend',
-    ceo_decide:isCeoProfile()&&workflow.ownerTier===3&&workflow.approvalStatus==='CEO-Entscheidung ausstehend'&&!ownCase&&workflow.history?.at(-1)?.actorId!==actorId,
+    ceo_decide:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='CEO-Entscheidung ausstehend',
     implement_measure:tier===1&&c.processCode==='D5'&&workflow.approvalStatus==='Freigegeben'&&workflow.implementationStatus!=='Umgesetzt',
     return_t1:tier>=2&&workflow.ownerTier>0&&!['Freigegeben','Abgelehnt'].includes(workflow.approvalStatus)
   }[action];
@@ -869,15 +874,15 @@ async function actOnProcessCase(caseId,action){
     showAccessNotice(approvalAction&&ownCase?'Eine eigene Akte darf nicht selbst unabhängig freigegeben werden. Bitte eine andere berechtigte Person einsetzen.':action==='ceo_decide'&&!isCeoProfile()?'Nur ein als CEO gekennzeichnetes Tier-3-Konto darf diese Entscheidung treffen.':'Diese Aktion ist für deine Tier-Stufe oder den aktuellen Freigabestatus nicht freigegeben. Die Akte bleibt unverändert.');
     return;
   }
-  if((action==='approve_t2'||action==='approve_t3'||action==='ceo_decide')&&ownCase){
+  if((action==='approve_t2'||action==='approve_t3'||action==='ceo_decide')&&ownCase&&tier<3){
     showAccessNotice('Eine eigene Akte darf nicht selbst freigegeben werden. Bitte eine unabhängige Person der zuständigen Prüfstufe einsetzen.');
     return;
   }
-  if(action==='ceo_decide'&&['subject','participants','owner'].some(key=>/\bceo\b/i.test(String(c.processFields?.[key]||'')))){
+  if(action==='ceo_decide'&&tier<3&&['subject','participants','owner'].some(key=>/\bceo\b/i.test(String(c.processFields?.[key]||'')))){
     showAccessNotice('Der CEO ist selbst betroffen. Es ist keine unabhängige Vertretungsstelle im System hinterlegt; die Entscheidung wurde daher gesperrt.');
     return;
   }
-  const labels={submit_tier2:'An Tier 2 übergeben',approve_t2:'Tier-2-Prüfung freigegeben',escalate_t3:'An Tier 3 eskaliert',approve_t3:'Tier-3-Prüfung freigegeben',send_ceo:'CEO-Entscheidung angefordert',ceo_decide:'CEO-Entscheidung dokumentiert',return_t1:'Zur Ergänzung zurückgegeben',implement_measure:'Freigegebene Maßnahme umgesetzt'};
+  const labels={submit_tier2:'An Tier 2 übergeben',approve_t2:'Tier-2-Prüfung freigegeben',escalate_t3:'An Tier 3 eskaliert',approve_t3:'Tier-3-Prüfung freigegeben',admin_approve:'Durch Tier 3 direkt freigegeben',send_ceo:'CEO-Entscheidung angefordert',ceo_decide:'CEO-Entscheidung dokumentiert',return_t1:'Zur Ergänzung zurückgegeben',implement_measure:'Freigegebene Maßnahme umgesetzt'};
   const needsReason=action!=='submit_tier2'||workflow.approvalStatus==='Zur Ergänzung zurückgegeben';
   const reason=needsReason?window.prompt('Begründung / konkreter nächster Arbeitsauftrag:',''):'Übergabe zur fachlichen Prüfung.';
   if(reason===null) return;
@@ -890,6 +895,8 @@ async function actOnProcessCase(caseId,action){
   if(['approve_t2','approve_t3'].includes(action)){
     decision=window.prompt('Freizugebendes Ergebnis / Entscheidung:','Freigegeben')?.trim()||'';
     if(!decision) return;
+  }else if(action==='admin_approve'){
+    decision='Freigegeben';
   }else if(action==='ceo_decide'){
     const outcomes=['Freigegeben','Abgelehnt','Änderung verlangt','Weitere Prüfung angeordnet','Bearbeitung delegiert'];
     decision=window.prompt(`CEO-Ergebnis:\n${outcomes.map((item,index)=>`${index+1}. ${item}`).join('\n')}`,'Freigegeben')?.trim()||'';
@@ -970,8 +977,8 @@ function findProcess(code){
   return null;
 }
 function pageProcessCatalog(){
-  return `<div class="pagehead"><div><div class="eyebrow">Force anlegen · Prozessübersicht</div><h1>Prozesskatalog</h1><p>Wähle einen Prozess, um Zuständigkeit und Ablauf einzusehen oder einen berechtigten Vorgang anzulegen. Die jeweilige Prüfstufe wird auf jeder Prozesskarte angezeigt.</p></div><div class="actions"><button class="btn" onclick="go('processes')">Wissensportal</button><button class="btn" onclick="go('dashboard')">← Arbeitsplatz</button></div></div>
-    ${PROCESS_CATALOG.map(category=>`<section class="process-catalog-section"><div class="process-catalog-heading"><div><span class="eyebrow">${esc(category.processes.length)} Prozesse</span><h2>${esc(category.name)}</h2></div></div><div class="process-catalog-grid">${category.processes.map(process=>`<article class="process-catalog-card"><div class="process-catalog-code">${esc(process.code)}</div><span class="process-tier-label">${TIER1_PROCESS_CODES.has(process.code)?'Tier 1 Aufnahme möglich':`Entscheidung ab Tier ${workflowApprovalTier(process.code)}`}</span><h3>${esc(process.title)}</h3><p>${esc(process.purpose)}</p><div class="process-catalog-actions"><button class="btn small" onclick="go('process-detail','${esc(process.code)}')">Prozess ansehen</button><button class="btn small primary" onclick="go('process-form','${esc(process.code)}')">Vorgang anlegen</button></div></article>`).join('')}</div></section>`).join('')}`;
+  return `<div class="pagehead"><div><div class="eyebrow">Vorgänge · Prozessübersicht</div><h1>Prozesskatalog</h1><p>Wähle einen Prozess, um Zuständigkeit und Ablauf einzusehen oder einen Vorgang anzulegen. Tier 3 kann jeden Prozess starten; Tier 1 und 2 werden an den vorgesehenen Eskalationsstellen geführt.</p></div><div class="actions"><button class="btn" onclick="go('processes')">Wissensportal</button><button class="btn" onclick="go('dashboard')">← Arbeitsplatz</button></div></div>
+    ${PROCESS_CATALOG.map(category=>`<section class="process-catalog-section"><div class="process-catalog-heading"><div><span class="eyebrow">${esc(category.processes.length)} Prozesse</span><h2>${esc(category.name)}</h2></div></div><div class="process-catalog-grid">${category.processes.map(process=>`<article class="process-catalog-card"><div class="process-catalog-code">${esc(process.code)}</div><span class="process-tier-label">${currentTier()>=3?'Tier 3: alle Prozesse freigegeben':TIER1_PROCESS_CODES.has(process.code)?'Tier 1 Aufnahme möglich':`Entscheidung ab Tier ${workflowApprovalTier(process.code)}`}</span><h3>${esc(process.title)}</h3><p>${esc(process.purpose)}</p><div class="process-catalog-actions"><button class="btn small" onclick="go('process-detail','${esc(process.code)}')">Prozess ansehen</button><button class="btn small primary" onclick="go('process-form','${esc(process.code)}')">Vorgang anlegen</button></div></article>`).join('')}</div></section>`).join('')}`;
 }
 function pageProcessDetail(code){
   const process=findProcess(code);
@@ -981,6 +988,14 @@ function pageProcessDetail(code){
   return `<div class="pagehead"><div><div class="eyebrow">${esc(process.categoryName)} · Prozess ${esc(process.code)}</div><h1>${esc(process.title)}</h1></div><div class="actions"><button class="btn" onclick="go('process-catalog')">← Prozesskatalog</button><button class="btn primary" onclick="go('process-form','${esc(process.code)}')">Diesen Prozess starten</button></div></div>
     <div class="process-detail-grid"><article class="panel process-detail-main"><span class="tag decided">Version 1.0 · Entwurf</span><h2>Zweck &amp; Anwendungsbereich</h2><p>${esc(process.purpose)} ${esc(process.summary)}</p><h2>Auslöser &amp; Voraussetzungen</h2><p>Eröffnung nach Eingang eines nachvollziehbaren Anliegens. Erfasse die erforderlichen Grunddaten, sichere vorhandene Nachweise und prüfe Zuständigkeit sowie mögliche Interessenkonflikte.</p><h2>Zuständigkeiten &amp; Ablauf</h2><ol><li>Eingang dokumentieren und Vollständigkeit der Angaben prüfen.</li><li>Vorgang der zuständigen Abteilung und Bearbeitungsebene zuordnen.</li><li>Belege, Rückfragen und Fristen in der Akte festhalten.</li><li>Prüfung durchführen, erforderliche Freigabe einholen und Ergebnis dokumentieren.</li><li>Abschluss, Mitteilung und Archivierung nachvollziehbar vermerken.</li></ol><h2>Benötigte Unterlagen</h2><ul>${fields.map(field=>`<li>${esc(field.label)}</li>`).join('')}<li>Entscheidungs- oder Abschlussvermerk</li></ul><h2>Fristen &amp; mögliche Ergebnisse</h2><p>Fristen werden je Vorgang festgelegt und in der Akte dokumentiert. Mögliche Ergebnisse: Übernahme, Rückfrage, Weiterleitung, Freigabe, Maßnahme oder begründeter Abschluss.</p></article><aside class="panel process-detail-side"><h2>Verknüpfte Prozesse</h2>${related.map(item=>`<button class="process-related" onclick="go('process-detail','${esc(item.code)}')"><strong>${esc(item.code)} · ${esc(item.title)}</strong><span>Prozess öffnen →</span></button>`).join('')}<h2>Dokumentvorlagen</h2><p>Vorgangsaufnahme · Prüfvermerk · Abschlussvermerk</p><h2>Versionsverlauf</h2><p>Version 1.0 · Arbeitsentwurf · ${fmtDate(today())}</p><button class="btn primary" style="width:100%;margin-top:10px;" onclick="go('process-form','${esc(process.code)}')">Diesen Prozess starten</button></aside></div>`;
 }
+function setProcessType(input){
+  const form=input.form;
+  if(!form) return;
+  const options=[...form.querySelectorAll('input[name="caseType"]')];
+  if(input.checked) options.forEach(option=>{if(option!==input) option.checked=false;});
+  const hasSelection=options.some(option=>option.checked);
+  options.forEach((option,index)=>{option.required=!hasSelection&&index===0;});
+}
 function pageProcessForm(code){
   const process=findProcess(code);
   if(!process) return `<div class="panel"><h2>Prozess nicht gefunden</h2><button class="btn" onclick="go('process-catalog')">Zum Prozesskatalog</button></div>`;
@@ -988,6 +1003,7 @@ function pageProcessForm(code){
   return `<div class="pagehead"><div><div class="eyebrow">Vorgangsanlage · ${esc(process.code)}</div><h1>${esc(process.title)}</h1><p>${esc(process.summary)}</p></div><div class="actions"><button class="btn" onclick="go('process-detail','${esc(process.code)}')">← Prozessdetails</button></div></div>
     <form class="panel process-create-form" onsubmit="submitProcessCase(event,'${esc(process.code)}')">
       <div class="process-form-intro"><span class="process-catalog-code">${esc(process.code)}</span><div><h2>Vorgangsdaten erfassen</h2><p>Bitte fülle die Pflichtangaben aus. Der Vorgang wird mit einer neuen STW-Aktennummer gespeichert.</p></div></div>
+      <fieldset class="process-kind-picker"><legend>Art des Vorgangs *</legend><p>Wähle eine Option aus. Die Auswahl ist eindeutig, es kann nur eine Art markiert werden.</p><div class="process-kind-options"><label class="process-kind-option"><input type="checkbox" name="caseType" value="steward" required onchange="setProcessType(this)"><span><strong>Steward-Fall</strong><small>Der Bereich zum Anlegen von Prozessdokumenten bleibt geschlossen.</small></span></label><label class="process-kind-option"><input type="checkbox" name="caseType" value="force" onchange="setProcessType(this)"><span><strong>Force-Vorgang</strong><small>In der Akte wird der zusätzliche Dokumentenbereich geöffnet.</small></span></label></div></fieldset>
       <div class="grid cols-2"><div class="field"><label for="pf_event">${process.group==='race'?'Rennen / Veranstaltung':'Vorgangsbereich / Event'} *</label><input id="pf_event" name="event" required maxlength="160" placeholder="z. B. GP Monaco / Saison 2026"></div><div class="field"><label for="pf_priority">Priorität</label><select id="pf_priority" name="priority"><option>Normal</option><option>Wichtig</option><option>Dringend</option></select></div></div>
       <div class="grid cols-2">${fields.map(field=>{const required=PROCESS_REQUIRED_FIELDS[process.group].includes(field.name);return `<div class="field"><label for="pf_${field.name}">${esc(field.label)}${required?' *':''}</label><input id="pf_${field.name}" name="${field.name}" type="text" maxlength="500" placeholder="${esc(field.placeholder)}" ${required?'required':''}></div>`;}).join('')}</div>
       <div class="field"><label for="pf_summary">Sachverhalt / Auftrag / Kurzbeschreibung *</label><textarea id="pf_summary" name="summary" rows="5" required maxlength="5000" placeholder="Beschreibe den Anlass und was im Vorgang bearbeitet werden soll."></textarea></div>
@@ -1005,11 +1021,16 @@ async function submitProcessCase(event,code){
   const form=event.currentTarget;
   if(!process||!form||!form.reportValidity()) return;
   const values=Object.fromEntries(new FormData(form).entries());
+  if(!['steward','force'].includes(values.caseType)){
+    showAccessNotice('Bitte wähle „Steward-Fall“ oder „Force-Vorgang“, bevor du die Akte anlegst.');
+    return;
+  }
   const now=Date.now();
   const stw=nextStw();
-  const notes=Object.entries(values).filter(([key,value])=>!['event','summary','priority','owner','dueDate'].includes(key)&&String(value).trim()).map(([key,value])=>`${key}: ${String(value).trim()}`).join('\n');
+  const notes=Object.entries(values).filter(([key,value])=>!['caseType','event','summary','priority','owner','dueDate'].includes(key)&&String(value).trim()).map(([key,value])=>`${key}: ${String(value).trim()}`).join('\n');
   const record={
     id:uid(),stw,season:String(values.season||new Date().getFullYear()),status:'Neu',createdAt:now,updatedAt:now,
+    caseType:String(values.caseType),
     createdById:AUTH.profile?.id||AUTH.session?.user?.id||'',createdByTier:currentTier(),
     event:String(values.event).trim(),sessionType:String(values.session||'Sonstige Session').trim(),incidentLap:String(values.time||'').trim(),
     category:process.categoryName,reportedBy:'Interner Prozess',
@@ -1041,7 +1062,7 @@ async function submitProcessCase(event,code){
 /* ============================= PROZESSE / KNOWLEDGEBASE ============================= */
 const PROCESS_TOPICS = [
   {id:'start',title:'Start & Orientierung',summary:'Die wichtigsten Bereiche und die Grundlogik der Anwendung.',intro:'Das Stewards Office ist in Arbeitsbereiche aufgeteilt. Jede Seite hat eine konkrete Aufgabe: erfassen, untersuchen, entscheiden oder dokumentieren.',steps:[['Dashboard öffnen','Offene Akten, Lizenzstatus, Kategorien und zuletzt bearbeitete Fälle zeigen den aktuellen Handlungsbedarf.'],['Seite wählen','Die Navigation links öffnet den Arbeitsbereich. Ein Klick auf einen Fall oder Fahrer führt in die Detailansicht.'],['Änderungen speichern','Formulare werden erst durch den jeweiligen Speichern-Button dauerhaft übernommen.'],['Datenstand prüfen','Bei verbundenem Supabase sehen alle offenen Browser denselben Stand.']],screen:'dashboard'},
-  {id:'case',title:'Steward-Akte',summary:'Meldung aufnehmen, Beweise dokumentieren, unabhängige Prüfung anfordern und Entscheidungen versioniert festhalten.',intro:'Eine geöffnete Akte ist zunächst eine Aufnahme oder Prüfung, keine Entscheidung. Zuständigkeit und Freigabestatus stehen direkt in der Akte; eine unabhängige Person muss Entscheidungen freigeben.',steps:[['Vorgang eröffnen','Den Prozess passend zum Anliegen auswählen. Tier 1 nimmt zugewiesene Meldungen und Unterlagen auf; Entscheidungen bleiben den zuständigen höheren Stufen vorbehalten.'],['Akte vervollständigen','Saison, Event, Beteiligte, objektiven Sachverhalt, Beweise, Regelartikel und Fristen dokumentieren.'],['An die Prüfstufe senden','Tier 1 übergibt zur Tier-2-Prüfung; Tier 2 kann bei fehlender Befugnis an Tier 3 eskalieren.'],['Unabhängig prüfen','Bearbeitung und Freigabe erfolgen durch unterschiedliche Konten. Die eigene Akte kann nicht selbst freigegeben werden.'],['Rückgabe bearbeiten','Bei Ergänzungsbedarf muss die Prüfstelle einen konkreten Arbeitsauftrag mit Grund dokumentieren.'],['Freigabe und Umsetzung dokumentieren','Freigabe, Ablehnung, CEO-Übergabe und nächste Umsetzung werden im Prüfverlauf mit Person, Stufe, Zeitpunkt und Begründung gespeichert.'],['Bericht als PDF ausgeben','Der aktuelle Prüf- oder Übergabevermerk kann aus der Akte als PDF gedruckt werden.']],screen:'case'},
+  {id:'case',title:'Steward-Akte',summary:'Meldung aufnehmen, Beweise dokumentieren, unabhängige Prüfung anfordern und Entscheidungen versioniert festhalten.',intro:'Eine geöffnete Akte ist zunächst eine Aufnahme oder Prüfung. Bei der Anlage wird zwischen Steward-Fall ohne Dokumentenbereich und Force-Vorgang mit Dokumentenbereich gewählt. Tier 3 kann jeden Prozess eröffnen und Freigaben einschließlich eigener und CEO-pflichtiger Vorgänge direkt dokumentieren.',steps:[['Vorgang eröffnen','Den Prozess passend zum Anliegen auswählen und Steward-Fall oder Force-Vorgang markieren. Tier 1 und Tier 2 folgen ihren Eskalationswegen; Tier 3 kann jeden Prozess eröffnen.'],['Akte vervollständigen','Saison, Event, Beteiligte, objektiven Sachverhalt, Beweise, Regelartikel und Fristen dokumentieren.'],['An die Prüfstufe senden','Tier 1 übergibt zur Tier-2-Prüfung; Tier 2 kann bei fehlender Befugnis an Tier 3 eskalieren. Tier 3 kann Vorgänge direkt freigeben.'],['Unabhängig prüfen','Für Tier 1 und Tier 2 erfolgen Bearbeitung und Freigabe durch unterschiedliche Konten. Tier 3 darf auch eigene Vorgänge und CEO-pflichtige Schritte freigeben.'],['Rückgabe bearbeiten','Bei Ergänzungsbedarf muss die Prüfstelle einen konkreten Arbeitsauftrag mit Grund dokumentieren.'],['Freigabe und Umsetzung dokumentieren','Freigabe, Ablehnung, CEO-Übergabe und nächste Umsetzung werden im Prüfverlauf mit Person, Stufe, Zeitpunkt und Begründung gespeichert.'],['Bericht als PDF ausgeben','Der aktuelle Prüf- oder Übergabevermerk kann aus der Akte als PDF gedruckt werden.']],screen:'case'},
   {id:'cases',title:'Aktenübersicht',summary:'Vorgänge nach Prozess, Prüfstufe, Frist und Freigabestatus priorisieren.',intro:'Die Aktenübersicht ist der Arbeitskorb der Stewards. Filter helfen beim Finden; das Öffnen einer Zeile startet nur die Prüfung.',steps:[['Aktenliste öffnen','STW-Nummer, Prozesskennung, Event, Zuständigkeit und Freigabestatus prüfen.'],['Suchen und filtern','Suchfeld, Status, Team und Kategorie kombinieren, um offene Fälle zu finden.'],['Detail öffnen','Eine Tabellenzeile öffnet die Akte, verändert aber nichts.'],['Zuständigkeit beachten','Übergaben, unabhängige Freigaben und begründete Rückgaben werden direkt in der Akte protokolliert.']],screen:'cases'},
   {id:'drivers',title:'Fahrer & Lizenzen',summary:'Fahrerakten pflegen, Strafpunkte prüfen und Lizenzen verwalten.',intro:'Die Fahrerakte verbindet Stammdaten, Lizenz, Strafpunkte, verknüpfte Steward-Akten und Transferhistorie.',steps:[['Fahrer suchen','Nach Name, Team oder Lizenzstatus filtern.'],['Fahrerakte öffnen','Persönliche Daten, Sim-Racing-Profil und bisherige Fälle prüfen.'],['Lizenz erteilen','Reglement-Akzeptanz prüfen, dann Lizenz erteilen und Dokument erzeugen.'],['Status ändern','Aussetzen, Entziehen oder Reaktivieren mit dokumentiertem Grund durchführen.'],['Aktenhistorie prüfen','Strafpunkte stammen aus entschiedenen oder archivierten Akten.']],screen:'drivers'},
   {id:'teams',title:'Teams & Aufstellung',summary:'Teams, Fahreraufstellungen und Lizenzstatus übersichtlich kontrollieren.',intro:'Die Teamseite zeigt die aktuelle Aufstellung. Änderungen an Fahrern erfolgen über Fahrerakte oder Transfers.',steps:[['Teamübersicht öffnen','Aufstellung, Lizenzstatus und Fallanzahl je Team sehen.'],['Fahrer prüfen','Einen Fahrer anklicken, um seine vollständige Akte zu öffnen.'],['Teamdaten verwalten','Neue Teams und Grunddaten in Verwaltung pflegen.'],['Aufstellung nachvollziehen','Teamwechsel ausschließlich über den Transferprozess dokumentieren.']],screen:'teams'},
@@ -1186,11 +1207,19 @@ const PAGE_TIERS={
 };
 function canAccessPage(page){
   const requiredTier=PAGE_TIERS[page]??1;
-  if(page==='tier-office-t2'||page==='tier-office-t3') return Number(AUTH.profile?.access_tier||0)===requiredTier;
   return Number(AUTH.profile?.access_tier||0)>=requiredTier;
 }
 function go(page, id){
   if(page==='tier-office') page=currentTier()===3?'tier-office-t3':'tier-office-t2';
+  const documentCase=page==='document-create'
+    ?DB.cases.find(item=>item.id===id)
+    :page==='document-editor'
+      ?DB.cases.find(item=>item.id===DB.caseDocuments.find(doc=>doc.id===id)?.caseId)
+      :null;
+  if(documentCase?.caseType==='steward'&&['document-create','document-editor'].includes(page)){
+    showAccessNotice('Für einen Steward-Fall ist der Dokumentenbereich geschlossen.');
+    return;
+  }
   if(!canAccessPage(page)){
     showAccessNotice(page.startsWith('tier-office-')?`Dieser Arbeitsplatz ist ausschließlich für Tier ${PAGE_TIERS[page]} freigegeben.`:`Dieser Bereich ist erst ab Tier ${PAGE_TIERS[page]||1} freigegeben. Bitte nutze den für deine Stufe vorgesehenen Übergabeweg.`);
     return;
@@ -1210,7 +1239,7 @@ function portalAccessCard(){
   const canCreateProcess=Number(AUTH.profile?.access_tier||0)>=2;
   return `<section class="portal-launch-card">
     <div><span class="eyebrow">ZFC · CFC · Steward Office</span><h2>Wissen &amp; Vorgänge</h2><p>Öffne Arbeitsanleitungen und Abläufe oder ${canCreateProcess?'starte einen Vorgang mit dem passenden Prozessformular.':'nimm einen für Tier 1 freigegebenen Vorgang auf.'}</p></div>
-    <div class="portal-launch-actions"><button class="btn primary" onclick="go('process-catalog')">${canCreateProcess?'Force anlegen':'Vorgang aufnehmen'}</button><button class="btn gold" onclick="go('processes')">Wissensportal öffnen</button></div>
+    <div class="portal-launch-actions"><button class="btn primary" onclick="go('process-catalog')">${canCreateProcess?'Vorgang anlegen':'Vorgang aufnehmen'}</button><button class="btn gold" onclick="go('processes')">Wissensportal öffnen</button></div>
   </section>`;
 }
 function pageTierOffice(tier){
@@ -1303,7 +1332,7 @@ function renderNav(){
     {tier:3,label:'Tier 3'}
   ];
   document.getElementById('mainnav').innerHTML=groups.map(group=>{
-    const items=NAV.filter(item=>canAccessPage(item.id)&&(PAGE_TIERS[item.id]??1)===group.tier);
+    const items=currentTier()>=group.tier?NAV.filter(item=>canAccessPage(item.id)&&(PAGE_TIERS[item.id]??1)===group.tier):[];
     if(!items.length) return '';
     return `<div class="navgroup"><div class="navgroup-title">${group.label}</div>${items.map(item=>`
       <div class="navitem ${(ROUTE.page===item.id||(item.id==='esport'&&ROUTE.page.startsWith('esport')))?'active':''}" onclick="go('${item.id}')">
@@ -1513,7 +1542,7 @@ function pageDashboard(){
 
     <div class="dashboard-section-head"><h2>Race Control <b>Shortcuts</b></h2><span>Arbeitsbereiche</span></div>
     <div class="dashboard-quicklinks">
-      <div class="dashboard-quicklink" onclick="go('process-catalog')"><span class="quick-no">01</span><div><strong>${currentTier()>=2?'Force anlegen':'Vorgang aufnehmen'}</strong><span>Prozess auswählen und zuständig übergeben</span></div></div>
+      <div class="dashboard-quicklink" onclick="go('process-catalog')"><span class="quick-no">01</span><div><strong>${currentTier()>=2?'Vorgang anlegen':'Vorgang aufnehmen'}</strong><span>Prozess auswählen und Vorgang bearbeiten</span></div></div>
       <div class="dashboard-quicklink" onclick="go('cases')"><span class="quick-no">02</span><div><strong>Akten prüfen</strong><span>Status und Entscheidungen</span></div></div>
       <div class="dashboard-quicklink" onclick="go('drivers')"><span class="quick-no">03</span><div><strong>Fahrerregister</strong><span>Lizenzen und Profile</span></div></div>
       <div class="dashboard-quicklink" onclick="go('rulebook')"><span class="quick-no">04</span><div><strong>Regelwerk</strong><span>Sportliche Grundlage</span></div></div>
@@ -1700,7 +1729,7 @@ function pageCaseForm(existing){
 
   return `
   <div class="pagehead">
-    <div><div class="eyebrow">${isNew?'Neue Akte':'Akte bearbeiten'}</div><h1>Steward-Fall</h1></div>
+    <div><div class="eyebrow">${isNew?'Neue Akte':'Akte bearbeiten'}</div><h1>${c.caseType==='force'?'Force-Vorgang':'Steward-Fall'}</h1></div>
     <div class="actions">
       <button class="btn" onclick="go('cases')">← Zur Übersicht</button>
     </div>
@@ -1717,7 +1746,7 @@ function pageCaseForm(existing){
     <div class="dossier-body">
 
       ${c.processCode?processWorkflowPanel(c):''}
-      ${!isNew?caseDocumentsPanel(c):''}
+      ${!isNew&&(c.caseType!=='steward'||!c.processCode)?caseDocumentsPanel(c):''}
       <div class="sectiontitle">Grunddaten</div>
       <div class="grid cols-3">
         <div class="field"><label>Saison</label><select id="f_season">${selectOptions(['2025','2026','2027'], c.season)}</select></div>
@@ -1857,6 +1886,7 @@ function caseDocumentClosureState(c){
 function caseDocumentsPanel(c){
   if(!CASE_DOCUMENTS.loaded.has(c.id)&&!CASE_DOCUMENTS.loading.has(c.id)&&!CASE_DOCUMENTS.errorByCase.has(c.id)) loadCaseDocuments(c.id);
   const state=caseDocumentClosureState(c);
+  const canClose=state.ready||currentTier()>=3;
   const requirements=requirementsMetForCase(c);
   const rows=documentRowsForCase(c.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   const processOptions=Object.keys(DOCUMENT_PROCESS_MATRIX).map(code=>`<option value="${esc(code)}" ${documentCaseProcessCodes(c).includes(code)?'disabled':''}>${esc(code)} · ${esc(findProcess(code)?.title||code)}</option>`).join('');
@@ -1872,7 +1902,7 @@ function caseDocumentsPanel(c){
     ${caseDocumentSuggestions(c)}
     <div class="case-document-table-heading"><h3>Dokumentenübersicht</h3><div class="actions"><button class="btn small" onclick="downloadCaseBundle('${esc(c.id)}')">Akten-PDF</button><button class="btn small" onclick="downloadCaseZip('${esc(c.id)}')">Aktenpaket ZIP</button></div></div>
     ${rows.length?`<div class="table-scroll"><table><thead><tr><th>Dokumentnummer</th><th>Dokumentart / Titel</th><th>Status</th><th>Version</th><th>Ersteller</th><th>Datum</th><th>Freigabe</th><th>PDF</th><th>Aktionen</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.documentNumber||row.documentId.slice(0,8))}</td><td>${esc(documentTypeTitle(row.documentType))}<br><small>${esc(row.title||'—')}</small></td><td><span class="tag ${row.status==='Freigegeben'||row.status==='Finalisiert'?'decided':row.status==='Zur Ergänzung zurückgegeben'?'open':'invest'}">${esc(row.status)}</span></td><td>v${Number(row.version)}</td><td>${esc(row.createdByName||'—')}</td><td>${fmtDateTime(row.updatedAt)}</td><td>${esc(row.approvedByName||row.reviewedByName||'—')}</td><td>${row.pdfPath?'<span class="tag decided">Verfügbar</span>':'<span class="tag open">Fehlt</span>'}</td><td class="doc-row-actions"><button class="btn small" onclick="go('document-editor','${esc(row.id)}')">Öffnen</button><button class="btn small gold" onclick="previewCaseDocument('${esc(row.id)}')">Vorschau</button><button class="btn small" onclick="downloadCaseDocument('${esc(row.id)}')">PDF laden</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Noch keine Dokumentvorgänge in dieser Akte.</div>'}
-    <div class="case-document-close-state ${state.ready?'is-ready':'is-blocked'}"><strong>${state.ready?'Abschluss möglich':'Abschluss gesperrt'}</strong><span>${state.ready?'Mindestens fünf abgeschlossene PDFs und alle Pflichtunterlagen liegen vor.':`${Math.max(0,5-state.count)} weitere abgeschlossene PDF-Dokumente und ${state.missing.length} Pflichtunterlage(n) fehlen.`}</span></div>
+    <div class="case-document-close-state ${canClose?'is-ready':'is-blocked'}"><strong>${state.ready?'Abschluss möglich':currentTier()>=3?'Tier-3-Freigabe möglich':'Abschluss gesperrt'}</strong><span>${state.ready?'Mindestens fünf abgeschlossene PDFs und alle Pflichtunterlagen liegen vor.':currentTier()>=3?'Tier 3 kann den Vorgang ohne weitere Dokumentensperre freigeben.':`${Math.max(0,5-state.count)} weitere abgeschlossene PDF-Dokumente und ${state.missing.length} Pflichtunterlage(n) fehlen.`}</span></div>
   </section>`;
 }
 function documentTypeTitle(key){
@@ -1902,6 +1932,7 @@ function documentOptionList(c,search=''){
 function pageDocumentCreate(caseId){
   const c=DB.cases.find(item=>item.id===caseId);
   if(!c) return '<div class="empty"><b>Akte nicht gefunden</b></div>';
+  if(c.caseType==='steward') return '<div class="panel"><h2>Dokumentenbereich geschlossen</h2><p>Für einen Steward-Fall können keine Prozessdokumente angelegt werden.</p><button class="btn" onclick="go(\'caseform\',\''+esc(c.id)+'\')">← Zur Akte</button></div>';
   if(!CASE_DOCUMENTS.loaded.has(caseId)&&!CASE_DOCUMENTS.loading.has(caseId)) loadCaseDocuments(caseId);
   return `<div class="pagehead"><div><div class="eyebrow">${esc(c.stw)} · Dokumentvorgang</div><h1>Dokumentvorgang <b>anlegen</b></h1></div><div class="actions"><button class="btn" onclick="go('caseform','${esc(c.id)}')">← Zur Akte</button></div></div>
   <section class="panel document-create-panel"><h2>Dokumentvorgang für Akte <b>${esc(c.stw)}</b> anlegen</h2><div class="field"><label for="documentTypeSearch">Vorgangs- / Dokumentart suchen</label><input id="documentTypeSearch" type="search" placeholder="Dokumentart, Prozess oder Zweck suchen …" oninput="filterDocumentOptions('${esc(c.id)}')"></div><div class="field"><label for="documentTypeSelect">Vorgangs- / Dokumentart</label><select id="documentTypeSelect" size="9">${documentOptionList(c)}</select></div><div id="documentTypeInfo" class="document-type-info">Wähle eine Dokumentart, um Zweck, Pflichtfelder und Freigabestufe einzusehen.</div><div id="documentRequirementAssignments" class="document-requirement-assignments"></div><div class="actions"><button class="btn primary" onclick="startCaseDocument('${esc(c.id)}')">Dokumentvorgang beginnen</button><button class="btn" onclick="go('caseform','${esc(c.id)}')">Abbrechen</button></div></section>`;
@@ -1998,7 +2029,8 @@ function documentCanCreate(c,processCode=''){
   if(processCode&&processCode!==c.processCode){
     return currentTier()===1?canStartProcess(processCode):currentTier()>=workflowApprovalTier(processCode);
   }
-  if(c.processCode&&workflow.ownerTier&&Number(workflow.ownerTier)!==currentTier()&&currentTier()<3) return false;
+  if(currentTier()>=3) return true;
+  if(c.processCode&&workflow.ownerTier&&Number(workflow.ownerTier)!==currentTier()) return false;
   if(c.processCode&&workflow.createdById===actor&&workflow.approvalStatus!=='Noch nicht vorgelegt'&&workflow.approvalStatus!=='Zur Ergänzung zurückgegeben') return false;
   return true;
 }
@@ -2096,7 +2128,8 @@ function pageDocumentEditor(rowId){
   }
   const c=DB.cases.find(item=>item.id===doc.caseId), type=documentTypeByKey(doc.documentType);
   if(!c||!type) return '<div class="empty"><b>Akte oder Dokumentart nicht verfügbar.</b></div>';
-  const canEdit=['Entwurf','Zur Ergänzung zurückgegeben'].includes(doc.status)&&doc.createdBy===(AUTH.profile?.id||AUTH.session?.user?.id)&&documentCanCreate(c,doc.processCode||c.processCode||'');
+  if(c.caseType==='steward') return '<div class="panel"><h2>Dokumentenbereich geschlossen</h2><p>Für einen Steward-Fall ist der Dokumentenbereich nicht verfügbar.</p><button class="btn" onclick="go(\'caseform\',\''+esc(c.id)+'\')">← Zur Akte</button></div>';
+  const canEdit=['Entwurf','Zur Ergänzung zurückgegeben'].includes(doc.status)&&(currentTier()>=3||doc.createdBy===(AUTH.profile?.id||AUTH.session?.user?.id))&&documentCanCreate(c,doc.processCode||c.processCode||'');
   const canReview=doc.status==='Zur Prüfung'&&documentCanApprove(doc,c);
   const snapshot=doc.recordSnapshot||{};
   const events=DB.caseDocumentEvents.filter(event=>event.documentRowId===doc.id);
@@ -2115,7 +2148,7 @@ function pageDocumentEditor(rowId){
     <details class="document-audit"><summary>Prüf- und Freigabeereignisse</summary>${events.length?`<ol>${events.map(event=>`<li><time>${fmtDateTime(event.createdAt)}</time><strong>${esc(event.eventType)}</strong><span>${esc(event.actorName)} · Tier ${event.actorTier}</span><p>${esc(event.details)}</p></li>`).join('')}</ol>`:'<div class="empty">Noch keine Ereignisse geladen.</div>'}</details>
     <div id="documentEditorError" class="case-document-error" role="alert"></div>
     <div class="actions document-editor-actions">
-      ${canEdit?`<button class="btn" onclick="saveCaseDocument('${esc(doc.id)}',false)">Entwurf speichern</button><button class="btn gold" onclick="saveCaseDocument('${esc(doc.id)}',true)">Speichern &amp; PDF aktualisieren</button>${doc.status==='Zur Ergänzung zurückgegeben'?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Erneut zur Prüfung senden</button>`:doc.requiresApproval?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Zur Prüfung senden</button>`:`<button class="btn primary" onclick="finalizeCaseDocument('${esc(doc.id)}')">Finalisieren &amp; PDF speichern</button>`}`:''}
+      ${canEdit?`<button class="btn" onclick="saveCaseDocument('${esc(doc.id)}',false)">Entwurf speichern</button><button class="btn gold" onclick="saveCaseDocument('${esc(doc.id)}',true)">Speichern &amp; PDF aktualisieren</button>${doc.status==='Zur Ergänzung zurückgegeben'?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Erneut zur Prüfung senden</button>`:doc.requiresApproval&&currentTier()<3?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Zur Prüfung senden</button>`:`<button class="btn primary" onclick="finalizeCaseDocument('${esc(doc.id)}')">Finalisieren &amp; PDF speichern</button>`}`:''}
       ${canReview?`<button class="btn primary" onclick="approveCaseDocument('${esc(doc.id)}')">${doc.requiresCeo?'CEO-Freigabe erteilen':'Freigeben'}</button><button class="btn" onclick="returnCaseDocument('${esc(doc.id)}')">Zur Ergänzung zurückgeben</button>`:''}
       ${doc.pdfPath?`<button class="btn" onclick="previewCaseDocument('${esc(doc.id)}')">Vorschau</button>`:''}
       ${['Freigegeben','Finalisiert','Ersetzt'].includes(doc.status)?`<button class="btn gold" onclick="createNewDocumentVersion('${esc(doc.id)}')">Neue Version erstellen</button>`:''}
@@ -2207,6 +2240,7 @@ async function submitCaseDocument(rowId){
 }
 function documentCanApprove(doc,c){
   const actor=AUTH.profile?.id||AUTH.session?.user?.id||'', workflow=c.processWorkflow||{};
+  if(currentTier()>=3) return true;
   if(actor===doc.createdBy||actor===workflow.createdById) return false;
   if(doc.requiresCeo) return isCeoProfile()&&(doc.processCode!==c.processCode||workflow.approvalStatus==='CEO-Entscheidung ausstehend');
   if(doc.processCode&&doc.processCode!==c.processCode) return currentTier()===doc.requiredTier;
@@ -2214,7 +2248,7 @@ function documentCanApprove(doc,c){
 }
 async function finalizeCaseDocument(rowId){
   const doc=DB.caseDocuments.find(row=>row.id===rowId);
-  if(!doc||doc.requiresApproval){ showAccessNotice('Dieses Dokument erfordert eine unabhängige Freigabe; Finalisieren ist nicht zulässig.'); return; }
+  if(!doc||doc.requiresApproval&&currentTier()<3){ showAccessNotice('Dieses Dokument erfordert eine unabhängige Freigabe; Finalisieren ist nicht zulässig.'); return; }
   const saved=await saveCaseDocument(rowId,false);
   if(!saved) return;
   try{
@@ -2528,7 +2562,7 @@ async function saveCase(id, closeAfter){
   const now = Date.now();
   let c = id? DB.cases.find(x=>x.id===id) : null;
   const isNew = !c;
-  if(c?.processCode){
+  if(c?.processCode&&currentTier()<3){
     const workflow=c.processWorkflow||{};
     const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
     const allowedOwner=Number(workflow.ownerTier)===currentTier();
@@ -2548,7 +2582,7 @@ async function saveCase(id, closeAfter){
     DB.cases.push(c);
   }
   const prevStatus = c.status, prevDecision = c.decision;
-  if(!isNew&&!c.processCode&&currentTier()>=2&&v('f_status')==='Archiviert'){
+  if(!isNew&&!c.processCode&&currentTier()>=2&&currentTier()<3&&v('f_status')==='Archiviert'){
     await loadCaseDocuments(c.id,true);
     if(CASE_DOCUMENTS.errorByCase.has(c.id)){
       showAccessNotice('Der Aktenabschluss ist gesperrt, weil der PDF-Bestand nicht geprüft werden konnte.');
@@ -2564,11 +2598,11 @@ async function saveCase(id, closeAfter){
   const requestedDecision=canEditLegacyDecision?v('f_decision'):c.decision;
   const requestedLicenseStatus=canEditLegacyDecision?v('f_licenseStatusAfter'):c.licenseStatusAfter;
   const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
-  if(!isNew&&canEditLegacyDecision&&requestedDecision!==prevDecision&&c.createdById===actorId){
+  if(!isNew&&canEditLegacyDecision&&requestedDecision!==prevDecision&&c.createdById===actorId&&currentTier()<3){
     showAccessNotice('Die eigene Fallaufnahme darf nicht selbst unabhängig entschieden werden. Bitte eine andere berechtigte Person prüfen lassen.');
     return;
   }
-  if(!c.processCode&&((requestedDecision==='Rennsperre'&&currentTier()<3)||(requestedLicenseStatus==='Entzogen'&&!isCeoProfile()))){
+  if(!c.processCode&&((requestedDecision==='Rennsperre'&&currentTier()<3)||(requestedLicenseStatus==='Entzogen'&&!isCeoProfile()&&currentTier()<3))){
     showAccessNotice(requestedLicenseStatus==='Entzogen'?'Ein dauerhafter Lizenzentzug benötigt eine CEO-Freigabe. Bitte den Vorgang an Tier 3 und anschließend an den CEO übergeben.':'Eine Rennsperre muss durch Tier 3 unabhängig geprüft werden.');
     return;
   }

@@ -295,6 +295,10 @@ begin
 				raise exception 'Neue Akten beginnen ohne Entscheidung oder Sanktion im Status Neu.';
 			end if;
 			if case_code is not null then
+				if case_item->>'caseType' is null
+					or case_item->>'caseType' not in ('steward','force') then
+					raise exception 'Prozessakten müssen als Steward-Fall oder Force-Vorgang gekennzeichnet werden.';
+				end if;
 				if new_workflow->>'createdById' is distinct from auth.uid()::text
 					or (new_workflow->>'createdByTier')::smallint is distinct from actor_tier then
 					raise exception 'Die Prozessakte muss vom angemeldeten Konto und mit dessen Tier eröffnet werden.';
@@ -327,6 +331,10 @@ begin
 					raise exception 'Die Eröffnung muss mit einem unveränderlichen Protokolleintrag dokumentiert werden.';
 				end if;
 			end if;
+			continue;
+		end if;
+
+		if actor_tier = 3 then
 			continue;
 		end if;
 
@@ -1102,6 +1110,7 @@ declare
 begin
 	select * into doc from public.zfc_case_documents where id = p_document_row_id;
 	if not found or doc.status <> 'Zur Prüfung' or not public.zfc_case_document_access(doc.case_id) then return false; end if;
+	if actor_tier >= 3 then return true; end if;
 	if doc.created_by = auth.uid() then return false; end if;
 	if doc.requires_ceo then
 		select lower(btrim(position)) into actor_position from public.zfc_user_profiles where id = auth.uid();
@@ -1151,7 +1160,10 @@ begin
 	if case_item is null or not public.zfc_case_document_access(new.case_id) then
 		raise exception 'Kein berechtigter Zugriff auf die zugeordnete Akte.';
 	end if;
-	if case_item->>'status' = 'Archiviert' then
+	if case_item->>'caseType' = 'steward' then
+		raise exception 'Für einen Steward-Fall ist der Dokumentenbereich geschlossen.';
+	end if;
+	if case_item->>'status' = 'Archiviert' and actor_tier < 3 then
 		raise exception 'In einer archivierten Akte können keine Dokumente mehr geändert werden.';
 	end if;
 	if nullif(new.process_code,'') is not null
@@ -1255,10 +1267,12 @@ begin
 			raise exception 'Eine neue Dokumentversion muss auf eine abgeschlossene Vorversion verweisen.';
 		end if;
 		if new.process_code = case_item->>'processCode' and new.process_code <> '' then
-			if actor_tier < 3 and actor_tier <> coalesce((case_item->'processWorkflow'->>'ownerTier')::smallint,actor_tier)
+			if actor_tier < 3 and (
+				actor_tier <> coalesce((case_item->'processWorkflow'->>'ownerTier')::smallint,actor_tier)
 				or case_item->'processWorkflow'->>'createdById' = auth.uid()::text
 					and case_item->'processWorkflow'->>'approvalStatus' not in ('Noch nicht vorgelegt','Zur Ergänzung zurückgegeben')
-				or case_item->'processWorkflow'->>'approvalStatus' in ('Freigegeben','Abgelehnt') then
+				or case_item->'processWorkflow'->>'approvalStatus' in ('Freigegeben','Abgelehnt')
+			) then
 				raise exception 'Die Prozessakte ist einer anderen Bearbeitungsstufe oder bereits einer Freigabe zugeordnet.';
 			end if;
 		elsif new.process_code <> '' then
@@ -1277,6 +1291,14 @@ begin
 		from public.zfc_case_documents existing
 		where existing.case_id = new.case_id;
 		new.updated_at := now();
+		return new;
+	end if;
+
+	if actor_tier = 3 then
+		new.updated_at := now();
+		if new.pdf_path is distinct from old.pdf_path and new.pdf_path is not null then
+			new.pdf_generated_at := now();
+		end if;
 		return new;
 	end if;
 
@@ -1448,7 +1470,7 @@ create policy zfc_case_documents_update
 	on public.zfc_case_documents for update to authenticated
 	using (
 		public.zfc_case_document_access(case_id)
-		and (created_by = auth.uid() or public.zfc_case_document_can_review(id)
+		and (public.zfc_current_tier() >= 3 or created_by = auth.uid() or public.zfc_case_document_can_review(id)
 			or status in ('Freigegeben','Finalisiert') and public.zfc_current_tier() >= required_tier)
 	)
 	with check (public.zfc_case_document_access(case_id));
