@@ -7,7 +7,7 @@ const SUPABASE_CONFIG = {
 };
 const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
-let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null };
+let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null, lastSyncError:null };
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
 let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
 let syncQueue = Promise.resolve();
@@ -90,6 +90,7 @@ const DECISIONS = [
 const LICENSE_AFTER = ["Bleibt uneingeschränkt aktiv","Aktiv, Verwarnung vermerkt","Vorübergehend ausgesetzt","Entzogen"];
 const SESSION_TYPES = ["Training","Qualifying","Sprint-Qualifying","Sprint","Rennen","Sonstige Session"];
 const CASE_STATUS = ["Neu","Offen","In Untersuchung","Entschieden","Archiviert"];
+const PROCESS_APPROVAL_STATUSES = ["Noch nicht vorgelegt","Tier-2-Prüfung ausstehend","Tier-3-Prüfung ausstehend","CEO-Entscheidung ausstehend","Zur Ergänzung zurückgegeben","Freigegeben","Abgelehnt"];
 const REPORTED_BY = ["Rennleitung","Steward-Beobachtung","Fahrer-Meldung (Protest)","Team-Meldung","Video-Beweis / Marshalling-System"];
 const EVENTS = ["Bahrain","Saudi-Arabien","Australien","Japan","China","Miami","Emilia-Romagna","Monaco","Kanada","Spanien","Österreich","Großbritannien","Belgien","Ungarn","Niederlande","Italien","Aserbaidschan","Singapur","USA (Austin)","Mexiko","Brasilien","Las Vegas","Katar","Abu Dhabi"];
 const PLATFORMS = ["PlayStation","Xbox","PC"];
@@ -295,6 +296,7 @@ function applyRemoteState(state){
 }
 function stateRecordCount(state){ return ['drivers','cases','transfers','finance','marketRequests','escalations'].reduce((count,key)=>count+(Array.isArray(state?.[key])?state[key].length:0),0); }
 async function syncAppState(){
+  SUPABASE.lastSyncError=null;
   if(!SUPABASE.client || SUPABASE.applyingRemote) return;
   syncQueue=syncQueue.then(async()=>{
     if(!SUPABASE.client || SUPABASE.applyingRemote) return;
@@ -311,6 +313,7 @@ async function syncAppState(){
   }).catch(error=>{
     SUPABASE.applyingRemote=false;
     SUPABASE.status='Synchronisierung fehlgeschlagen';
+    SUPABASE.lastSyncError=error;
     console.warn('Supabase-State konnte nicht synchronisiert werden',error);
   });
   return syncQueue;
@@ -603,8 +606,11 @@ function nextLicenseNo(){
   return `ZFC-LIC-${String(next).padStart(3,'0')}`;
 }
 function statusTagClass(s){
-  return {Neu:'open',Offen:'open','In Untersuchung':'invest',Entschieden:'decided',Archiviert:'archived'}[s] || 'archived';
+  return {Neu:'open',Offen:'open','In Untersuchung':'invest',Entschieden:'decided',Archiviert:'archived',
+    'Noch nicht vorgelegt':'open','Tier-2-Prüfung ausstehend':'invest','Tier-3-Prüfung ausstehend':'invest',
+    'CEO-Entscheidung ausstehend':'invest','Zur Ergänzung zurückgegeben':'open','Freigegeben':'decided','Abgelehnt':'archived'}[s] || 'archived';
 }
+function caseDisplayStatus(c){ return c?.processWorkflow?.approvalStatus||c?.status||'Neu'; }
 function licenseTagClass(s){
   return {'Aktiv':'active','Ausgesetzt':'suspended','Entzogen':'revoked','Nicht ausgestellt':'none'}[s] || 'none';
 }
@@ -652,11 +658,385 @@ function pageRulebook(){
   </div>`;
 }
 
+/* ============================= PROZESSKATALOG & VORGANGSANLAGE ============================= */
+const PROCESS_CATALOG = [
+  {group:'discipline',name:'Disziplin, Prüfung & Eskalierung',processes:[
+    ['35','Disziplinarverfahren','Prüfung eines gemeldeten oder beobachteten Regelverstoßes.','Anlass, Sachverhalt, Beweissicherung, Anhörung, Entscheidung und Abschluss.'],
+    ['D9','Erweitertes Disziplinarverfahren','Erweiterte Untersuchung bei schwerwiegenden oder komplexen Sachverhalten.','Übernahme einer bestehenden Akte, zusätzlicher Prüfauftrag, Leitungsprüfung und Abschlussentscheidung.'],
+    ['07b','Eskalierung Tier 3','Übergabe eines Vorgangs zur Prüfung oder Entscheidung durch Tier 3.','Eskalierungsgrund, Pflichtunterlagen, Übergabevermerk, Übernahme oder Rückgabe.'],
+    ['D1','Meldung eines möglichen Regelverstoßes','Aufnahme und Einordnung eines möglichen Regelverstoßes.','Mindestangaben, Eingangsprüfung, Zuständigkeit, Weiterleitung oder begründeter Abschluss.'],
+    ['D2','Beweissicherung','Registrierung und nachvollziehbare Bewertung von Beweismitteln.','Herkunft, Zeitbezug, Bewertung, Zugriffsrechte und Aufbewahrung.'],
+    ['D3','Anhörung und Stellungnahme','Einholung und Dokumentation der Stellungnahme betroffener Personen.','Anhörung, Frist, Fristverlängerung, Eingang und Bewertung.'],
+    ['D4','Einspruch und Überprüfung','Unabhängige Überprüfung einer bestehenden Entscheidung.','Eingang, Frist, Zuständigkeit, Befangenheit, Bestätigung, Änderung oder Aufhebung.'],
+    ['D5','Umsetzung von Maßnahmen','Dokumentierte Umsetzung einer freigegebenen Maßnahme.','Verwarnung, Sperre oder Lizenzmaßnahme, Kontrolle, Ablauf und Aufhebung.'],
+    ['D6','Kommunikations- und Rufschädigungsbeschwerde','Prüfung einer Beschwerde zu Kommunikation oder möglicher Rufschädigung.','Wortlaut, Kontext, Beteiligte, Stellungnahmen und Weiterleitung oder Abschluss.'],
+    ['D7','Befangenheit und Bearbeiterwechsel','Offenlegung und Behandlung eines Interessenkonflikts.','Interessenkonflikt, Wechselentscheidung, Übergabe und Rechteanpassung.'],
+    ['D8','Wiederaufnahme eines Verfahrens','Erneute Prüfung aufgrund neuer Erkenntnisse oder erheblicher Verfahrensmängel.','Wiederaufnahmefreigabe, ergänzende Prüfung und neue Abschlussentscheidung.']
+  ]},
+  {group:'race',name:'Rennorganisation & Race Control',processes:[
+    ['R1','Rennanmeldung und Abmeldung','Verwaltung von Anmeldungen, Abmeldungen und Ersatzfahrern.','Teilnahmevoraussetzungen, Anmeldefrist, Startliste und dokumentierter Abschluss.'],
+    ['R2','Lobbyorganisation','Vorbereitung und technische Durchführung einer Rennlobby.','Lobbyverantwortung, Einstellungen, Einladungen, Anwesenheit und Startfreigabe.'],
+    ['R3','Fahrerbriefing und Rennvorbereitung','Vorbereitung und Veröffentlichung der verbindlichen Fahrerinformationen.','Pflichtinhalte, Kenntnisnahme und Änderungen vor dem Start.'],
+    ['R4','Race Control und Rennunterbrechung','Bearbeitung einer Rennunterbrechung, eines Neustarts oder eines technischen Eingriffs.','Meldungsaufnahme, Prüfung, Entscheidung, Kommunikation und Rennprotokoll.'],
+    ['R5','Steward-Prüfung eines Rennvorfalls','Untersuchung und Bewertung eines Vorfalls während einer Rennsession.','Rennen, Runde, Beteiligte, Beweismittel, gültiges Regelwerk und begründete Entscheidung.'],
+    ['R6','Ergebnisse und Meisterschaftswertung','Prüfung, Korrektur und Veröffentlichung offizieller Ergebnisse.','Ergebnisübernahme, freigegebene Strafen, Punkteberechnung und Korrekturprotokoll.'],
+    ['R7','Lizenzverwaltung','Vergabe, Prüfung, Sperre oder Wiederfreigabe einer Rennlizenz.','Lizenzpunkte, verknüpfte Entscheidungen, Status und Verlauf.'],
+    ['R8','Technischer Vorfall','Prüfung technischer Störungen mit möglichen Auswirkungen auf die Veranstaltung.','Meldung, Nachweise, Auswirkungen und dokumentierte Folgemaßnahmen.']
+  ]},
+  {group:'admin',name:'Verwaltung & Archiv',processes:[
+    ['V1','Fahreraufnahme','Erfassung und Prüfung einer neuen Fahreraufnahme.','Teilnahmevoraussetzungen, Fahrerprofil, Zuordnung und Freigabe durch Tier 2.'],
+    ['V2','Rollen und Rechte','Beantragung, Prüfung und Freigabe operativer Rollen und Zugriffsrechte.','Antrag, Zielrolle, Vier-Augen-Prüfung und dokumentierte Rechtevergabe.'],
+    ['V3','Regeln und Prozesse ändern','Änderung eines Regelwerks oder verbindlichen Prozesses.','Änderungsvorschlag, Auswirkung, fachliche Prüfung, CEO-Freigabe und Versionsverlauf.'],
+    ['V4','Team- und Fahrerwechsel','Bearbeitung eines Teamwechsels oder einer Fahrerzuordnung.','Antrag, Regelkonformität, Freigabe und nachvollziehbare Historie.'],
+    ['A1','Archivierung','Abschluss und sichere Ablage einer Akte.','Vollständigkeit, offene Pflichtaufgaben, Freigabestatus und Aufbewahrung.']
+  ]},
+  {group:'finance',name:'Finanzen',processes:[
+    ['F1','Rechnungsfreigabe','Prüfung und Freigabe einer Rechnung oder Zahlung.','Betrag, Zahlungsempfänger, Beleg, Budget und Freigabeentscheidung.'],
+    ['F2','Finanzprüfung','Abgleich eines Finanzpostens mit Budget und Belegen.','Saison, Kategorie, Beleglage, Abweichung und Prüfvermerk.'],
+    ['F3','Sponsoring & Vertragsprüfung','Dokumentation eines Sponsoring- oder Vertragsvorgangs.','Partner, Vertragsunterlagen, Leistungsumfang, Betrag und Freigabe.']
+  ]},
+  {group:'esport',name:'CFC Esport',processes:[
+    ['C1','Esport-Fahrerprofil','Anlage oder Änderung eines CFC-Esport-Fahrerprofils.','Fahrer, Team, Plattform, Rolle, Coach und Profilstatus.'],
+    ['C2','Setup-Labor','Dokumentation einer Setup- oder Streckenanalyse.','Fahrer, Strecke, Fahrzeugkonfiguration, Testbedingungen und Analyse.'],
+    ['C3','Team-Review','Strukturiertes Leistungs- und Entwicklungsreview.','Team, Zeitraum, Ziele, Beobachtungen und vereinbarte Maßnahmen.']
+  ]}
+].map(category=>({
+  ...category,
+  processes:category.processes.map(([code,title,purpose,summary])=>({code,title,purpose,summary,category:category.name}))
+}));
+const PROCESS_FORM_FIELDS={
+  discipline:[
+    {name:'subject',label:'Betroffene Person / Fahrer',placeholder:'Name oder Fahrer-ID'},
+    {name:'team',label:'Team',placeholder:'Betroffenes Team'},
+    {name:'incident',label:'Vorwurf / Prüfgegenstand',placeholder:'Was soll geprüft werden?'},
+    {name:'rule',label:'Regelartikel / Prüfauftrag',placeholder:'z. B. Art. 04 Abs. 2'},
+    {name:'evidence',label:'Beweismittel und Fundstelle',placeholder:'Replay, Chat, Link oder Dokument'},
+    {name:'response',label:'Anhörung / Stellungnahme',placeholder:'Anhörungsstand oder offene Fragen'},
+    {name:'relatedCase',label:'Verknüpfte Aktennummer',placeholder:'Optional'}
+  ],
+  race:[
+    {name:'event',label:'Rennen / Veranstaltung',placeholder:'GP oder Eventname'},
+    {name:'session',label:'Session / Rennphase',placeholder:'Rennen, Qualifying, Lobby, Briefing'},
+    {name:'participants',label:'Teilnehmer / Teams',placeholder:'Betroffene Fahrer, Teams oder Verantwortliche'},
+    {name:'time',label:'Runde / Zeitpunkt / Frist',placeholder:'Runde, Uhrzeit oder Termin'},
+    {name:'technical',label:'Vorfall / Rennablauf',placeholder:'Restart, Lobby-Problem, Ergebnisabweichung etc.'},
+    {name:'evidence',label:'Protokoll / Beweismittel',placeholder:'Replay-, Lobby- oder Ergebnislink'},
+    {name:'action',label:'Benötigte Maßnahme',placeholder:'Startfreigabe, Prüfung, Korrektur etc.'}
+  ],
+  admin:[
+    {name:'reference',label:'Referenz / verbundene Akte',placeholder:'Aktennummer, Artikel oder Auftrag'},
+    {name:'owner',label:'Zuständige Abteilung / Person',placeholder:'Verantwortliche Stelle'},
+    {name:'reason',label:'Anlass und Begründung',placeholder:'Warum ist der Vorgang erforderlich?'},
+    {name:'documents',label:'Pflichtunterlagen / Ablageort',placeholder:'Unterlagen, Links oder Ablage'},
+    {name:'approval',label:'Erforderliche Freigabe',placeholder:'Freigabe durch wen und bis wann?'},
+    {name:'outcome',label:'Erwarteter Abschluss / Ergebnis',placeholder:'Welche Entscheidung oder Ablage wird benötigt?'}
+  ],
+  finance:[
+    {name:'counterparty',label:'Empfänger / Vertragspartner',placeholder:'Name des Zahlungsempfängers'},
+    {name:'amount',label:'Betrag und Währung',placeholder:'z. B. 250,00 EUR'},
+    {name:'financeType',label:'Finanzkategorie',placeholder:'Rechnung, Sponsoring, Erstattung etc.'},
+    {name:'season',label:'Saison / Kostenstelle',placeholder:'Saison oder zugehöriges Team'},
+    {name:'receipt',label:'Beleg / Vertragsreferenz',placeholder:'Link oder Belegnummer'},
+    {name:'approval',label:'Freigabe / Zahlungsfrist',placeholder:'Freigabeebene und Termin'}
+  ],
+  esport:[
+    {name:'team',label:'Team / Fahrer',placeholder:'Team und betroffene Person'},
+    {name:'season',label:'Saison / Zeitraum',placeholder:'Saison, Review-Zeitraum oder Termin'},
+    {name:'platform',label:'Plattform / Strecke',placeholder:'Plattform, Strecke oder Spiel'},
+    {name:'goal',label:'Ziel / gewünschte Änderung',placeholder:'Was soll angelegt, geprüft oder angepasst werden?'},
+    {name:'evidence',label:'Analyse / Nachweis',placeholder:'Setup, Telemetrie, Ergebnis oder Link'},
+    {name:'action',label:'Vereinbarte nächste Schritte',placeholder:'Verantwortliche und Folgemaßnahmen'}
+  ]
+};
+const PROCESS_REQUIRED_FIELDS={
+  discipline:['subject','incident'],
+  race:['session','participants'],
+  admin:['reason'],
+  finance:['counterparty','amount'],
+  esport:['team','goal']
+};
+const TIER1_PROCESS_CODES=new Set(['D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','A1']);
+const TIER3_PROCESS_CODES=new Set(['D4','D8','D9']);
+function currentTier(){ return Number(AUTH.profile?.access_tier||0); }
+function isCeoProfile(){ return currentTier()===3&&String(AUTH.profile?.position||'').trim().toLowerCase()==='ceo'; }
+function processRequiredTier(code){
+  if(TIER3_PROCESS_CODES.has(code)) return 3;
+  if(code==='07b') return 1;
+  return 2;
+}
+function canStartProcess(code){
+  const tier=currentTier();
+  if(tier>=processRequiredTier(code)) return true;
+  return tier===1&&TIER1_PROCESS_CODES.has(code);
+}
+function showAccessNotice(message){
+  const notice=document.getElementById('accessNotice');
+  if(!notice){ window.alert(message); return; }
+  notice.textContent=message;
+  notice.hidden=false;
+  notice.classList.add('is-visible');
+  clearTimeout(showAccessNotice.timer);
+  showAccessNotice.timer=setTimeout(()=>{
+    notice.classList.remove('is-visible');
+    notice.hidden=true;
+  },6500);
+}
+function workflowApprovalTier(code){
+  if(TIER3_PROCESS_CODES.has(code)||code==='07b'||code==='V2'||code==='V3'||code==='F1'||code==='F2') return 3;
+  return 2;
+}
+function processNeedsCeoApproval(code){
+  return ['V2','V3','F1','F2'].includes(code);
+}
+function makeProcessWorkflow(code){
+  const tier=currentTier(), userId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const initialTier=tier===1?1:Math.max(tier,workflowApprovalTier(code));
+  const approvalStatus=tier===1?'Noch nicht vorgelegt':`Tier-${initialTier}-Prüfung ausstehend`;
+  return {
+    createdById:userId,createdByName:AUTH.profile?.display_name||AUTH.profile?.email||'',
+    createdByTier:tier,ownerTier:initialTier,approvalStatus,
+    nextAction:tier===1?'Unterlagen vervollständigen und an Tier 2 senden':'Unabhängige Prüfung und dokumentierte Freigabe',
+    requiredApprovalTier:workflowApprovalTier(code),requiresCeoApproval:processNeedsCeoApproval(code),
+    history:[{id:uid(),action:'created',actorId:userId,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',actorTier:tier,reason:`Prozess ${code} eröffnet.`,ts:Date.now()}]
+  };
+}
+function processWorkflowPanel(c){
+  if(!c.processCode) return '';
+  const workflow=c.processWorkflow||{};
+  const tier=currentTier(), actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const history=Array.isArray(workflow.history)?workflow.history:[];
+  const last=history[history.length-1];
+  const pending=String(workflow.approvalStatus||'Noch nicht vorgelegt');
+  const ownCase=workflow.createdById===actorId;
+  const canTier3=tier>=3;
+  const buttons=[];
+  if(tier===1&&workflow.ownerTier===1&&['Noch nicht vorgelegt','Zur Ergänzung zurückgegeben'].includes(pending)){
+    if(c.processCode==='07b') buttons.push(`<button class="btn gold" onclick="actOnProcessCase('${c.id}','escalate_t3')">An Tier 3 eskalieren</button>`);
+    else buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','submit_tier2')">Zur Tier-2-Prüfung senden</button>`);
+  }
+  if(tier>=2&&workflow.ownerTier===2&&pending==='Tier-2-Prüfung ausstehend'){
+    if(tier===2&&!ownCase&&Number(workflow.requiredApprovalTier||2)<=2) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','approve_t2')">Prüfung abschließen</button>`);
+    buttons.push(`<button class="btn gold" onclick="actOnProcessCase('${c.id}','escalate_t3')">An Tier 3 eskalieren</button>`);
+    buttons.push(`<button class="btn" onclick="actOnProcessCase('${c.id}','return_t1')">Zur Ergänzung zurückgeben</button>`);
+  }
+  if(canTier3&&workflow.ownerTier===3&&pending==='Tier-3-Prüfung ausstehend'){
+    if(!ownCase) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','approve_t3')">Tier-3-Prüfung abschließen</button>`);
+    buttons.push(`<button class="btn gold" onclick="actOnProcessCase('${c.id}','send_ceo')">CEO-Entscheidung anfordern</button>`);
+    buttons.push(`<button class="btn" onclick="actOnProcessCase('${c.id}','return_t1')">Zur Ergänzung zurückgeben</button>`);
+  }
+  if(isCeoProfile()&&workflow.ownerTier===3&&pending==='CEO-Entscheidung ausstehend'){
+    if(!ownCase&&last?.actorId!==actorId) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','ceo_decide')">CEO-Entscheidung dokumentieren</button>`);
+    buttons.push(`<button class="btn" onclick="actOnProcessCase('${c.id}','return_t1')">Zur weiteren Prüfung zurückgeben</button>`);
+  }
+  if(tier===1&&c.processCode==='D5'&&pending==='Freigegeben'&&workflow.implementationStatus!=='Umgesetzt'){
+    buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','implement_measure')">Freigegebene Maßnahme umsetzen</button>`);
+  }
+  const historyRows=history.slice().reverse().map(item=>`<tr><td>${fmtDateTime(item.ts)}</td><td>${esc(item.actionLabel||item.action)}</td><td>${esc(item.actorName||'—')} · Tier ${esc(item.actorTier||'—')}</td><td>${esc(item.reason||'—')}</td></tr>`).join('');
+  const nextAction=workflow.nextAction||'Zuständige Prüfstelle festlegen.';
+  const decisionNote=workflow.decision?`<p><strong>Dokumentiertes Ergebnis:</strong> ${esc(workflow.decision)}</p>`:'';
+  return `<section class="panel process-workflow-panel"><div class="sectiontitle">Zuständigkeit &amp; Freigabe</div>
+    <div class="process-workflow-summary"><div><span>Prozess</span><strong>${esc(c.processCode)} · ${esc(c.processTitle||'')}</strong></div><div><span>Aktuelle Prüfstufe</span><strong>${workflow.ownerTier?`Tier ${esc(workflow.ownerTier)}`:['Freigegeben','Abgelehnt'].includes(pending)?'Abgeschlossen':'Noch offen'}</strong></div><div><span>Freigabestatus</span><strong>${esc(pending)}</strong></div><div><span>Nächster Schritt</span><strong>${esc(nextAction)}</strong></div></div>
+    ${workflow.requiresCeoApproval?'<p class="note">Dieser Vorgang benötigt eine dokumentierte CEO-Freigabe. Der CEO bleibt im System eine gesondert gekennzeichnete Tier-3-Rolle.</p>':''}
+    ${ownCase&&pending!=='Noch nicht vorgelegt'&&!['Freigegeben','Abgelehnt'].includes(pending)?'<p class="note">Du kannst deine eigene Akte nicht unabhängig freigeben. Die Prüfung muss durch eine andere berechtigte Person erfolgen.</p>':''}
+    ${decisionNote}<div class="process-workflow-actions"><button class="btn gold" onclick="printProcessWorkflowReport('${c.id}')">Prüf- / Übergabevermerk als PDF</button>${buttons.join('')}</div>
+    ${historyRows?`<details class="process-workflow-history"><summary>Übergaben und Prüfverlauf</summary><div class="table-scroll"><table><thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Bearbeitung</th><th>Begründung / Auftrag</th></tr></thead><tbody>${historyRows}</tbody></table></div></details>`:''}
+  </section>`;
+}
+async function actOnProcessCase(caseId,action){
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c?.processCode){ showAccessNotice('Der Prozessvorgang wurde nicht gefunden.'); return; }
+  const workflow=c.processWorkflow||{};
+  const tier=currentTier(), actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const ownCase=workflow.createdById===actorId;
+  const permitted={
+    submit_tier2:tier===1&&workflow.ownerTier===1&&['Noch nicht vorgelegt','Zur Ergänzung zurückgegeben'].includes(workflow.approvalStatus),
+    approve_t2:tier===2&&workflow.ownerTier===2&&workflow.approvalStatus==='Tier-2-Prüfung ausstehend'&&!ownCase&&Number(workflow.requiredApprovalTier||2)<=2,
+    escalate_t3:(tier>=2&&workflow.ownerTier===2&&workflow.approvalStatus==='Tier-2-Prüfung ausstehend')||(tier===1&&c.processCode==='07b'&&workflow.ownerTier===1&&['Noch nicht vorgelegt','Zur Ergänzung zurückgegeben'].includes(workflow.approvalStatus)),
+    approve_t3:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='Tier-3-Prüfung ausstehend'&&!ownCase,
+    send_ceo:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='Tier-3-Prüfung ausstehend',
+    ceo_decide:isCeoProfile()&&workflow.ownerTier===3&&workflow.approvalStatus==='CEO-Entscheidung ausstehend'&&!ownCase&&workflow.history?.at(-1)?.actorId!==actorId,
+    implement_measure:tier===1&&c.processCode==='D5'&&workflow.approvalStatus==='Freigegeben'&&workflow.implementationStatus!=='Umgesetzt',
+    return_t1:tier>=2&&workflow.ownerTier>0&&!['Freigegeben','Abgelehnt'].includes(workflow.approvalStatus)
+  }[action];
+  if(!permitted){
+    const approvalAction=['approve_t2','approve_t3','ceo_decide'].includes(action);
+    showAccessNotice(approvalAction&&ownCase?'Eine eigene Akte darf nicht selbst unabhängig freigegeben werden. Bitte eine andere berechtigte Person einsetzen.':action==='ceo_decide'&&!isCeoProfile()?'Nur ein als CEO gekennzeichnetes Tier-3-Konto darf diese Entscheidung treffen.':'Diese Aktion ist für deine Tier-Stufe oder den aktuellen Freigabestatus nicht freigegeben. Die Akte bleibt unverändert.');
+    return;
+  }
+  if((action==='approve_t2'||action==='approve_t3'||action==='ceo_decide')&&ownCase){
+    showAccessNotice('Eine eigene Akte darf nicht selbst freigegeben werden. Bitte eine unabhängige Person der zuständigen Prüfstufe einsetzen.');
+    return;
+  }
+  if(action==='ceo_decide'&&['subject','participants','owner'].some(key=>/\bceo\b/i.test(String(c.processFields?.[key]||'')))){
+    showAccessNotice('Der CEO ist selbst betroffen. Es ist keine unabhängige Vertretungsstelle im System hinterlegt; die Entscheidung wurde daher gesperrt.');
+    return;
+  }
+  const labels={submit_tier2:'An Tier 2 übergeben',approve_t2:'Tier-2-Prüfung freigegeben',escalate_t3:'An Tier 3 eskaliert',approve_t3:'Tier-3-Prüfung freigegeben',send_ceo:'CEO-Entscheidung angefordert',ceo_decide:'CEO-Entscheidung dokumentiert',return_t1:'Zur Ergänzung zurückgegeben',implement_measure:'Freigegebene Maßnahme umgesetzt'};
+  const needsReason=action!=='submit_tier2'||workflow.approvalStatus==='Zur Ergänzung zurückgegeben';
+  const reason=needsReason?window.prompt('Begründung / konkreter nächster Arbeitsauftrag:',''):'Übergabe zur fachlichen Prüfung.';
+  if(reason===null) return;
+  if(needsReason&&!reason.trim()){
+    showAccessNotice('Bitte eine konkrete Begründung oder einen klaren Arbeitsauftrag eintragen.');
+    return;
+  }
+  let decision='';
+  let delegatedTier=0;
+  if(['approve_t2','approve_t3'].includes(action)){
+    decision=window.prompt('Freizugebendes Ergebnis / Entscheidung:','Freigegeben')?.trim()||'';
+    if(!decision) return;
+  }else if(action==='ceo_decide'){
+    const outcomes=['Freigegeben','Abgelehnt','Änderung verlangt','Weitere Prüfung angeordnet','Bearbeitung delegiert'];
+    decision=window.prompt(`CEO-Ergebnis:\n${outcomes.map((item,index)=>`${index+1}. ${item}`).join('\n')}`,'Freigegeben')?.trim()||'';
+    if(!outcomes.includes(decision)){
+      showAccessNotice('Bitte eines der angezeigten CEO-Ergebnisse exakt auswählen.');
+      return;
+    }
+    if(['Weitere Prüfung angeordnet','Bearbeitung delegiert'].includes(decision)){
+      delegatedTier=Number(window.prompt('Zielstufe für die weitere Bearbeitung (2 oder 3):','3'));
+      if(![2,3].includes(delegatedTier)){
+        showAccessNotice('Für eine weitere Prüfung oder Delegation muss Tier 2 oder Tier 3 angegeben werden.');
+        return;
+      }
+    }
+  }
+  const oldCase=JSON.parse(JSON.stringify(c));
+  const now=Date.now();
+  const nextStatus=action==='return_t1'?'Zur Ergänzung zurückgegeben':
+    action==='submit_tier2'?'Tier-2-Prüfung ausstehend':
+    action==='escalate_t3'?'Tier-3-Prüfung ausstehend':
+    action==='send_ceo'?'CEO-Entscheidung ausstehend':
+    action==='approve_t3'&&workflow.requiresCeoApproval?'CEO-Entscheidung ausstehend':
+    action==='ceo_decide'&&decision==='Abgelehnt'?'Abgelehnt':
+    action==='ceo_decide'&&decision==='Änderung verlangt'?'Zur Ergänzung zurückgegeben':
+    action==='ceo_decide'&&decision==='Weitere Prüfung angeordnet'?`Tier-${delegatedTier}-Prüfung ausstehend`:
+    action==='ceo_decide'&&decision==='Bearbeitung delegiert'?`Tier-${delegatedTier}-Prüfung ausstehend`:
+    'Freigegeben';
+  const nextOwner=action==='return_t1'?1:action==='submit_tier2'?2:action==='escalate_t3'||action==='send_ceo'?3:
+    nextStatus==='CEO-Entscheidung ausstehend'?3:
+    action==='ceo_decide'&&['Weitere Prüfung angeordnet','Bearbeitung delegiert'].includes(decision)?delegatedTier:
+    nextStatus==='Zur Ergänzung zurückgegeben'?1:0;
+  const eventRecord={
+    id:uid(),action,actionLabel:labels[action],actorId,
+    actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',
+    actorTier:tier,reason:reason.trim(),decision,ts:now
+  };
+  c.processWorkflow={...workflow,ownerTier:nextOwner,approvalStatus:nextStatus,
+    requiredApprovalTier:workflow.requiredApprovalTier||workflowApprovalTier(c.processCode),
+    nextAction:nextStatus==='Freigegeben'?'Freigegebene Maßnahme dokumentiert umsetzen.':
+      nextStatus==='Abgelehnt'?'Entscheidung mitteilen und Vorgang abschließen.':
+      nextStatus==='CEO-Entscheidung ausstehend'?'CEO-Entscheidung durch unabhängiges CEO-Konto dokumentieren.':
+      nextStatus==='Tier-2-Prüfung ausstehend'?'Unabhängige Tier-2-Prüfung durchführen.':
+      nextStatus==='Tier-3-Prüfung ausstehend'?'Unabhängige Tier-3-Prüfung durchführen.':
+      nextStatus==='Zur Ergänzung zurückgegeben'?'Angeforderte Unterlagen ergänzen und erneut vorlegen.':'',
+    history:[...(workflow.history||[]),eventRecord]};
+  if(decision) c.processWorkflow.decision=decision;
+  if(action==='return_t1') c.processWorkflow.returnReason=reason.trim();
+  if(action==='implement_measure'){
+    c.processWorkflow.implementationStatus='Umgesetzt';
+    c.processWorkflow.implementationReport=reason.trim();
+    c.processWorkflow.nextAction='Umsetzung dokumentiert.';
+  }
+  c.updatedAt=now;
+  c.history=[...(c.history||[]),{ts:now,text:`${labels[action]}: ${reason.trim()}`,actorId,actorTier:tier}];
+  const activityId=uid();
+  DB.caseActivityLog.unshift({id:activityId,caseId:c.id,stw:c.stw,action:labels[action],category:c.category||c.processCode,ts:now});
+  saveKey(KEYS.cases,DB.cases);
+  saveKey(KEYS.caseActivityLog,DB.caseActivityLog);
+  try{
+    await persist.cases();
+    if(SUPABASE.lastSyncError) throw SUPABASE.lastSyncError;
+  }catch(error){
+    DB.cases[DB.cases.findIndex(item=>item.id===caseId)]=oldCase;
+    DB.caseActivityLog=DB.caseActivityLog.filter(item=>item.id!==activityId);
+    saveKey(KEYS.cases,DB.cases);
+    saveKey(KEYS.caseActivityLog,DB.caseActivityLog);
+    console.error('Prozessaktion konnte nicht gespeichert werden',error);
+    showAccessNotice(`Aktion konnte nicht gespeichert werden. ${error?.message||'Bitte Verbindung und Berechtigungen prüfen.'}`);
+    return;
+  }
+  go('caseform',caseId);
+}
+function findProcess(code){
+  for(const category of PROCESS_CATALOG){
+    const process=category.processes.find(item=>item.code===code);
+    if(process) return {...process,group:category.group,categoryName:category.name};
+  }
+  return null;
+}
+function pageProcessCatalog(){
+  return `<div class="pagehead"><div><div class="eyebrow">Force anlegen · Prozessübersicht</div><h1>Prozesskatalog</h1><p>Wähle einen Prozess, um Zuständigkeit und Ablauf einzusehen oder einen berechtigten Vorgang anzulegen. Die jeweilige Prüfstufe wird auf jeder Prozesskarte angezeigt.</p></div><div class="actions"><button class="btn" onclick="go('processes')">Wissensportal</button><button class="btn" onclick="go('dashboard')">← Arbeitsplatz</button></div></div>
+    ${PROCESS_CATALOG.map(category=>`<section class="process-catalog-section"><div class="process-catalog-heading"><div><span class="eyebrow">${esc(category.processes.length)} Prozesse</span><h2>${esc(category.name)}</h2></div></div><div class="process-catalog-grid">${category.processes.map(process=>`<article class="process-catalog-card"><div class="process-catalog-code">${esc(process.code)}</div><span class="process-tier-label">${TIER1_PROCESS_CODES.has(process.code)?'Tier 1 Aufnahme möglich':`Entscheidung ab Tier ${workflowApprovalTier(process.code)}`}</span><h3>${esc(process.title)}</h3><p>${esc(process.purpose)}</p><div class="process-catalog-actions"><button class="btn small" onclick="go('process-detail','${esc(process.code)}')">Prozess ansehen</button><button class="btn small primary" onclick="go('process-form','${esc(process.code)}')">Vorgang anlegen</button></div></article>`).join('')}</div></section>`).join('')}`;
+}
+function pageProcessDetail(code){
+  const process=findProcess(code);
+  if(!process) return `<div class="panel"><h2>Prozess nicht gefunden</h2><button class="btn" onclick="go('process-catalog')">Zum Prozesskatalog</button></div>`;
+  const related=PROCESS_CATALOG.flatMap(category=>category.processes).filter(item=>item.code!==process.code&&item.group===process.group).slice(0,3);
+  const fields=PROCESS_FORM_FIELDS[process.group];
+  return `<div class="pagehead"><div><div class="eyebrow">${esc(process.categoryName)} · Prozess ${esc(process.code)}</div><h1>${esc(process.title)}</h1></div><div class="actions"><button class="btn" onclick="go('process-catalog')">← Prozesskatalog</button><button class="btn primary" onclick="go('process-form','${esc(process.code)}')">Diesen Prozess starten</button></div></div>
+    <div class="process-detail-grid"><article class="panel process-detail-main"><span class="tag decided">Version 1.0 · Entwurf</span><h2>Zweck &amp; Anwendungsbereich</h2><p>${esc(process.purpose)} ${esc(process.summary)}</p><h2>Auslöser &amp; Voraussetzungen</h2><p>Eröffnung nach Eingang eines nachvollziehbaren Anliegens. Erfasse die erforderlichen Grunddaten, sichere vorhandene Nachweise und prüfe Zuständigkeit sowie mögliche Interessenkonflikte.</p><h2>Zuständigkeiten &amp; Ablauf</h2><ol><li>Eingang dokumentieren und Vollständigkeit der Angaben prüfen.</li><li>Vorgang der zuständigen Abteilung und Bearbeitungsebene zuordnen.</li><li>Belege, Rückfragen und Fristen in der Akte festhalten.</li><li>Prüfung durchführen, erforderliche Freigabe einholen und Ergebnis dokumentieren.</li><li>Abschluss, Mitteilung und Archivierung nachvollziehbar vermerken.</li></ol><h2>Benötigte Unterlagen</h2><ul>${fields.map(field=>`<li>${esc(field.label)}</li>`).join('')}<li>Entscheidungs- oder Abschlussvermerk</li></ul><h2>Fristen &amp; mögliche Ergebnisse</h2><p>Fristen werden je Vorgang festgelegt und in der Akte dokumentiert. Mögliche Ergebnisse: Übernahme, Rückfrage, Weiterleitung, Freigabe, Maßnahme oder begründeter Abschluss.</p></article><aside class="panel process-detail-side"><h2>Verknüpfte Prozesse</h2>${related.map(item=>`<button class="process-related" onclick="go('process-detail','${esc(item.code)}')"><strong>${esc(item.code)} · ${esc(item.title)}</strong><span>Prozess öffnen →</span></button>`).join('')}<h2>Dokumentvorlagen</h2><p>Vorgangsaufnahme · Prüfvermerk · Abschlussvermerk</p><h2>Versionsverlauf</h2><p>Version 1.0 · Arbeitsentwurf · ${fmtDate(today())}</p><button class="btn primary" style="width:100%;margin-top:10px;" onclick="go('process-form','${esc(process.code)}')">Diesen Prozess starten</button></aside></div>`;
+}
+function pageProcessForm(code){
+  const process=findProcess(code);
+  if(!process) return `<div class="panel"><h2>Prozess nicht gefunden</h2><button class="btn" onclick="go('process-catalog')">Zum Prozesskatalog</button></div>`;
+  const fields=PROCESS_FORM_FIELDS[process.group].filter(field=>!['event','owner'].includes(field.name));
+  return `<div class="pagehead"><div><div class="eyebrow">Vorgangsanlage · ${esc(process.code)}</div><h1>${esc(process.title)}</h1><p>${esc(process.summary)}</p></div><div class="actions"><button class="btn" onclick="go('process-detail','${esc(process.code)}')">← Prozessdetails</button></div></div>
+    <form class="panel process-create-form" onsubmit="submitProcessCase(event,'${esc(process.code)}')">
+      <div class="process-form-intro"><span class="process-catalog-code">${esc(process.code)}</span><div><h2>Vorgangsdaten erfassen</h2><p>Bitte fülle die Pflichtangaben aus. Der Vorgang wird mit einer neuen STW-Aktennummer gespeichert.</p></div></div>
+      <div class="grid cols-2"><div class="field"><label for="pf_event">${process.group==='race'?'Rennen / Veranstaltung':'Vorgangsbereich / Event'} *</label><input id="pf_event" name="event" required maxlength="160" placeholder="z. B. GP Monaco / Saison 2026"></div><div class="field"><label for="pf_priority">Priorität</label><select id="pf_priority" name="priority"><option>Normal</option><option>Wichtig</option><option>Dringend</option></select></div></div>
+      <div class="grid cols-2">${fields.map(field=>{const required=PROCESS_REQUIRED_FIELDS[process.group].includes(field.name);return `<div class="field"><label for="pf_${field.name}">${esc(field.label)}${required?' *':''}</label><input id="pf_${field.name}" name="${field.name}" type="text" maxlength="500" placeholder="${esc(field.placeholder)}" ${required?'required':''}></div>`;}).join('')}</div>
+      <div class="field"><label for="pf_summary">Sachverhalt / Auftrag / Kurzbeschreibung *</label><textarea id="pf_summary" name="summary" rows="5" required maxlength="5000" placeholder="Beschreibe den Anlass und was im Vorgang bearbeitet werden soll."></textarea></div>
+      <div class="grid cols-2"><div class="field"><label for="pf_dueDate">Frist / Zieltermin</label><input id="pf_dueDate" name="dueDate" type="date"></div><div class="field"><label for="pf_owner">Zuständige Bearbeitung</label><input id="pf_owner" name="owner" maxlength="160" value="${esc(AUTH.profile?.display_name||AUTH.profile?.email||'')}" placeholder="Name oder Abteilung"></div></div>
+      <div class="form-actions"><button class="btn" type="button" onclick="go('process-detail','${esc(process.code)}')">Abbrechen</button><button class="btn primary" type="submit">Vorgang anlegen</button></div>
+    </form>`;
+}
+async function submitProcessCase(event,code){
+  event.preventDefault();
+  if(!canStartProcess(code)){
+    showAccessNotice(`Der Prozess ${code} ist für Tier ${currentTier()} nicht zur Eröffnung freigegeben. Für eine Aufnahme oder Entscheidung auf der höheren Stufe nutze bitte den vorgesehenen Übergabeprozess.`);
+    return;
+  }
+  const process=findProcess(code);
+  const form=event.currentTarget;
+  if(!process||!form||!form.reportValidity()) return;
+  const values=Object.fromEntries(new FormData(form).entries());
+  const now=Date.now();
+  const stw=nextStw();
+  const notes=Object.entries(values).filter(([key,value])=>!['event','summary','priority','owner','dueDate'].includes(key)&&String(value).trim()).map(([key,value])=>`${key}: ${String(value).trim()}`).join('\n');
+  const record={
+    id:uid(),stw,season:String(values.season||new Date().getFullYear()),status:'Neu',createdAt:now,updatedAt:now,
+    createdById:AUTH.profile?.id||AUTH.session?.user?.id||'',createdByTier:currentTier(),
+    event:String(values.event).trim(),sessionType:String(values.session||'Sonstige Session').trim(),incidentLap:String(values.time||'').trim(),
+    category:process.categoryName,reportedBy:'Interner Prozess',
+    teamInvolved:'',driverInvolved:'',teamAffected:'',driverAffected:'',
+    description:String(values.summary).trim(),investigationNotes:notes,evidenceLink:String(values.evidence||values.receipt||values.documents||'').trim(),
+    regulationBreach:String(values.rule||'').trim(),hearingHeld:false,decision:DECISIONS[0],decisionDetail:'',
+    penaltyPoints:0,licenseStatusAfter:LICENSE_AFTER[0],licenseStatusDetail:'',stewardChairman:'',
+    steward2:'',steward3:'',history:[{ts:now,text:`Vorgang nach Prozess ${process.code} eröffnet.`}],
+    processCode:process.code,processTitle:process.title,processGroup:process.categoryName,
+    processPriority:String(values.priority||'Normal'),processOwner:String(values.owner||'').trim(),
+    processDueDate:String(values.dueDate||''),processFields:values,processWorkflow:makeProcessWorkflow(process.code)
+  };
+  DB.cases.push(record);
+  saveKey(KEYS.cases,DB.cases);
+  try{
+    await persist.cases();
+    if(SUPABASE.lastSyncError) throw SUPABASE.lastSyncError;
+  }catch(error){
+    DB.cases=DB.cases.filter(item=>item.id!==record.id);
+    saveKey(KEYS.cases,DB.cases);
+    console.error('Prozessakte konnte nicht gespeichert werden',error);
+    showAccessNotice(`Prozessakte konnte nicht gespeichert werden. ${error?.message||'Bitte Verbindung und Berechtigungen prüfen.'}`);
+    return;
+  }
+  addCaseActivity(record,`Vorgang nach Prozess ${process.code} angelegt.`);
+  go('caseform',record.id);
+}
+
 /* ============================= PROZESSE / KNOWLEDGEBASE ============================= */
 const PROCESS_TOPICS = [
   {id:'start',title:'Start & Orientierung',summary:'Die wichtigsten Bereiche und die Grundlogik der Anwendung.',intro:'Das Stewards Office ist in Arbeitsbereiche aufgeteilt. Jede Seite hat eine konkrete Aufgabe: erfassen, untersuchen, entscheiden oder dokumentieren.',steps:[['Dashboard öffnen','Offene Akten, Lizenzstatus, Kategorien und zuletzt bearbeitete Fälle zeigen den aktuellen Handlungsbedarf.'],['Seite wählen','Die Navigation links öffnet den Arbeitsbereich. Ein Klick auf einen Fall oder Fahrer führt in die Detailansicht.'],['Änderungen speichern','Formulare werden erst durch den jeweiligen Speichern-Button dauerhaft übernommen.'],['Datenstand prüfen','Bei verbundenem Supabase sehen alle offenen Browser denselben Stand.']],screen:'dashboard'},
-  {id:'case',title:'Steward-Akte',summary:'Meldung aufnehmen, Beweise dokumentieren, Verwarnungen erstellen und nach Freigabe entscheiden.',intro:'Eine geöffnete Akte ist zunächst eine Untersuchung, keine Entscheidung. Verwarnungen werden direkt in der bestehenden Akte erstellt und abgelegt; eine endgültige Entscheidung erfolgt erst nach Discord-Freigabe.',steps:[['Neue Akte eröffnen','Saison, Event, Session, Zeitpunkt, Kategorie, Beteiligte und objektive Beschreibung erfassen.'],['Akte anlegen','„Akte anlegen“ erzeugt die STW-Nummer und setzt den Status „Neu“.'],['Untersuchung ergänzen','Replay-, Onboard- oder Telemetrie-Links, Aussagen, Anhörung und Regelreferenz dokumentieren.'],['Schriftliche Verwarnung öffnen','In einer bestehenden Akte auf „Verwarnung setzen“ klicken. Dieser Button befindet sich am unteren Rand der Akte neben dem FIA-Bericht.'],['Kategorie auswählen','Eine der 30 Kategorien zum Mangel an Rennintelligenz auswählen. Der passende Verwarnungstext wird automatisch eingesetzt.'],['Verwarnung prüfen und anpassen','Fahrer, Team, Datum, Steward und Text kontrollieren. Der automatisch erzeugte Text kann vor dem Speichern noch sachlich ergänzt oder korrigiert werden.'],['PDF erstellen oder ablegen','„PDF erstellen“ öffnet die druckfertige Verwarnung; im Druckdialog kann sie als PDF gespeichert werden. Mit „Verwarnung in Akte speichern“ wird sie dauerhaft in der Akte abgelegt.'],['Verwarnung nachkontrollieren','Nach dem Speichern erscheint sie unter „Verwarnungen in dieser Akte“. Der Button „PDF öffnen“ erzeugt das Dokument erneut; im FIA-Gesamtbericht wird die Verwarnung ebenfalls angezeigt.'],['Discord-Freigabe holen','Im zuständigen Discord-Kanal das ausdrückliche Okay der zuständigen Person oder des Gremiums einholen und in den Notizen festhalten.'],['Entscheidung setzen','Erst danach Status, Entscheidung, Strafpunkte, Lizenzfolge und Begründung speichern.']],screen:'case'},
-  {id:'cases',title:'Aktenübersicht',summary:'Fälle filtern, priorisieren und ohne versehentliche Entscheidung öffnen.',intro:'Die Aktenübersicht ist der Arbeitskorb der Stewards. Filter helfen beim Finden; das Öffnen einer Zeile startet nur die Prüfung.',steps:[['Aktenliste öffnen','STW-Nummer, Event, Team, Fahrer, Kategorie, Entscheidung und Status prüfen.'],['Suchen und filtern','Suchfeld, Status, Team und Kategorie kombinieren, um offene Fälle zu finden.'],['Detail öffnen','Eine Tabellenzeile öffnet die Akte, verändert aber nichts.'],['Freigabe beachten','Vor jeder Entscheidung zurück in Discord, Okay einholen und in der Akte dokumentieren.']],screen:'cases'},
+  {id:'case',title:'Steward-Akte',summary:'Meldung aufnehmen, Beweise dokumentieren, unabhängige Prüfung anfordern und Entscheidungen versioniert festhalten.',intro:'Eine geöffnete Akte ist zunächst eine Aufnahme oder Prüfung, keine Entscheidung. Zuständigkeit und Freigabestatus stehen direkt in der Akte; eine unabhängige Person muss Entscheidungen freigeben.',steps:[['Vorgang eröffnen','Den Prozess passend zum Anliegen auswählen. Tier 1 nimmt zugewiesene Meldungen und Unterlagen auf; Entscheidungen bleiben den zuständigen höheren Stufen vorbehalten.'],['Akte vervollständigen','Saison, Event, Beteiligte, objektiven Sachverhalt, Beweise, Regelartikel und Fristen dokumentieren.'],['An die Prüfstufe senden','Tier 1 übergibt zur Tier-2-Prüfung; Tier 2 kann bei fehlender Befugnis an Tier 3 eskalieren.'],['Unabhängig prüfen','Bearbeitung und Freigabe erfolgen durch unterschiedliche Konten. Die eigene Akte kann nicht selbst freigegeben werden.'],['Rückgabe bearbeiten','Bei Ergänzungsbedarf muss die Prüfstelle einen konkreten Arbeitsauftrag mit Grund dokumentieren.'],['Freigabe und Umsetzung dokumentieren','Freigabe, Ablehnung, CEO-Übergabe und nächste Umsetzung werden im Prüfverlauf mit Person, Stufe, Zeitpunkt und Begründung gespeichert.'],['Bericht als PDF ausgeben','Der aktuelle Prüf- oder Übergabevermerk kann aus der Akte als PDF gedruckt werden.']],screen:'case'},
+  {id:'cases',title:'Aktenübersicht',summary:'Vorgänge nach Prozess, Prüfstufe, Frist und Freigabestatus priorisieren.',intro:'Die Aktenübersicht ist der Arbeitskorb der Stewards. Filter helfen beim Finden; das Öffnen einer Zeile startet nur die Prüfung.',steps:[['Aktenliste öffnen','STW-Nummer, Prozesskennung, Event, Zuständigkeit und Freigabestatus prüfen.'],['Suchen und filtern','Suchfeld, Status, Team und Kategorie kombinieren, um offene Fälle zu finden.'],['Detail öffnen','Eine Tabellenzeile öffnet die Akte, verändert aber nichts.'],['Zuständigkeit beachten','Übergaben, unabhängige Freigaben und begründete Rückgaben werden direkt in der Akte protokolliert.']],screen:'cases'},
   {id:'drivers',title:'Fahrer & Lizenzen',summary:'Fahrerakten pflegen, Strafpunkte prüfen und Lizenzen verwalten.',intro:'Die Fahrerakte verbindet Stammdaten, Lizenz, Strafpunkte, verknüpfte Steward-Akten und Transferhistorie.',steps:[['Fahrer suchen','Nach Name, Team oder Lizenzstatus filtern.'],['Fahrerakte öffnen','Persönliche Daten, Sim-Racing-Profil und bisherige Fälle prüfen.'],['Lizenz erteilen','Reglement-Akzeptanz prüfen, dann Lizenz erteilen und Dokument erzeugen.'],['Status ändern','Aussetzen, Entziehen oder Reaktivieren mit dokumentiertem Grund durchführen.'],['Aktenhistorie prüfen','Strafpunkte stammen aus entschiedenen oder archivierten Akten.']],screen:'drivers'},
   {id:'teams',title:'Teams & Aufstellung',summary:'Teams, Fahreraufstellungen und Lizenzstatus übersichtlich kontrollieren.',intro:'Die Teamseite zeigt die aktuelle Aufstellung. Änderungen an Fahrern erfolgen über Fahrerakte oder Transfers.',steps:[['Teamübersicht öffnen','Aufstellung, Lizenzstatus und Fallanzahl je Team sehen.'],['Fahrer prüfen','Einen Fahrer anklicken, um seine vollständige Akte zu öffnen.'],['Teamdaten verwalten','Neue Teams und Grunddaten in Verwaltung pflegen.'],['Aufstellung nachvollziehen','Teamwechsel ausschließlich über den Transferprozess dokumentieren.']],screen:'teams'},
   {id:'transfers',title:'Transfers',summary:'Teamwechsel nachvollziehbar erfassen, ohne die Historie zu verlieren.',intro:'Ein Transfer ändert die aktuelle Teamzuordnung und legt gleichzeitig einen Historieneintrag an.',steps:[['Fahrer auswählen','Der aktuelle Verein wird als Ausgangspunkt verwendet.'],['Zielteam setzen','Neues Team, Datum und klare Notiz zum Wechsel eintragen.'],['Transfer speichern','„Transfer eintragen“ aktualisiert Fahrer und Historie.'],['Nachkontrolle','Fahrerakte und Teamaufstellung prüfen.']],screen:'transfers'},
@@ -784,7 +1164,11 @@ const PAGE_TIERS={
   transfers:2,
   finance:3,
   'finance-pay':3,
-  processes:2,
+  processes:1,
+  'process-catalog':1,
+  'process-detail':1,
+  'process-form':1,
+  warningform:2,
   rulebook:2,
   manage:3,
   archive:3,
@@ -799,8 +1183,30 @@ function canAccessPage(page){
   if(page==='tier-office-t2'||page==='tier-office-t3') return Number(AUTH.profile?.access_tier||0)===requiredTier;
   return Number(AUTH.profile?.access_tier||0)>=requiredTier;
 }
-function go(page, id){ if(page==='tier-office') page=Number(AUTH.profile?.access_tier)===3?'tier-office-t3':'tier-office-t2'; if(!canAccessPage(page)){ alert(page.startsWith('tier-office-')?`Dieser Arbeitsplatz ist ausschließlich für Tier ${PAGE_TIERS[page]} freigegeben.`:`Dieser Bereich ist erst ab Tier ${PAGE_TIERS[page]||1} freigegeben.`); return; } CASE_OPENING_MODE=page==='caseform'?(id?'existing':'new'):'none'; ROUTE = {page, id: id||null}; location.hash = '#'+page+(id?'/'+id:''); render(); window.scrollTo(0,0); }
+function go(page, id){
+  if(page==='tier-office') page=currentTier()===3?'tier-office-t3':'tier-office-t2';
+  if(!canAccessPage(page)){
+    showAccessNotice(page.startsWith('tier-office-')?`Dieser Arbeitsplatz ist ausschließlich für Tier ${PAGE_TIERS[page]} freigegeben.`:`Dieser Bereich ist erst ab Tier ${PAGE_TIERS[page]||1} freigegeben. Bitte nutze den für deine Stufe vorgesehenen Übergabeweg.`);
+    return;
+  }
+  if(page==='process-form'&&!canStartProcess(id)){
+    showAccessNotice(`Der Prozess ${id||''} ist für Tier ${currentTier()} nicht zur Eröffnung freigegeben. Du kannst den Ablauf ansehen und die zuständige Prüfstufe übergeben.`);
+    return;
+  }
+  CASE_OPENING_MODE=page==='caseform'?(id?'existing':'new'):'none';
+  ROUTE={page,id:id||null};
+  location.hash='#'+page+(id?'/'+id:'');
+  render();
+  window.scrollTo(0,0);
+}
 function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
+function portalAccessCard(){
+  const canCreateProcess=Number(AUTH.profile?.access_tier||0)>=2;
+  return `<section class="portal-launch-card">
+    <div><span class="eyebrow">ZFC · CFC · Steward Office</span><h2>Wissen &amp; Vorgänge</h2><p>Öffne Arbeitsanleitungen und Abläufe oder ${canCreateProcess?'starte einen Vorgang mit dem passenden Prozessformular.':'nimm einen für Tier 1 freigegebenen Vorgang auf.'}</p></div>
+    <div class="portal-launch-actions"><button class="btn primary" onclick="go('process-catalog')">${canCreateProcess?'Force anlegen':'Vorgang aufnehmen'}</button><button class="btn gold" onclick="go('processes')">Wissensportal öffnen</button></div>
+  </section>`;
+}
 function pageTierOffice(tier){
   const otherTier=tier===2?3:2;
   const tierEscalations=DB.escalations.filter(item=>Number(item.targetTier||3)===tier);
@@ -813,6 +1219,7 @@ function pageTierOffice(tier){
       <div class="stat"><div class="n">${tierEscalations.length}</div><div class="l">Zugewiesene Vorgänge</div></div>
       <div class="stat green"><div class="n">${esc(AUTH.profile?.position||'—')}</div><div class="l">Deine Position</div></div>
     </div>
+    ${portalAccessCard()}
     <div class="grid cols-2 tier-office-panels">
       <section class="panel tier-office-card">
         <div class="eyebrow">Fallverwaltung</div><h2>Fälle &amp; Aufgaben</h2>
@@ -852,7 +1259,10 @@ window.addEventListener('hashchange', ()=>{
   let [page,id] = h.split('/');
   if(page==='tier-office') page=Number(AUTH.profile?.access_tier)===3?'tier-office-t3':'tier-office-t2';
   if(page===ROUTE.page&&id===(ROUTE.id||null)) return;
-  if(!canAccessPage(page||'dashboard')){ ROUTE={page:'dashboard',id:null}; location.hash='#dashboard'; render(); return; }
+  if(!canAccessPage(page||'dashboard')||(page==='process-form'&&!canStartProcess(id))){
+    showAccessNotice(page==='process-form'?`Der Prozess ${id||''} ist für Tier ${currentTier()} nicht zur Eröffnung freigegeben.`:`Dieser Bereich ist für Tier ${currentTier()} nicht freigegeben.`);
+    ROUTE={page:'dashboard',id:null}; location.hash='#dashboard'; render(); return;
+  }
   CASE_OPENING_MODE='none';
   ROUTE = {page: page||'dashboard', id: id||null};
   render();
@@ -929,6 +1339,9 @@ function render(){
   else if(ROUTE.page==='transfers') main.innerHTML = pageTransfers();
   else if(ROUTE.page==='finance') main.innerHTML = pageFinance();
   else if(ROUTE.page==='finance-pay') main.innerHTML = pageFinancePayment(ROUTE.id);
+  else if(ROUTE.page==='process-catalog') main.innerHTML = pageProcessCatalog();
+  else if(ROUTE.page==='process-detail') main.innerHTML = pageProcessDetail(ROUTE.id);
+  else if(ROUTE.page==='process-form') main.innerHTML = pageProcessForm(ROUTE.id);
   else if(ROUTE.page==='processes') main.innerHTML = pageProcesses();
   else if(ROUTE.page==='manage') main.innerHTML = pageManage();
   else if(ROUTE.page==='set-password') main.innerHTML = pageSetPassword();
@@ -1077,14 +1490,15 @@ function pageDashboard(){
         <div class="eyebrow">ZFC Racing · Race Control Platform</div>
         <h1>Stewards<br><span>Office</span></h1>
         <p>Die zentrale Rennleitung für Fallaufnahme, Beweissicherung und nachvollziehbare Entscheidungen in der ZFC Racing Series.</p>
-        <div class="dashboard-hero-actions"><button class="btn primary" onclick="go('caseform')">+ Neue Akte eröffnen</button><button class="btn gold" onclick="go('cases')">Aktenzentrale öffnen</button></div>
         <div class="dashboard-hero-meta"><div><strong>${total}</strong>Akten im System</div><div><strong>${open}</strong>offene Vorgänge</div><div><strong>${nextCase?.stw||'—'}</strong>zuletzt aktiv</div></div>
       </div>
     </section>
 
+    ${portalAccessCard()}
+
     <div class="dashboard-section-head"><h2>Race Control <b>Shortcuts</b></h2><span>Arbeitsbereiche</span></div>
     <div class="dashboard-quicklinks">
-      <div class="dashboard-quicklink" onclick="go('caseform')"><span class="quick-no">01</span><div><strong>Fall eröffnen</strong><span>Vorfall dokumentieren</span></div></div>
+      <div class="dashboard-quicklink" onclick="go('process-catalog')"><span class="quick-no">01</span><div><strong>${currentTier()>=2?'Force anlegen':'Vorgang aufnehmen'}</strong><span>Prozess auswählen und zuständig übergeben</span></div></div>
       <div class="dashboard-quicklink" onclick="go('cases')"><span class="quick-no">02</span><div><strong>Akten prüfen</strong><span>Status und Entscheidungen</span></div></div>
       <div class="dashboard-quicklink" onclick="go('drivers')"><span class="quick-no">03</span><div><strong>Fahrerregister</strong><span>Lizenzen und Profile</span></div></div>
       <div class="dashboard-quicklink" onclick="go('rulebook')"><span class="quick-no">04</span><div><strong>Regelwerk</strong><span>Sportliche Grundlage</span></div></div>
@@ -1264,7 +1678,10 @@ function pageCaseForm(existing){
     stewardChairman:'', steward2:'', steward3:'', history:[]
   };
   const isNew = !existing;
+  const canEditDecision=currentTier()>=2&&!c.processCode;
   const stwDisplay = c.stw || nextStw() + ' (Vorschau)';
+  const caseCategories=CATEGORIES.includes(c.category)?CATEGORIES:[c.category,...CATEGORIES];
+  const caseSessionTypes=SESSION_TYPES.includes(c.sessionType)?SESSION_TYPES:[c.sessionType,...SESSION_TYPES];
 
   return `
   <div class="pagehead">
@@ -1276,23 +1693,24 @@ function pageCaseForm(existing){
 
   <div class="dossier">
     <div class="dossier-head">
-      <div><div class="stwlabel">Aktennummer</div><div class="stwno">${esc(stwDisplay)}</div></div>
+      <div><div class="stwlabel">Aktennummer</div><div class="stwno">${esc(stwDisplay)}</div>${c.processCode?`<div class="case-process-reference">Prozess ${esc(c.processCode)} · ${esc(c.processTitle||'')}</div>`:''}</div>
         <div style="text-align:right">
         <div class="stwlabel">Status</div>
-        ${isNew ? '<span class="tag open">Neu</span>' : `<select id="f_status" style="width:auto;">${selectOptions(CASE_STATUS, c.status)}</select>`}
+        ${isNew ? '<span class="tag open">Neu</span>' : c.processCode?`<span class="tag open">${esc(c.processWorkflow?.approvalStatus||c.status)}</span>`:currentTier()>=2?`<select id="f_status" style="width:auto;">${selectOptions(CASE_STATUS, c.status)}</select>`:`<span class="tag open">${esc(c.status)}</span>`}
       </div>
     </div>
     <div class="dossier-body">
 
+      ${c.processCode?processWorkflowPanel(c):''}
       <div class="sectiontitle">Grunddaten</div>
       <div class="grid cols-3">
         <div class="field"><label>Saison</label><select id="f_season">${selectOptions(['2025','2026','2027'], c.season)}</select></div>
         <div class="field"><label>Grand Prix / Event</label><input list="gplist" id="f_event" type="text" value="${esc(c.event)}" placeholder="z. B. GP Monaco"><datalist id="gplist">${EVENTS.map(e=>`<option value="${esc(e)}">`).join('')}</datalist></div>
-        <div class="field"><label>Session</label><select id="f_sessionType">${selectOptions(SESSION_TYPES, c.sessionType)}</select></div>
+        <div class="field"><label>Session</label><select id="f_sessionType">${selectOptions(caseSessionTypes, c.sessionType)}</select></div>
       </div>
       <div class="grid cols-3">
         <div class="field"><label>Zeitpunkt (Runde / Minute)</label><input id="f_incidentLap" type="text" value="${esc(c.incidentLap)}" placeholder="z. B. Runde 34"></div>
-        <div class="field"><label>Kategorie</label><select id="f_category">${selectOptions(CATEGORIES, c.category)}</select></div>
+        <div class="field"><label>Kategorie</label><select id="f_category">${selectOptions(caseCategories, c.category)}</select></div>
         <div class="field"><label>Meldung durch</label><select id="f_reportedBy">${selectOptions(REPORTED_BY, c.reportedBy)}</select></div>
       </div>
 
@@ -1326,8 +1744,8 @@ function pageCaseForm(existing){
         <div class="field"><label>Vergleichbare frühere Fälle (Präzedenzfall)</label><input id="f_precedent" type="text" value="${esc(c.precedent)}" placeholder="z. B. STW-378945"></div>
       </div>
 
-      ${isNew ? '<div class="panel" style="margin-top:26px;margin-bottom:0;"><h2>Akte zuerst <b>anlegen</b></h2><p style="margin:0;color:var(--grey);">Trage die Grunddaten und eine objektive Fallbeschreibung ein. Nach dem Anlegen wird die Akte mit Status „Neu“ gespeichert und kann anschließend vollständig ausgewertet werden.</p></div>' : '<div class="sectiontitle">Entscheidung</div>'}
-      ${isNew ? '' : `
+      ${isNew ? '<div class="panel" style="margin-top:26px;margin-bottom:0;"><h2>Akte zuerst <b>anlegen</b></h2><p style="margin:0;color:var(--grey);">Trage die Grunddaten und eine objektive Fallbeschreibung ein. Nach dem Anlegen wird die Akte mit Status „Neu“ gespeichert und kann anschließend vollständig ausgewertet werden.</p></div>' : c.processCode?'<div class="note">Entscheidungen und Freigaben bei Prozessakten werden ausschließlich über den Zuständigkeits- und Freigabebereich oben dokumentiert.</div>':currentTier()<2?'<div class="note">Tier 1 kann Sachverhalt und Belege ergänzen. Entscheidungen, Statusänderungen und Sanktionen sind der unabhängigen Tier-2-Prüfung vorbehalten.</div>':'<div class="sectiontitle">Entscheidung</div>'}
+      ${isNew||c.processCode||!canEditDecision ? '' : `
       <div class="grid cols-2">
         <div class="field"><label>Entscheidung</label><select id="f_decision">${selectOptions(DECISIONS, c.decision)}</select></div>
         <div class="field"><label>Strafpunkte (auf Superlizenz)</label><input id="f_penaltyPoints" type="number" min="0" max="12" value="${c.penaltyPoints||0}"></div>
@@ -1339,8 +1757,8 @@ function pageCaseForm(existing){
       </div>
       `}
 
-      ${isNew ? '' : '<div class="sectiontitle">Unterzeichnende Stewards</div>'}
-      ${isNew ? '' : `
+      ${isNew||c.processCode||!canEditDecision ? '' : '<div class="sectiontitle">Unterzeichnende Stewards</div>'}
+      ${isNew||c.processCode||!canEditDecision ? '' : `
       <div class="grid cols-3">
         <div class="field"><label>Vorsitzender Steward</label><input id="f_stewardChairman" type="text" value="${esc(c.stewardChairman)}"></div>
         <div class="field"><label>Steward 2</label><input id="f_steward2" type="text" value="${esc(c.steward2)}"></div>
@@ -1357,8 +1775,8 @@ function pageCaseForm(existing){
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:26px;border-top:1px solid var(--line);padding-top:20px;">
         <button class="btn primary" onclick="saveCase('${c.id||''}', false)">${isNew?'Akte anlegen':'Akte speichern'}</button>
         <button class="btn" onclick="saveCase('${c.id||''}', true)">Speichern &amp; schließen</button>
-        ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button><button class="btn gold" onclick="go('warningform','${c.id}')">Verwarnung setzen</button><button class="btn gold" onclick="openTier3EscalationDialog('${c.id}')">Fall weiterleiten</button><button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
-        ${!isNew? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte löschen</button>` : ''}
+        ${!isNew? `<button class="btn gold" onclick="printCaseReport('${c.id}')">FIA-Bericht erstellen (PDF)</button>${!c.processCode&&currentTier()>=2?`<button class="btn gold" onclick="go('warningform','${c.id}')">Verwarnung setzen</button>`:''}${!c.processCode?`<button class="btn gold" onclick="openTier3EscalationDialog('${c.id}')">Fall weiterleiten</button>`:''}<button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
+        ${!isNew&&currentTier()>=3&&!c.processCode? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte löschen</button>` : ''}
       </div>
       ${!isNew ? `<div class="sectiontitle">Verwarnungen in dieser Akte</div>${c.warningDocuments?.length ? `<table><thead><tr><th>Datum</th><th>Kategorie</th><th>Fahrer</th><th></th></tr></thead><tbody>${c.warningDocuments.map((warning,index)=>`<tr><td>${fmtDate(warning.createdAt)}</td><td>${esc(warning.category)}</td><td>${esc(warning.driverName||'—')}</td><td><button class="btn small gold" onclick="printWarning('${c.id}',${index})">PDF öffnen</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Noch keine schriftliche Verwarnung in dieser Akte abgelegt.</div>'}` : ''}
     </div>
@@ -1379,7 +1797,26 @@ function updateWarningTemplate(caseId){ const category=parseInt(document.getElem
 function warningFromForm(caseId){ const category=parseInt(document.getElementById('w_category')?.value||0,10); return {id:uid(),category:WARNING_CATEGORIES[category]||WARNING_CATEGORIES[0],driverName:document.getElementById('w_driver')?.value.trim()||'',teamName:document.getElementById('w_team')?.value.trim()||'',createdAt:document.getElementById('w_date')?.value||today(),text:document.getElementById('w_text')?.value.trim()||'',steward:document.getElementById('w_steward')?.value.trim()||'',note:document.getElementById('w_note')?.value.trim()||'',caseId}; }
 function warningDocumentHtml(c,warning){ return `<div class="doc"><div class="doc-head"><div><div class="t1">ZFC <span>RACING</span></div><div class="t2">Schriftliche Verwarnung · Steward Office</div></div><div class="stw">${esc(c.stw)}</div></div><p style="font-size:12px;color:#666;">${esc(c.event||'—')} · ${esc(c.sessionType||'—')} · ${esc(warning.createdAt||today())}</p><h3>Schriftliche Verwarnung</h3><table><tr><td class="k">Fahrer</td><td>${esc(warning.driverName||'—')}</td></tr><tr><td class="k">Team</td><td>${esc(warning.teamName||'—')}</td></tr><tr><td class="k">Kategorie</td><td>${esc(warning.category)}</td></tr><tr><td class="k">Aktennummer</td><td>${esc(c.stw)}</td></tr></table><p>${nl2br(warning.text)||'—'}</p>${warning.note?`<h3>Zusätzliche Notiz</h3><p>${nl2br(warning.note)}</p>`:''}<div class="sig"><div class="sigbox"><div class="sigline">${esc(warning.steward)||'—'}<br>Vorsitzender Steward</div></div><div class="sigbox"><div class="sigline">${esc(warning.driverName)||'—'}<br>Fahrer</div></div></div><div class="foot">ZFC RACING STEWARD-SYSTEM // Erstellt am ${fmtDateTime(Date.now())}</div></div>`; }
 function createWarningPdf(caseId){ const c=DB.cases.find(item=>item.id===caseId); if(c) printDoc(warningDocumentHtml(c,warningFromForm(caseId))); }
-async function saveWarning(caseId){ const c=DB.cases.find(item=>item.id===caseId); if(!c) return; const warning=warningFromForm(caseId); if(!warning.driverName||!warning.text){ alert('Bitte Fahrer und Verwarnungstext ausfüllen.'); return; } c.warningDocuments=Array.isArray(c.warningDocuments)?c.warningDocuments:[]; c.warningDocuments.push(warning); c.updatedAt=Date.now(); c.history=c.history||[]; c.history.push({ts:Date.now(),text:`Schriftliche Verwarnung abgelegt: ${warning.category}`}); addCaseActivity(c,`Schriftliche Verwarnung abgelegt: ${warning.category}`); await persist.cases(); go('caseform',caseId); }
+async function saveWarning(caseId){
+  if(currentTier()<2){ showAccessNotice('Schriftliche Maßnahmen dürfen nur durch Tier 2 oder eine höhere berechtigte Prüfstufe vorbereitet werden.'); return; }
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c) return;
+  const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  if(c.processCode||c.createdById===actorId){
+    showAccessNotice('Eine Verwarnung benötigt eine unabhängige Prüfung. Eigene oder bereits workflowgebundene Akten können hier nicht direkt sanktioniert werden.');
+    return;
+  }
+  const warning=warningFromForm(caseId);
+  if(!warning.driverName||!warning.text){ alert('Bitte Fahrer und Verwarnungstext ausfüllen.'); return; }
+  c.warningDocuments=Array.isArray(c.warningDocuments)?c.warningDocuments:[];
+  c.warningDocuments.push(warning);
+  c.updatedAt=Date.now();
+  c.history=c.history||[];
+  c.history.push({ts:Date.now(),text:`Schriftliche Verwarnung abgelegt: ${warning.category}`,actorId,actorTier:currentTier()});
+  addCaseActivity(c,`Schriftliche Verwarnung abgelegt: ${warning.category}`);
+  await persist.cases();
+  go('caseform',caseId);
+}
 function printWarning(caseId,index){ const c=DB.cases.find(item=>item.id===caseId), warning=c?.warningDocuments?.[index]; if(c&&warning) printDoc(warningDocumentHtml(c,warning)); }
 
 function onCaseTeamChange(which){
@@ -1389,39 +1826,63 @@ function onCaseTeamChange(which){
 }
 
 async function saveCase(id, closeAfter){
-  const v = (i)=> document.getElementById(i).value;
+  const v = (i)=> document.getElementById(i)?.value??'';
   const now = Date.now();
   let c = id? DB.cases.find(x=>x.id===id) : null;
   const isNew = !c;
+  if(c?.processCode){
+    const workflow=c.processWorkflow||{};
+    const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+    const allowedOwner=Number(workflow.ownerTier)===currentTier();
+    const returned=workflow.approvalStatus==='Zur Ergänzung zurückgegeben';
+    if(!allowedOwner||(workflow.createdById===actorId&&!returned&&workflow.approvalStatus!=='Noch nicht vorgelegt')||['Freigegeben','Abgelehnt'].includes(workflow.approvalStatus)){
+      showAccessNotice('Diese Prozessakte ist an eine andere Bearbeitungsstufe übergeben oder bereits freigegeben. Bitte nutze den dokumentierten Übergabe- oder Ergänzungsschritt.');
+      return;
+    }
+  }
   if(isNew){
     if(!v('f_event').trim() || !v('f_description').trim()){
       alert('Bitte Event und eine Fallbeschreibung eintragen, bevor die Akte angelegt wird.');
       return;
     }
     const season = v('f_season');
-    c = { id: uid(), stw: nextStw(), createdAt: now, history: [] };
+    c = { id: uid(), stw: nextStw(), createdAt: now, history: [], createdById:AUTH.profile?.id||AUTH.session?.user?.id||'', createdByTier:currentTier() };
     DB.cases.push(c);
   }
   const prevStatus = c.status, prevDecision = c.decision;
+  const canEditLegacyDecision=currentTier()>=2&&!c.processCode;
+  const requestedDecision=canEditLegacyDecision?v('f_decision'):c.decision;
+  const requestedLicenseStatus=canEditLegacyDecision?v('f_licenseStatusAfter'):c.licenseStatusAfter;
+  const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  if(!isNew&&canEditLegacyDecision&&requestedDecision!==prevDecision&&c.createdById===actorId){
+    showAccessNotice('Die eigene Fallaufnahme darf nicht selbst unabhängig entschieden werden. Bitte eine andere berechtigte Person prüfen lassen.');
+    return;
+  }
+  if(!c.processCode&&((requestedDecision==='Rennsperre'&&currentTier()<3)||(requestedLicenseStatus==='Entzogen'&&!isCeoProfile()))){
+    showAccessNotice(requestedLicenseStatus==='Entzogen'?'Ein dauerhafter Lizenzentzug benötigt eine CEO-Freigabe. Bitte den Vorgang an Tier 3 und anschließend an den CEO übergeben.':'Eine Rennsperre muss durch Tier 3 unabhängig geprüft werden.');
+    return;
+  }
   Object.assign(c, {
-    season: v('f_season'), status: isNew ? 'Neu' : v('f_status'), event: v('f_event'), sessionType: v('f_sessionType'),
+    season: v('f_season'), status: isNew ? 'Neu' : c.processCode||currentTier()<2 ? c.status : v('f_status'), event: v('f_event'), sessionType: v('f_sessionType'),
     incidentLap: v('f_incidentLap'), category: v('f_category'), reportedBy: v('f_reportedBy'),
     teamInvolved: v('f_teamInvolved'), driverInvolved: v('f_driverInvolved'),
     teamAffected: v('f_teamAffected'), driverAffected: v('f_driverAffected'),
     description: v('f_description'), evidenceLink: v('f_evidenceLink'),
     hearingHeld: document.getElementById('f_hearingHeld').checked,
     investigationNotes: v('f_investigationNotes'), regulationBreach: v('f_regulationBreach'),
-    precedent: v('f_precedent'), decision: isNew ? DECISIONS[0] : v('f_decision'),
-    penaltyPoints: isNew ? 0 : parseInt(v('f_penaltyPoints'))||0, decisionDetail: isNew ? '' : v('f_decisionDetail'),
-    licenseStatusAfter: isNew ? LICENSE_AFTER[0] : v('f_licenseStatusAfter'), licenseStatusDetail: isNew ? '' : v('f_licenseStatusDetail'),
-    stewardChairman: isNew ? '' : v('f_stewardChairman'), steward2: isNew ? '' : v('f_steward2'), steward3: isNew ? '' : v('f_steward3'),
+    precedent: v('f_precedent'), decision: isNew ? DECISIONS[0] : canEditLegacyDecision ? v('f_decision') : c.decision,
+    penaltyPoints: isNew ? 0 : canEditLegacyDecision ? parseInt(v('f_penaltyPoints'))||0 : c.penaltyPoints, decisionDetail: isNew ? '' : canEditLegacyDecision ? v('f_decisionDetail') : c.decisionDetail,
+    licenseStatusAfter: isNew ? LICENSE_AFTER[0] : canEditLegacyDecision ? v('f_licenseStatusAfter') : c.licenseStatusAfter, licenseStatusDetail: isNew ? '' : canEditLegacyDecision ? v('f_licenseStatusDetail') : c.licenseStatusDetail,
+    stewardChairman: isNew ? '' : canEditLegacyDecision ? v('f_stewardChairman') : c.stewardChairman, steward2: isNew ? '' : canEditLegacyDecision ? v('f_steward2') : c.steward2, steward3: isNew ? '' : canEditLegacyDecision ? v('f_steward3') : c.steward3,
     updatedAt: now,
   });
-  if(isNew){ c.history.push({ts:now, text:'Akte '+c.stw+' eröffnet.'}); }
+  const actorTier=currentTier();
+  if(isNew) c.history.push({ts:now,text:'Akte '+c.stw+' eröffnet.',actorId,actorTier});
   else{
-    if(prevStatus!==c.status) c.history.push({ts:now, text:`Status geändert: ${prevStatus} → ${c.status}`});
-    if(prevDecision!==c.decision) c.history.push({ts:now, text:`Entscheidung aktualisiert: ${c.decision}`});
-    else c.history.push({ts:now, text:'Akte bearbeitet.'});
+    const changes=[];
+    if(prevStatus!==c.status) changes.push(`Status geändert: ${prevStatus} → ${c.status}`);
+    if(prevDecision!==c.decision) changes.push(`Entscheidung aktualisiert: ${c.decision}`);
+    c.history.push({ts:now,text:changes.join(' · ')||'Akte bearbeitet.',actorId,actorTier});
   }
   addCaseActivity(c, isNew ? 'Akte angelegt.' : (prevStatus!==c.status ? `Status geändert: ${prevStatus} → ${c.status}` : prevDecision!==c.decision ? `Entscheidung aktualisiert: ${c.decision}` : 'Akte bearbeitet.'));
   await persist.cases();
@@ -1429,6 +1890,8 @@ async function saveCase(id, closeAfter){
 }
 
 async function deleteCase(id){
+  if(currentTier()<3){ showAccessNotice('Das Löschen von Akten ist Tier 3 vorbehalten. Für reguläre Abschlüsse bitte den Prozess A1 – Archivierung verwenden.'); return; }
+  if(DB.cases.find(item=>item.id===id)?.processCode){ showAccessNotice('Prozessakten dürfen nicht gelöscht werden. Nutze den dokumentierten Abschluss- und Archivierungsprozess.'); return; }
   if(!confirm('Diese Akte unwiderruflich löschen?')) return;
   const c=DB.cases.find(item=>item.id===id);
   if(!c) return;
@@ -1456,14 +1919,14 @@ function pageCaseList(){
   return `
   <div class="pagehead">
     <div><div class="eyebrow">Übersicht</div><h1>Alle Akten</h1></div>
-    <div class="actions"><button class="btn primary" onclick="go('caseform')">+ Neue Akte</button></div>
+    <div class="actions"><button class="btn" onclick="go('process-catalog')">Prozessvorgang aufnehmen</button><button class="btn primary" onclick="go('caseform')">+ Neue Akte</button></div>
   </div>
   <div class="panel">
     <div class="searchbar">
       <input id="cf_q" type="text" placeholder="Suche: Event, Beschreibung, STW-Nr. …" oninput="renderCaseTable()">
-      <select id="cf_status" onchange="renderCaseTable()"><option value="">Alle Status</option>${selectOptions(CASE_STATUS,'')}</select>
+      <select id="cf_status" onchange="renderCaseTable()"><option value="">Alle Status</option>${selectOptions([...CASE_STATUS,...PROCESS_APPROVAL_STATUSES],'')}</select>
       <select id="cf_team" onchange="renderCaseTable()"><option value="">Alle Teams</option>${teamOptions('',false)}</select>
-      <select id="cf_cat" onchange="renderCaseTable()"><option value="">Alle Kategorien</option>${selectOptions(CATEGORIES,'')}</select>
+      <select id="cf_cat" onchange="renderCaseTable()"><option value="">Alle Kategorien</option>${selectOptions([...CATEGORIES,...PROCESS_CATALOG.map(category=>category.name)],'')}</select>
     </div>
     <div id="caseTableWrap"></div>
   </div>
@@ -1476,11 +1939,11 @@ function renderCaseTable(){
   const ct = document.getElementById('cf_cat')?.value||'';
   let list = [...DB.cases].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   list = list.filter(c=>{
-    if(st && c.status!==st) return false;
+    if(st && c.status!==st && caseDisplayStatus(c)!==st) return false;
     if(tm && c.teamInvolved!==tm) return false;
     if(ct && c.category!==ct) return false;
     if(q){
-      const hay = [c.stw,c.event,c.description,c.category].join(' ').toLowerCase();
+      const hay = [c.stw,c.event,c.description,c.category,c.processCode,c.processTitle,caseDisplayStatus(c)].join(' ').toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -1492,9 +1955,9 @@ function renderCaseTable(){
       <td>${esc(c.event||'—')} <span style="color:var(--grey-2);font-size:11.5px;">/ ${esc(c.sessionType||'')}</span></td>
       <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'—'}</td>
       <td>${esc(driverName(d))}</td>
-      <td>${esc(c.category||'—')}</td>
+      <td>${esc(c.processCode?`${c.processCode} · ${c.processTitle||c.category}`:c.category||'—')}</td>
       <td>${esc(c.decision||'—')}</td>
-      <td><span class="tag ${statusTagClass(c.status)}">${esc(c.status)}</span></td>
+      <td><span class="tag ${statusTagClass(caseDisplayStatus(c))}">${esc(caseDisplayStatus(c))}</span></td>
     </tr>`;
   }).join('');
   document.getElementById('caseTableWrap').innerHTML = `
@@ -1938,11 +2401,11 @@ function renderCaseTable(){
     if(String(c.status||'').startsWith('An Tier ') || c.status === 'Zurück an Tier 1') {
       if(st !== 'Eskaliert' && st !== 'Zurück an Tier 1' && st !== '') return false;
     }
-    if(st && c.status !== st && !(st==='Eskaliert' && String(c.status||'').startsWith('An Tier ')) && !(st==='Zurück an Tier 1' && c.status==='Zurück an Tier 1')) return false;
+    if(st && c.status!==st && caseDisplayStatus(c)!==st && !(st==='Eskaliert' && String(c.status||'').startsWith('An Tier ')) && !(st==='Zurück an Tier 1' && c.status==='Zurück an Tier 1')) return false;
     if(tm && c.teamInvolved!==tm) return false;
-    if(ct && c.category!==ct) return false;
+    if(ct && c.category!==ct && c.processGroup!==ct) return false;
     if(q){
-      const hay = [c.stw,c.event,c.description,c.category].join(' ').toLowerCase();
+      const hay = [c.stw,c.event,c.description,c.category,c.processCode,c.processTitle,caseDisplayStatus(c)].join(' ').toLowerCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -1954,9 +2417,9 @@ function renderCaseTable(){
       <td>${esc(c.event||'—')} <span style="color:var(--grey-2);font-size:11.5px;">/ ${esc(c.sessionType||'')}</span></td>
       <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'—'}</td>
       <td>${esc(driverName(d))}</td>
-      <td>${esc(c.category||'—')}</td>
+      <td>${esc(c.processCode?`${c.processCode} · ${c.processTitle||c.category}`:c.category||'—')}</td>
       <td>${esc(c.decision||'—')}</td>
-      <td><span class="tag ${statusTagClass(String(c.status||'').startsWith('An Tier ') ? 'archived' : c.status)}">${esc(c.status)}</span></td>
+      <td><span class="tag ${statusTagClass(caseDisplayStatus(c))}">${esc(caseDisplayStatus(c))}</span></td>
     </tr>`;
   }).join('');
   document.getElementById('caseTableWrap').innerHTML = `
@@ -2712,6 +3175,34 @@ function printCaseReport(id){
     <div class="foot">ZFC RACING STEWARD-SYSTEM // Automatisch generiert am ${fmtDateTime(Date.now())} // Aktenstatus: ${esc(c.status)}</div>
   </div>`;
   printDoc(html);
+}
+
+function printProcessWorkflowReport(id){
+  const c=DB.cases.find(item=>item.id===id);
+  if(!c?.processCode){ showAccessNotice('Für diesen Vorgang ist kein Prozessbericht verfügbar.'); return; }
+  const workflow=c.processWorkflow||{};
+  const entries=workflow.history||[];
+  const last=entries[entries.length-1];
+  const reportTitle={
+    created:'Vorgangsaufnahme',
+    submit_tier2:'Übergabebericht an Tier 2',
+    escalate_t3:'07b-Eskalierungsbericht',
+    approve_t2:'Tier-2-Prüfbericht',
+    approve_t3:'Tier-3-Prüfbericht',
+    send_ceo:'CEO-Entscheidungsvorlage',
+    ceo_decide:'CEO-Entscheidungsvermerk',
+    return_t1:'Rückgabe- und Arbeitsauftrag'
+  }[last?.action]||'Prüf- und Freigabevermerk';
+  const isDraft=!['Freigegeben','Abgelehnt'].includes(workflow.approvalStatus);
+  const processFields=Object.entries(c.processFields||{}).filter(([,value])=>String(value||'').trim()).map(([key,value])=>`<tr><td class="k">${esc(key)}</td><td>${nl2br(value)}</td></tr>`).join('');
+  const workflowRows=entries.map(item=>`<tr><td>${fmtDateTime(item.ts)}</td><td>${esc(item.actionLabel||item.action)}</td><td>${esc(item.actorName||'—')} · Tier ${esc(item.actorTier||'—')}</td><td>${nl2br(item.reason||'—')}</td></tr>`).join('');
+  printDoc(`<div class="doc"><div class="doc-head"><div><div class="t1">ZFC <span>RACING</span></div><div class="t2">Stewards Office · ${esc(reportTitle)}</div></div><div><div class="stw">${esc(c.stw||'—')}</div><div class="stwl">Aktennummer</div></div></div>
+    ${isDraft?'<p class="draft-watermark">ENTWURF · NICHT FREIGEGEBEN</p>':''}
+    <p style="font-size:12px;color:#666;">${esc(c.processCode)} · ${esc(c.processTitle||'')} · ${esc(c.event||'—')} · Erstellt ${fmtDateTime(c.createdAt)}</p>
+    <h3>Zuständigkeit und Freigabe</h3><table><tr><td class="k">Bearbeitungsebene</td><td>${workflow.ownerTier?`Tier ${esc(workflow.ownerTier)}`:'Abgeschlossen'}</td></tr><tr><td class="k">Freigabestatus</td><td>${esc(workflow.approvalStatus||'Noch nicht vorgelegt')}</td></tr><tr><td class="k">Nächster Schritt</td><td>${esc(workflow.nextAction||'—')}</td></tr><tr><td class="k">Ergebnis</td><td>${esc(workflow.decision||'—')}</td></tr></table>
+    <h3>Sachverhalt und Vorgangsdaten</h3><p>${nl2br(c.description)||'—'}</p><table>${processFields||'<tr><td>Keine zusätzlichen Angaben</td></tr>'}</table>
+    <h3>Übergaben, Prüfungen und Freigaben</h3><table><thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Verantwortung</th><th>Begründung / Auftrag</th></tr></thead><tbody>${workflowRows}</tbody></table>
+    <p style="margin-top:28px;font-size:11px;color:#666;">Dieser Bericht bildet den dokumentierten Aktenstand zum Zeitpunkt des Drucks ab. Änderungen erfolgen als neue Protokolleinträge.</p></div>`);
 }
 
 function printLicense(id){

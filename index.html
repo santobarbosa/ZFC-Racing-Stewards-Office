@@ -24,6 +24,7 @@
   <div id="main"></div>
 </div>
 <div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
+<div id="accessNotice" class="access-notice-popup" role="alert" aria-live="assertive" hidden></div>
 <section id="loginIntro" class="login-intro-overlay" hidden aria-label="ZFC Racing Stewards Office startet" role="status" aria-live="polite">
   <div class="intro-grid" aria-hidden="true"></div>
   <div class="intro-topline" aria-hidden="true"><span>ZFC RACING <i>/</i> STEWARDS OFFICE</span><span>RACE CONTROL <b>● ONLINE</b></span></div>
@@ -93,8 +94,8 @@
     <p class="footer-note">Benutzerkonten werden durch Tier 3 eingerichtet.</p>
   </form>
 </section>
-<button id="floatingCaseLauncher" class="floating-case-launcher" type="button" aria-label="Force anlegen">Force anlegen</button>
-<main id="knowledgePortal" class="knowledge-portal" aria-label="ZFC Wissensportal">
+<button id="floatingCaseLauncher" class="floating-case-launcher" type="button" aria-label="Force anlegen" hidden>Force anlegen</button>
+<main id="knowledgePortal" class="knowledge-portal" aria-label="ZFC Wissensportal" hidden>
   <section class="knowledge-hero">
     <p class="eyebrow">ZFC / CFC / Steward Office</p>
     <h1>Internes Prozess- und Wissensportal</h1>
@@ -396,11 +397,15 @@
   ];
 
   function openCaseLauncher() {
-    const modal = document.getElementById('caseLauncherModal');
-    if (!modal) return;
-    modal.hidden = false;
-    renderCaseLauncherCategories();
-    renderCaseLauncherContent(CASE_LAUNCHER_CATEGORIES[0]);
+    if (typeof window.go === 'function') {
+      window.go('process-catalog');
+      return;
+    }
+    const notice = document.getElementById('accessNotice');
+    if (notice) {
+      notice.textContent = 'Bitte zuerst anmelden, um einen Vorgang über den Prozesskatalog zu eröffnen.';
+      notice.hidden = false;
+    }
   }
 
   function closeCaseLauncher() {
@@ -579,9 +584,13 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     const trigger = document.getElementById('floatingCaseLauncher');
-    const firstButton = document.querySelector('.knowledge-hero .hero-actions button');
     if (trigger) trigger.addEventListener('click', openCaseLauncher);
-    if (firstButton) firstButton.addEventListener('click', openCaseLauncher);
+    const heroButtons = document.querySelectorAll('.knowledge-hero .hero-actions button');
+    if (heroButtons[0]) heroButtons[0].addEventListener('click', openCaseLauncher);
+    if (heroButtons[1]) heroButtons[1].addEventListener('click', () => {
+      if (typeof window.go === 'function') window.go('processes');
+      else openCaseLauncher();
+    });
     document.querySelectorAll('[data-close-launcher]').forEach(button => {
       button.addEventListener('click', closeCaseLauncher);
     });

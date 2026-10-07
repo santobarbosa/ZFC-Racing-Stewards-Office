@@ -32,6 +32,23 @@ $$;
 revoke all on function public.zfc_current_tier() from public, anon;
 grant execute on function public.zfc_current_tier() to authenticated;
 
+create or replace function public.zfc_is_system_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+	select exists (
+		select 1 from public.zfc_user_profiles
+		where id = auth.uid()
+			and lower(email) = lower('s.barbosa.galaxy@gmail.com')
+	);
+$$;
+
+revoke all on function public.zfc_is_system_admin() from public, anon;
+grant execute on function public.zfc_is_system_admin() to authenticated;
+
 create or replace function public.zfc_create_user_profile()
 returns trigger
 language plpgsql
@@ -75,7 +92,14 @@ create policy zfc_user_profiles_tier3_select
 	on public.zfc_user_profiles for select to authenticated using (public.zfc_current_tier() >= 3);
 create policy zfc_user_profiles_tier3_update
 	on public.zfc_user_profiles for update to authenticated
-	using (public.zfc_current_tier() >= 3) with check (public.zfc_current_tier() >= 3);
+	using (public.zfc_current_tier() >= 3 and (access_tier < 3 or public.zfc_is_system_admin()))
+	with check (
+		public.zfc_current_tier() >= 3
+		and (
+			(access_tier <= 2 and lower(btrim(position)) <> 'ceo')
+			or (access_tier = 3 and public.zfc_is_system_admin())
+		)
+	);
 
 grant usage on schema public to authenticated;
 grant select on public.zfc_user_profiles to authenticated;
@@ -201,6 +225,296 @@ create policy zfc_app_state_authenticated_delete
 
 revoke all on public.zfc_app_state from anon;
 grant select, insert, update on public.zfc_app_state to authenticated;
+
+-- Prüft sensible Aktenänderungen serverseitig; UI-Sichtbarkeit ist keine Berechtigungsgrenze.
+create or replace function public.zfc_validate_app_state_tier_workflow()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+	actor_tier smallint;
+	old_state jsonb := '{}'::jsonb;
+	case_item jsonb;
+	old_case jsonb;
+	new_workflow jsonb;
+	old_workflow jsonb;
+	last_event jsonb;
+	case_code text;
+	action_name text;
+	history_length integer;
+	required_tier smallint;
+	expected_owner_tier smallint;
+begin
+	actor_tier := public.zfc_current_tier();
+	if actor_tier < 1 or auth.uid() is null then
+		raise exception 'Anmeldung und gültiges Tier-Profil sind erforderlich.';
+	end if;
+
+	if tg_op = 'UPDATE' then
+		old_state := coalesce(old.state, '{}'::jsonb);
+	end if;
+
+	for case_item in
+		select value from jsonb_array_elements(coalesce(new.state->'cases', '[]'::jsonb))
+	loop
+		if case_item->>'id' is null then
+			continue;
+		end if;
+
+		old_case := null;
+		select value into old_case
+		from jsonb_array_elements(coalesce(old_state->'cases', '[]'::jsonb)) as old_cases(value)
+		where value->>'id' = case_item->>'id'
+		limit 1;
+
+		case_code := case_item->>'processCode';
+		new_workflow := coalesce(case_item->'processWorkflow', '{}'::jsonb);
+
+		if old_case is null then
+			if case_item->>'createdById' is distinct from auth.uid()::text
+				or (case_item->>'createdByTier')::smallint is distinct from actor_tier then
+				raise exception 'Eine neue Akte muss der angemeldeten Person und deren Tier zugeordnet sein.';
+			end if;
+			if coalesce(case_item->>'status','Neu') <> 'Neu'
+				or coalesce(case_item->>'decision','Keine weitere Untersuchung erforderlich') <> 'Keine weitere Untersuchung erforderlich'
+				or coalesce((case_item->>'penaltyPoints')::integer,0) <> 0 then
+				raise exception 'Neue Akten beginnen ohne Entscheidung oder Sanktion im Status Neu.';
+			end if;
+			if case_code is not null then
+				if new_workflow->>'createdById' is distinct from auth.uid()::text
+					or (new_workflow->>'createdByTier')::smallint is distinct from actor_tier then
+					raise exception 'Die Prozessakte muss vom angemeldeten Konto und mit dessen Tier eröffnet werden.';
+				end if;
+				required_tier := case when case_code in ('D4','D8','D9','07b','V2','V3','F1','F2') then 3 else 2 end;
+				if (new_workflow->>'requiredApprovalTier')::smallint is distinct from required_tier then
+					raise exception 'Die erforderliche Freigabestufe dieses Prozesses darf nicht verändert werden.';
+				end if;
+				if new_workflow->>'requiresCeoApproval' is distinct from
+					(case when case_code in ('V2','V3','F1','F2') then 'true' else 'false' end) then
+					raise exception 'Die CEO-Freigabepflicht dieses Prozesses darf nicht verändert werden.';
+				end if;
+				expected_owner_tier := case when actor_tier = 1 then 1 else greatest(actor_tier, required_tier) end;
+				if (new_workflow->>'ownerTier')::smallint is distinct from expected_owner_tier
+					or new_workflow->>'approvalStatus' is distinct from (case
+						when actor_tier = 1 then 'Noch nicht vorgelegt'
+						else 'Tier-' || expected_owner_tier::text || '-Prüfung ausstehend'
+					end) then
+					raise exception 'Die neue Prozessakte muss mit dem vorgeschriebenen Prüfstatus beginnen.';
+				end if;
+				if actor_tier = 1 and case_code not in ('D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','A1','07b') then
+					raise exception 'Dieser Prozess darf nicht durch Tier 1 eröffnet werden.';
+				end if;
+				if case_code in ('D4','D8','D9') and actor_tier < 3 then
+					raise exception 'Dieser Prozess darf nur durch Tier 3 eröffnet werden.';
+				end if;
+				if jsonb_array_length(coalesce(new_workflow->'history','[]'::jsonb)) <> 1
+					or new_workflow->'history'->0->>'actorId' is distinct from auth.uid()::text
+					or (new_workflow->'history'->0->>'actorTier')::smallint is distinct from actor_tier then
+					raise exception 'Die Eröffnung muss mit einem unveränderlichen Protokolleintrag dokumentiert werden.';
+				end if;
+			end if;
+			continue;
+		end if;
+
+		if actor_tier = 1 and (
+			case_item->'decision' is distinct from old_case->'decision'
+			or case_item->'decisionDetail' is distinct from old_case->'decisionDetail'
+			or case_item->'penaltyPoints' is distinct from old_case->'penaltyPoints'
+			or case_item->'licenseStatusAfter' is distinct from old_case->'licenseStatusAfter'
+			or case_item->'licenseStatusDetail' is distinct from old_case->'licenseStatusDetail'
+			or case_item->'status' is distinct from old_case->'status'
+		) then
+			raise exception 'Tier 1 darf keine Entscheidungen, Sanktionen oder Abschlussstatus ändern.';
+		end if;
+
+		if case_code is not null then
+			old_workflow := coalesce(old_case->'processWorkflow', '{}'::jsonb);
+			if new_workflow->>'createdById' is distinct from old_workflow->>'createdById'
+				or new_workflow->>'createdByTier' is distinct from old_workflow->>'createdByTier'
+				or new_workflow->>'requiredApprovalTier' is distinct from old_workflow->>'requiredApprovalTier'
+				or new_workflow->>'requiresCeoApproval' is distinct from old_workflow->>'requiresCeoApproval' then
+				raise exception 'Die ursprüngliche Prozessverantwortung darf nicht geändert werden.';
+			end if;
+
+			if case_item->'description' is distinct from old_case->'description'
+				or case_item->'evidenceLink' is distinct from old_case->'evidenceLink'
+				or case_item->'investigationNotes' is distinct from old_case->'investigationNotes'
+				or case_item->'processFields' is distinct from old_case->'processFields' then
+				if actor_tier is distinct from (old_workflow->>'ownerTier')::smallint
+					or (old_workflow->>'createdById' = auth.uid()::text
+						and old_workflow->>'approvalStatus' not in ('Noch nicht vorgelegt','Zur Ergänzung zurückgegeben')) then
+					raise exception 'Der Sachverhalt darf nur durch die aktuell zuständige Bearbeitungsstufe ergänzt werden.';
+				end if;
+			end if;
+
+			if case_item->'status' is distinct from old_case->'status' then
+				raise exception 'Der Prozessstatus darf nur durch einen dokumentierten Workflow-Schritt geändert werden.';
+			end if;
+
+			if new_workflow is distinct from old_workflow then
+				history_length := jsonb_array_length(coalesce(new_workflow->'history','[]'::jsonb));
+				if history_length <> jsonb_array_length(coalesce(old_workflow->'history','[]'::jsonb)) + 1 then
+					raise exception 'Jede Prozessänderung muss genau einen neuen Prüfverlaufseintrag enthalten.';
+				end if;
+				if (new_workflow->'history' #- array[(history_length - 1)::text]) is distinct from old_workflow->'history' then
+					raise exception 'Vorhandene Prüfverlaufseinträge dürfen nicht geändert oder entfernt werden.';
+				end if;
+				last_event := new_workflow->'history'->(history_length - 1);
+				action_name := last_event->>'action';
+				if last_event->>'actorId' is distinct from auth.uid()::text
+					or (last_event->>'actorTier')::smallint is distinct from actor_tier
+					or nullif(btrim(last_event->>'reason'),'') is null then
+					raise exception 'Prüfverlauf, handelnde Person und Begründung müssen übereinstimmen.';
+				end if;
+
+				if action_name = 'submit_tier2' then
+					if actor_tier <> 1
+						or old_workflow->>'ownerTier' is distinct from '1'
+						or old_workflow->>'approvalStatus' not in ('Noch nicht vorgelegt','Zur Ergänzung zurückgegeben')
+						or new_workflow->>'approvalStatus' is distinct from 'Tier-2-Prüfung ausstehend'
+						or (new_workflow->>'ownerTier')::smallint <> 2 then
+						raise exception 'Diese Übergabe an Tier 2 ist nicht zulässig.';
+					end if;
+				elsif action_name = 'escalate_t3' then
+					if (actor_tier < 2 and not (actor_tier = 1 and case_code = '07b' and old_workflow->>'approvalStatus' in ('Noch nicht vorgelegt','Zur Ergänzung zurückgegeben')))
+						or (actor_tier = 2 and (old_workflow->>'ownerTier' is distinct from '2' or old_workflow->>'approvalStatus' is distinct from 'Tier-2-Prüfung ausstehend'))
+						or (actor_tier = 3 and (old_workflow->>'ownerTier' is distinct from '2' or old_workflow->>'approvalStatus' is distinct from 'Tier-2-Prüfung ausstehend'))
+						or new_workflow->>'approvalStatus' is distinct from 'Tier-3-Prüfung ausstehend'
+						or (new_workflow->>'ownerTier')::smallint <> 3 then
+						raise exception 'Diese Eskalierung an Tier 3 ist nicht zulässig.';
+					end if;
+				elsif action_name = 'approve_t2' then
+					if actor_tier <> 2 or old_workflow->>'createdById' = auth.uid()::text
+						or (old_workflow->>'ownerTier')::smallint <> 2
+						or old_workflow->>'approvalStatus' <> 'Tier-2-Prüfung ausstehend'
+						or (old_workflow->>'requiredApprovalTier')::smallint > 2
+						or new_workflow->>'approvalStatus' <> 'Freigegeben'
+						or (new_workflow->>'ownerTier')::smallint <> 0 then
+						raise exception 'Die Tier-2-Freigabe erfordert eine unabhängige Tier-2-Prüfung.';
+					end if;
+				elsif action_name = 'approve_t3' then
+					if actor_tier <> 3 or old_workflow->>'createdById' = auth.uid()::text
+						or (old_workflow->>'ownerTier')::smallint <> 3
+						or old_workflow->>'approvalStatus' <> 'Tier-3-Prüfung ausstehend'
+						or new_workflow->>'approvalStatus' is distinct from (case
+							when coalesce((old_workflow->>'requiresCeoApproval')::boolean,false) then 'CEO-Entscheidung ausstehend'
+							else 'Freigegeben'
+						end)
+						or (new_workflow->>'ownerTier')::smallint is distinct from (case
+							when coalesce((old_workflow->>'requiresCeoApproval')::boolean,false) then 3
+							else 0
+						end) then
+						raise exception 'Die Tier-3-Freigabe erfordert eine unabhängige Tier-3-Prüfung.';
+					end if;
+				elsif action_name = 'send_ceo' then
+					if actor_tier <> 3 or old_workflow->>'ownerTier' is distinct from '3'
+						or old_workflow->>'approvalStatus' is distinct from 'Tier-3-Prüfung ausstehend'
+						or new_workflow->>'approvalStatus' is distinct from 'CEO-Entscheidung ausstehend'
+						or new_workflow->>'ownerTier' is distinct from '3' then
+						raise exception 'Eine CEO-Vorlage muss durch Tier 3 übergeben werden.';
+					end if;
+				elsif action_name = 'ceo_decide' then
+					if actor_tier <> 3
+						or not exists (select 1 from public.zfc_user_profiles where id = auth.uid() and lower(btrim(position)) = 'ceo')
+						or old_workflow->>'createdById' = auth.uid()::text
+						or old_workflow->>'ownerTier' is distinct from '3'
+						or old_workflow->>'approvalStatus' is distinct from 'CEO-Entscheidung ausstehend'
+						or old_workflow->'history'->(jsonb_array_length(coalesce(old_workflow->'history','[]'::jsonb))-1)->>'actorId' = auth.uid()::text
+						or lower(coalesce(case_item->'processFields'->>'subject','')) like '%ceo%'
+						or lower(coalesce(case_item->'processFields'->>'participants','')) like '%ceo%'
+						or last_event->>'decision' is null
+						or last_event->>'decision' is distinct from new_workflow->>'decision'
+						or coalesce(not (
+							(last_event->>'decision' in ('Freigegeben','Abgelehnt')
+								and new_workflow->>'approvalStatus' = last_event->>'decision'
+								and new_workflow->>'ownerTier' = '0')
+							or (last_event->>'decision' = 'Änderung verlangt'
+								and new_workflow->>'approvalStatus' = 'Zur Ergänzung zurückgegeben'
+								and new_workflow->>'ownerTier' = '1')
+							or (last_event->>'decision' in ('Weitere Prüfung angeordnet','Bearbeitung delegiert')
+								and new_workflow->>'ownerTier' in ('2','3')
+								and new_workflow->>'approvalStatus' = 'Tier-' || new_workflow->>'ownerTier' || '-Prüfung ausstehend')
+						),true) then
+						raise exception 'Die CEO-Entscheidung ist nur für ein unabhängiges, als CEO gekennzeichnetes Tier-3-Konto zulässig.';
+					end if;
+				elsif action_name = 'return_t1' then
+					if actor_tier < 2 or new_workflow->>'approvalStatus' <> 'Zur Ergänzung zurückgegeben'
+						or (new_workflow->>'ownerTier')::smallint <> 1 then
+						raise exception 'Eine Rückgabe an Tier 1 erfordert einen konkreten Auftrag durch Tier 2 oder Tier 3.';
+					end if;
+				elsif action_name = 'implement_measure' then
+					if actor_tier <> 1 or case_code <> 'D5'
+						or old_workflow->>'approvalStatus' <> 'Freigegeben'
+						or new_workflow->>'approvalStatus' <> 'Freigegeben'
+						or new_workflow->>'implementationStatus' <> 'Umgesetzt'
+						or old_workflow->>'implementationStatus' = 'Umgesetzt' then
+						raise exception 'Tier 1 darf nur eine zuvor freigegebene D5-Maßnahme umsetzen und dokumentieren.';
+					end if;
+				else
+					raise exception 'Unbekannte oder nicht zulässige Prozessaktion.';
+				end if;
+
+				if (
+					case_item->'decision' is distinct from old_case->'decision'
+					or case_item->'decisionDetail' is distinct from old_case->'decisionDetail'
+					or case_item->'penaltyPoints' is distinct from old_case->'penaltyPoints'
+					or case_item->'licenseStatusAfter' is distinct from old_case->'licenseStatusAfter'
+					or case_item->'licenseStatusDetail' is distinct from old_case->'licenseStatusDetail'
+				) and action_name not in ('approve_t2','approve_t3','ceo_decide') then
+					raise exception 'Entscheidungen und Sanktionen benötigen die vorgeschriebene Freigabeaktion.';
+				end if;
+			elsif (
+				case_item->'decision' is distinct from old_case->'decision'
+				or case_item->'decisionDetail' is distinct from old_case->'decisionDetail'
+				or case_item->'penaltyPoints' is distinct from old_case->'penaltyPoints'
+				or case_item->'licenseStatusAfter' is distinct from old_case->'licenseStatusAfter'
+				or case_item->'licenseStatusDetail' is distinct from old_case->'licenseStatusDetail'
+			) then
+				raise exception 'Entscheidungen und Sanktionen bei Prozessakten müssen über den Freigabeschritt erfolgen.';
+			end if;
+		else
+			if case_item->'decision' is distinct from old_case->'decision'
+				or case_item->'decisionDetail' is distinct from old_case->'decisionDetail'
+				or case_item->'penaltyPoints' is distinct from old_case->'penaltyPoints'
+				or case_item->'licenseStatusAfter' is distinct from old_case->'licenseStatusAfter'
+				or case_item->'licenseStatusDetail' is distinct from old_case->'licenseStatusDetail'
+				or case_item->'status' is distinct from old_case->'status' then
+				if actor_tier < 2 then
+					raise exception 'Tier 1 darf keine Entscheidungen, Sanktionen oder Abschlussstatus ändern.';
+				end if;
+				history_length := jsonb_array_length(coalesce(case_item->'history','[]'::jsonb));
+				if history_length <> jsonb_array_length(coalesce(old_case->'history','[]'::jsonb)) + 1
+					or (case_item->'history' #- array[(history_length - 1)::text]) is distinct from old_case->'history'
+					or case_item->'history'->(history_length - 1)->>'actorId' is distinct from auth.uid()::text
+					or (case_item->'history'->(history_length - 1)->>'actorTier')::smallint is distinct from actor_tier
+					or nullif(btrim(case_item->'history'->(history_length - 1)->>'text'),'') is null then
+					raise exception 'Entscheidungen und Statusänderungen benötigen einen nachvollziehbaren Prüfverlauf.';
+				end if;
+				if case_item->'decision' is distinct from old_case->'decision'
+					and old_case->>'createdById' = auth.uid()::text then
+					raise exception 'Die eigene Fallaufnahme darf nicht selbst entschieden werden.';
+				end if;
+				if case_item->>'decision' = 'Rennsperre' and actor_tier < 3 then
+					raise exception 'Eine Rennsperre benötigt mindestens eine unabhängige Tier-3-Prüfung.';
+				end if;
+				if case_item->>'licenseStatusAfter' = 'Entzogen'
+					and not exists (select 1 from public.zfc_user_profiles where id = auth.uid() and lower(btrim(position)) = 'ceo') then
+					raise exception 'Ein Lizenzentzug benötigt eine CEO-Freigabe.';
+				end if;
+			end if;
+		end if;
+	end loop;
+	return new;
+end;
+$$;
+
+drop trigger if exists zfc_validate_app_state_tier_workflow on public.zfc_app_state;
+create trigger zfc_validate_app_state_tier_workflow
+	before insert or update of state on public.zfc_app_state
+	for each row execute function public.zfc_validate_app_state_tier_workflow();
+revoke all on function public.zfc_validate_app_state_tier_workflow() from public, anon, authenticated;
 
 -- Feste ID: Das Frontend schreibt die Einstellungen immer in denselben Datensatz.
 create table if not exists public.zfc_finance_settings (
