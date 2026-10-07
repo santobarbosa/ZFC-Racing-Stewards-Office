@@ -82,6 +82,66 @@ grant select on public.zfc_user_profiles to authenticated;
 grant update (display_name, position, access_tier, updated_at) on public.zfc_user_profiles to authenticated;
 revoke all on public.zfc_user_profiles from anon;
 
+-- Gemeinsamer Chat für Tier 2 und Tier 3. Autorenname und Tier werden serverseitig gesetzt.
+create table if not exists public.zfc_tier_chat_messages (
+	id uuid primary key default gen_random_uuid(),
+	sender_id uuid not null references public.zfc_user_profiles(id) on delete cascade,
+	sender_name text not null default '',
+	sender_tier smallint not null default 2 check (sender_tier in (2, 3)),
+	message text not null check (char_length(message) between 1 and 2000 and message ~ '[^[:space:]]'),
+	created_at timestamptz not null default now()
+);
+
+alter table public.zfc_tier_chat_messages enable row level security;
+alter table public.zfc_tier_chat_messages replica identity full;
+create index if not exists zfc_tier_chat_messages_created_idx on public.zfc_tier_chat_messages(created_at desc);
+
+create or replace function public.zfc_prepare_tier_chat_message()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+	if auth.uid() is null or new.sender_id <> auth.uid() then
+		raise exception 'Chat-Nachrichten dürfen nur für das eigene Konto gesendet werden.';
+	end if;
+
+	new.sender_tier := public.zfc_current_tier();
+	if new.sender_tier not in (2, 3) then
+		raise exception 'Der Chat ist ausschließlich für Tier 2 und Tier 3 verfügbar.';
+	end if;
+
+	select coalesce(nullif(display_name, ''), email)
+	into new.sender_name
+	from public.zfc_user_profiles
+	where id = new.sender_id;
+
+	if new.sender_name is null or new.sender_name = '' then
+		raise exception 'Das Benutzerprofil für die Chat-Nachricht wurde nicht gefunden.';
+	end if;
+	return new;
+end;
+$$;
+
+drop trigger if exists zfc_prepare_tier_chat_message on public.zfc_tier_chat_messages;
+create trigger zfc_prepare_tier_chat_message
+	before insert on public.zfc_tier_chat_messages
+	for each row execute function public.zfc_prepare_tier_chat_message();
+
+drop policy if exists zfc_tier_chat_messages_select on public.zfc_tier_chat_messages;
+drop policy if exists zfc_tier_chat_messages_insert on public.zfc_tier_chat_messages;
+create policy zfc_tier_chat_messages_select
+	on public.zfc_tier_chat_messages for select to authenticated
+	using (public.zfc_current_tier() in (2, 3));
+create policy zfc_tier_chat_messages_insert
+	on public.zfc_tier_chat_messages for insert to authenticated
+	with check (public.zfc_current_tier() in (2, 3) and sender_id = auth.uid());
+
+revoke all on public.zfc_tier_chat_messages from anon, authenticated;
+grant select, insert on public.zfc_tier_chat_messages to authenticated;
+revoke all on function public.zfc_prepare_tier_chat_message() from public, anon, authenticated;
+
 create table if not exists public.zfc_tier_escalations (
 	id text primary key,
 	case_id text,
@@ -361,6 +421,15 @@ begin
 				and tablename = 'zfc_tier_escalations'
 		) then
 			alter publication supabase_realtime add table public.zfc_tier_escalations;
+		end if;
+
+		if not exists (
+			select 1 from pg_publication_tables
+			where pubname = 'supabase_realtime'
+				and schemaname = 'public'
+				and tablename = 'zfc_tier_chat_messages'
+		) then
+			alter publication supabase_realtime add table public.zfc_tier_chat_messages;
 		end if;
 	end if;
 end $$;

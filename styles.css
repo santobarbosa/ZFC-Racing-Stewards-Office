@@ -126,11 +126,27 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 .tier-office-card .eyebrow{margin:0 0 7px;color:var(--grey-2);font:10px var(--mono);letter-spacing:1.4px;text-transform:uppercase;}
 .tier-office-card h2{margin:0 0 8px;}
 .tier-office-card>p{margin:0 0 16px;color:var(--grey);font-size:13px;line-height:1.5;}
+.tier-office-chat{grid-column:1/-1;min-height:0;}
 .workspace-placeholder{display:flex;flex-direction:column;gap:5px;width:100%;min-height:75px;margin:0 0 16px;padding:13px 14px;border:1px dashed var(--line);background:rgba(10,10,11,.48);}
 .workspace-placeholder strong{color:#d8d6d2;font-size:12.5px;}
 .workspace-placeholder span{color:var(--grey-2);font-size:11.5px;line-height:1.45;}
 .tier-office-card>.btn{margin-top:auto;}
 .tier-office-card>.btn:disabled{opacity:.55;border-color:#444247;background:#19181b;color:#858086;cursor:not-allowed;}
+.tier-office-card .tier-chat-status{width:100%;margin:0 0 8px;color:var(--grey-2);font:10px var(--mono);}
+.tier-office-card .tier-chat-messages{display:flex;flex-direction:column;gap:9px;width:100%;height:290px;overflow-y:auto;margin:0 0 12px;padding:12px;border:1px solid var(--line);background:rgba(10,10,11,.55);}
+.tier-chat-empty{margin:auto;color:var(--grey-2);font-size:12px;text-align:center;line-height:1.55;}
+.tier-chat-message{padding:9px 10px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.025);}
+.tier-chat-message-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:5px;}
+.tier-chat-message-head strong{color:#eee;font-size:12px;}
+.tier-chat-message-head span{color:var(--grey-2);font:9px var(--mono);text-align:right;}
+.tier-chat-message p{margin:0;color:#d1ced0;font-size:12px;line-height:1.5;overflow-wrap:anywhere;}
+.tier-chat-form{display:flex;align-items:flex-end;gap:9px;width:100%;margin-top:auto;}
+.tier-chat-form textarea{flex:1;min-width:0;min-height:42px;max-height:120px;resize:vertical;padding:10px 11px;border:1px solid var(--line);background:#111;color:var(--white);font:12px var(--font);}
+.tier-chat-form textarea:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 2px rgba(200,16,46,.14);}
+.tier-office-card .tier-chat-form .btn{margin:0;white-space:nowrap;}
+.tier-chat-form .btn:disabled{opacity:.6;cursor:wait;}
+.tier-office-card .tier-chat-error{min-height:0;width:100%;margin:5px 0 0;color:#ff8b96;font-size:11px;}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
 @media(max-width:640px){.tier-office-badge{font-size:9px;padding:7px 8px;}.tier-office-page .pagehead{align-items:flex-start;}}
 
 #main{flex:1;min-width:0;padding:26px 34px 60px;max-width:1280px;background:linear-gradient(90deg,rgba(10,10,11,.42),rgba(10,10,11,.08));}

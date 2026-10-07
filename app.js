@@ -9,6 +9,7 @@ const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], fina
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
 let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null };
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
+let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -141,6 +142,87 @@ async function syncTierEscalations(){
   if(!rows.length) return;
   const result=await SUPABASE.client.from('zfc_tier_escalations').upsert(rows);
   if(result.error){ SUPABASE.status='Eskalierung konnte nicht synchronisiert werden'; console.warn('Tier-Eskalierungen konnten nicht gespeichert werden',result.error); }
+}
+function upsertTierChatMessage(message){
+  if(!message?.id) return;
+  const index=TIER_CHAT.messages.findIndex(item=>item.id===message.id);
+  if(index<0) TIER_CHAT.messages.push(message);
+  else TIER_CHAT.messages[index]=message;
+  TIER_CHAT.messages.sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+  TIER_CHAT.messages=TIER_CHAT.messages.slice(-100);
+  renderTierChatMessages();
+}
+function renderTierChatMessages(){
+  const list=document.getElementById('tierChatMessages');
+  if(!list) return;
+  if(TIER_CHAT.loading){
+    list.innerHTML='<div class="tier-chat-empty">Nachrichten werden geladen …</div>';
+  }else if(TIER_CHAT.error&&!TIER_CHAT.messages.length){
+    list.innerHTML=`<div class="tier-chat-empty tier-chat-error">${esc(TIER_CHAT.error)}</div>`;
+  }else if(!TIER_CHAT.messages.length){
+    list.innerHTML='<div class="tier-chat-empty">Noch keine Nachrichten. Starte die Abstimmung zwischen Tier 2 und Tier 3.</div>';
+  }else{
+    list.innerHTML=TIER_CHAT.messages.map(message=>`<article class="tier-chat-message"><div class="tier-chat-message-head"><strong>${esc(message.sender_name||'Steward')}</strong><span>Tier ${Number(message.sender_tier)||'—'} · ${fmtDateTime(message.created_at)}</span></div><p>${nl2br(message.message)}</p></article>`).join('');
+    list.scrollTop=list.scrollHeight;
+  }
+  const status=document.getElementById('tierChatStatus');
+  if(status) status.textContent=TIER_CHAT.error|| (TIER_CHAT.connected?'Live-Chat aktiv':'Verbindung wird hergestellt …');
+  const error=document.getElementById('tierChatError');
+  if(error) error.textContent=TIER_CHAT.error;
+  const sendButton=document.getElementById('tierChatSend');
+  if(sendButton) sendButton.disabled=TIER_CHAT.sending;
+}
+async function loadTierChatMessages(){
+  if(!SUPABASE.client) return;
+  TIER_CHAT.loading=true;
+  TIER_CHAT.error='';
+  try{
+    const result=await SUPABASE.client.from('zfc_tier_chat_messages').select('id,sender_id,sender_name,sender_tier,message,created_at').order('created_at',{ascending:false}).limit(100);
+    if(result.error) throw result.error;
+    if(!Array.isArray(result.data)) throw new Error('Supabase hat keine Nachrichtenliste zurückgegeben.');
+    const messagesById=new Map([...result.data.reverse(),...TIER_CHAT.messages].map(message=>[message.id,message]));
+    TIER_CHAT.messages=[...messagesById.values()].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)).slice(-100);
+  }catch(error){
+    TIER_CHAT.error=`Chat konnte nicht geladen werden: ${error.message||'Unbekannter Fehler'}`;
+    console.warn('Tier-Chat konnte nicht geladen werden',error);
+  }finally{
+    TIER_CHAT.loading=false;
+  }
+}
+async function sendTierChatMessage(){
+  const input=document.getElementById('tierChatInput');
+  const message=input?.value.trim()||'';
+  if(TIER_CHAT.sending) return;
+  if(!message){
+    TIER_CHAT.error='Bitte gib eine Nachricht ein.';
+    renderTierChatMessages();
+    input?.focus();
+    return;
+  }
+  if(!SUPABASE.client||!AUTH.session){
+    TIER_CHAT.error='Chat nicht verfügbar. Bitte erneut anmelden.';
+    renderTierChatMessages();
+    return;
+  }
+  TIER_CHAT.sending=true;
+  TIER_CHAT.error='';
+  renderTierChatMessages();
+  try{
+    const result=await SUPABASE.client.from('zfc_tier_chat_messages')
+      .insert({sender_id:AUTH.session.user.id,message})
+      .select('id,sender_id,sender_name,sender_tier,message,created_at').single();
+    if(result.error) throw result.error;
+    if(!result.data) throw new Error('Supabase hat keine gespeicherte Nachricht zurückgegeben.');
+    if(input) input.value='';
+    TIER_CHAT.error='';
+    upsertTierChatMessage(result.data);
+  }catch(error){
+    TIER_CHAT.error=`Nachricht konnte nicht gesendet werden: ${error.message||'Unbekannter Fehler'}`;
+    console.warn('Tier-Chat-Nachricht konnte nicht gesendet werden',error);
+  }finally{
+    TIER_CHAT.sending=false;
+    renderTierChatMessages();
+  }
 }
 
 function financeAmount(value){ return Number(value||0).toLocaleString('de-DE',{style:'currency',currency:DB.financeSettings?.currency||'EUR'}); }
@@ -285,11 +367,16 @@ async function initSupabase(){
       throw profileResult.error;
     }
     AUTH.profile=profileResult.data;
+    TIER_CHAT={messages:[],loading:Number(AUTH.profile.access_tier)>=2,sending:false,error:'',connected:false};
     if(new URLSearchParams(location.search).get('flow')==='set-password') ROUTE={page:'set-password',id:null};
     document.getElementById('loginScreen').style.display='none';
     renderAccountBadge();
     const authListener=SUPABASE.client.auth.onAuthStateChange((event,session)=>{
-      if(event==='SIGNED_OUT'){ AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false; showLogin(); }
+      if(event==='SIGNED_OUT'){
+        AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false;
+        TIER_CHAT={messages:[],loading:false,sending:false,error:'',connected:false};
+        showLogin();
+      }
     });
     SUPABASE.authSubscription=authListener.data.subscription;
     const shared = await SUPABASE.client.from('zfc_app_state').select('state,updated_at').eq('id',1).maybeSingle();
@@ -337,11 +424,28 @@ async function initSupabase(){
         else { const item={...row.data,targetTier:row.target_tier}; const index=DB.escalations.findIndex(entry=>entry.id===row.id); if(index<0) DB.escalations.push(item); else DB.escalations[index]=item; }
         saveKey(KEYS.escalations,DB.escalations);
         if(ROUTE.page.startsWith('tier-office')||ROUTE.page==='escalations') render();
+      }).on('postgres_changes',{event:'INSERT',schema:'public',table:'zfc_tier_chat_messages'}, payload=>{
+        upsertTierChatMessage(payload.new);
       }).subscribe((status)=>{
-        if(status==='SUBSCRIBED') setSupabaseStatus('Verbunden · Live-Sync aktiv');
-        else if(status==='CHANNEL_ERROR') setSupabaseStatus('Fehler: Realtime nicht aktiv');
-        else if(status==='TIMED_OUT') setSupabaseStatus('Zeitüberschreitung beim Realtime-Start');
+        if(status==='SUBSCRIBED'){
+          TIER_CHAT.connected=true;
+          setSupabaseStatus('Verbunden · Live-Sync aktiv');
+          renderTierChatMessages();
+        }
+        else if(status==='CHANNEL_ERROR'){
+          TIER_CHAT.connected=false;
+          TIER_CHAT.error='Live-Verbindung fehlgeschlagen. Nachrichten senden ist weiterhin möglich.';
+          setSupabaseStatus('Fehler: Realtime nicht aktiv');
+          renderTierChatMessages();
+        }
+        else if(status==='TIMED_OUT'){
+          TIER_CHAT.connected=false;
+          TIER_CHAT.error='Live-Verbindung hat zu lange gebraucht. Bitte Verbindung prüfen.';
+          setSupabaseStatus('Zeitüberschreitung beim Realtime-Start');
+          renderTierChatMessages();
+        }
       });
+    if(Number(AUTH.profile.access_tier)>=2) await loadTierChatMessages();
     setSupabaseStatus('Verbunden · Synchronisierung läuft');
       if(AUTH.loginIntroRequested){
         AUTH.loginIntroRequested=false;
@@ -722,11 +826,17 @@ function pageTierOffice(tier){
         <div class="workspace-placeholder"><strong>Übergaben werden später aktiviert</strong><span>Die Weitergabe von Fällen und Aufgaben ist noch nicht verfügbar.</span></div>
         <button class="btn" type="button" disabled aria-disabled="true">Fall an Tier ${otherTier} übergeben</button>
       </section>
-      <section class="panel tier-office-card">
+      <section class="panel tier-office-card tier-office-chat">
         <div class="eyebrow">Kommunikation</div><h2>Nachrichten</h2>
-        <p>Nachrichten und Rückfragen zu den Vorgängen dieses Arbeitsbereichs.</p>
-        <div class="workspace-placeholder"><strong>Noch keine Nachrichtenfunktion</strong><span>Nachrichten werden in einem späteren Schritt ergänzt.</span></div>
-        <button class="btn" type="button" disabled aria-disabled="true">Nachricht verfassen</button>
+        <p>Gemeinsamer Live-Chat für die Abstimmung zwischen Tier 2 und Tier 3.</p>
+        <div class="tier-chat-status" id="tierChatStatus" role="status" aria-live="polite">${esc(TIER_CHAT.error|| (TIER_CHAT.connected?'Live-Chat aktiv':'Verbindung wird hergestellt …'))}</div>
+        <div class="tier-chat-messages" id="tierChatMessages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+        <form class="tier-chat-form" onsubmit="event.preventDefault();sendTierChatMessage()">
+          <label class="sr-only" for="tierChatInput">Nachricht an Tier 2 und Tier 3</label>
+          <textarea id="tierChatInput" maxlength="2000" rows="2" placeholder="Nachricht schreiben …" required></textarea>
+          <button class="btn primary" id="tierChatSend" type="submit" ${TIER_CHAT.sending?'disabled':''}>Senden</button>
+        </form>
+        <p class="tier-chat-error" id="tierChatError" role="alert">${esc(TIER_CHAT.error)}</p>
       </section>
       <section class="panel tier-office-card tier-office-escalations">
         <div class="eyebrow">Bestehender Ablauf</div><h2>Eskalierungen</h2>
@@ -829,6 +939,7 @@ function render(){
   else if(ROUTE.page==='esport-driverform') main.innerHTML = pageEsportDriverForm(ROUTE.id?driverById(ROUTE.id):null);
   else if(ROUTE.page==='esport-setup') main.innerHTML = pageEsportSetup();
   else main.innerHTML = pageDashboard();
+  if(ROUTE.page==='tier-office-t2'||ROUTE.page==='tier-office-t3') renderTierChatMessages();
   if(ROUTE.page==='caseform'&&CASE_OPENING_MODE!=='none') showCaseOpening(CASE_OPENING_MODE,ROUTE.id);
   if(ROUTE.page==='cases') renderCaseTable();
   if(ROUTE.page==='drivers') renderDriverTable();
