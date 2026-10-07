@@ -1,3 +1,4 @@
+
 /* ============================= DATA LAYER ============================= */
 // Supabase-Verbindung hier eintragen (Project Settings > API):
 // Nur den anon/public-Key verwenden, niemals den service_role-Key.
@@ -5,11 +6,12 @@ const SUPABASE_CONFIG = {
   url: 'https://ktvcwyrsayoggjiapnln.supabase.co', // Project URL, z. B. https://xxxx.supabase.co
   anonKey: 'sb_publishable_EEM214FLVj0CA3hkPq4BCg_1dFAZmvr' // anon/public key
 };
-const DB = { teams: [], drivers: [], cases: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
+const DB = { teams: [], drivers: [], cases: [], caseDocuments: [], caseDocumentEvents: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
 let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null, lastSyncError:null };
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
 let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
+const CASE_DOCUMENTS = { loading:new Set(), loaded:new Set(), errorByCase:new Map(), saving:false };
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -688,6 +690,7 @@ const PROCESS_CATALOG = [
     ['V2','Rollen und Rechte','Beantragung, Prüfung und Freigabe operativer Rollen und Zugriffsrechte.','Antrag, Zielrolle, Vier-Augen-Prüfung und dokumentierte Rechtevergabe.'],
     ['V3','Regeln und Prozesse ändern','Änderung eines Regelwerks oder verbindlichen Prozesses.','Änderungsvorschlag, Auswirkung, fachliche Prüfung, CEO-Freigabe und Versionsverlauf.'],
     ['V4','Team- und Fahrerwechsel','Bearbeitung eines Teamwechsels oder einer Fahrerzuordnung.','Antrag, Regelkonformität, Freigabe und nachvollziehbare Historie.'],
+    ['A2','Entscheidung veröffentlichen','Prüfung und Freigabe einer öffentlichen Entscheidungsfassung.','Vertraulichkeitsprüfung, bereinigte Fassung, Veröffentlichungsfreigabe und Nachweis.'],
     ['A1','Archivierung','Abschluss und sichere Ablage einer Akte.','Vollständigkeit, offene Pflichtaufgaben, Freigabestatus und Aufbewahrung.']
   ]},
   {group:'finance',name:'Finanzen',processes:[
@@ -698,7 +701,10 @@ const PROCESS_CATALOG = [
   {group:'esport',name:'CFC Esport',processes:[
     ['C1','Esport-Fahrerprofil','Anlage oder Änderung eines CFC-Esport-Fahrerprofils.','Fahrer, Team, Plattform, Rolle, Coach und Profilstatus.'],
     ['C2','Setup-Labor','Dokumentation einer Setup- oder Streckenanalyse.','Fahrer, Strecke, Fahrzeugkonfiguration, Testbedingungen und Analyse.'],
-    ['C3','Team-Review','Strukturiertes Leistungs- und Entwicklungsreview.','Team, Zeitraum, Ziele, Beobachtungen und vereinbarte Maßnahmen.']
+    ['C3','Team-Review','Strukturiertes Leistungs- und Entwicklungsreview.','Team, Zeitraum, Ziele, Beobachtungen und vereinbarte Maßnahmen.'],
+    ['E1','Esport-Aufnahme','Prüfung und Entscheidung einer Bewerbung für die Esport-Division.','Bewerbung, Voraussetzungen, Testplan, Leistungsbewertung und Aufnahmeentscheidung.'],
+    ['E2','Esport-Training','Planung und Nachbereitung eines strukturierten Trainings.','Zielsetzung, Trainingsplan, Anwesenheit, Beobachtungen und Aufgaben.'],
+    ['E3','Fahrerentwicklung','Bewertung und Begleitung der individuellen Fahrerentwicklung.','Kriterien, Datenauswertung, Gespräch, Ziele und Fortschrittsbericht.']
   ]}
 ].map(category=>({
   ...category,
@@ -1326,6 +1332,8 @@ function render(){
   else if(ROUTE.page==='tier-office-t3') main.innerHTML = pageTierOffice(3);
   else if(ROUTE.page==='dashboard') main.innerHTML = pageDashboard();
   else if(ROUTE.page==='caseform') main.innerHTML = pageCaseForm(ROUTE.id? DB.cases.find(c=>c.id===ROUTE.id): null);
+  else if(ROUTE.page==='document-create') main.innerHTML = pageDocumentCreate(ROUTE.id);
+  else if(ROUTE.page==='document-editor') main.innerHTML = pageDocumentEditor(ROUTE.id);
   else if(ROUTE.page==='warningform') main.innerHTML = pageWarningForm(ROUTE.id);
   else if(ROUTE.page==='cases') main.innerHTML = pageCaseList();
   else if(ROUTE.page==='drivers') main.innerHTML = pageDriverList();
@@ -1352,6 +1360,13 @@ function render(){
   else if(ROUTE.page==='esport-driverform') main.innerHTML = pageEsportDriverForm(ROUTE.id?driverById(ROUTE.id):null);
   else if(ROUTE.page==='esport-setup') main.innerHTML = pageEsportSetup();
   else main.innerHTML = pageDashboard();
+  if(ROUTE.page==='document-create'){
+    const selector=document.getElementById('documentTypeSelect');
+    if(selector) selector.addEventListener('change',()=>showDocumentTypeInfo(ROUTE.id));
+  }
+  if(ROUTE.page==='document-editor'){
+    document.querySelectorAll('[data-document-field],#docAddendum').forEach(input=>input.addEventListener('input',()=>scheduleDocumentAutosave(ROUTE.id)));
+  }
   if(ROUTE.page==='tier-office-t2'||ROUTE.page==='tier-office-t3') renderTierChatMessages();
   if(ROUTE.page==='caseform'&&CASE_OPENING_MODE!=='none') showCaseOpening(CASE_OPENING_MODE,ROUTE.id);
   if(ROUTE.page==='cases') renderCaseTable();
@@ -1702,6 +1717,7 @@ function pageCaseForm(existing){
     <div class="dossier-body">
 
       ${c.processCode?processWorkflowPanel(c):''}
+      ${!isNew?caseDocumentsPanel(c):''}
       <div class="sectiontitle">Grunddaten</div>
       <div class="grid cols-3">
         <div class="field"><label>Saison</label><select id="f_season">${selectOptions(['2025','2026','2027'], c.season)}</select></div>
@@ -1784,6 +1800,688 @@ function pageCaseForm(existing){
   `;
 }
 
+/* ============================= CASE DOCUMENTS ============================= */
+function documentCaseProcessCodes(c){
+  return [...new Set([...(Array.isArray(c?.activeProcessCodes)?c.activeProcessCodes:[]), ...(c?.processCode?[c.processCode]:[])])];
+}
+function documentRowsForCase(caseId){
+  return DB.caseDocuments.filter(row=>row.caseId===caseId).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+}
+function currentDocumentVersions(rows){
+  const latest=new Map();
+  rows.forEach(row=>{
+    const existing=latest.get(row.documentId);
+    if(!existing||Number(row.version)>Number(existing.version)) latest.set(row.documentId,row);
+  });
+  return [...latest.values()];
+}
+function documentIsComplete(row){
+  return ['Freigegeben','Finalisiert'].includes(row.status)&&Boolean(row.pdfPath)&&Array.isArray(row.requiredFor);
+}
+function completedDocumentsForCase(caseId){
+  const latestCompleted=new Map();
+  documentRowsForCase(caseId).filter(documentIsComplete).forEach(row=>{
+    const previous=latestCompleted.get(row.documentId);
+    if(!previous||Number(row.version)>Number(previous.version)) latestCompleted.set(row.documentId,row);
+  });
+  const signatures=new Set();
+  return [...latestCompleted.values()].filter(row=>{
+    const values=Object.keys(row.content||{}).sort().map(key=>String(row.content[key]||'').trim()).join('\n');
+    const signature=`${row.documentType}:${values}`;
+    if(signatures.has(signature)) return false;
+    signatures.add(signature);
+    return true;
+  });
+}
+function documentRequirementsForCase(c){
+  if(c.documentClosureRoute==='early'){
+    return EARLY_CLOSURE_REQUIREMENTS.map((title,index)=>({processCode:'EARLY',index:index+1,title,key:`EARLY:${index+1}`}));
+  }
+  return documentCaseProcessCodes(c).flatMap(processCode=>(DOCUMENT_PROCESS_MATRIX[processCode]||[]).map((title,index)=>({
+    processCode,index:index+1,title,key:`${processCode}:${index+1}`
+  })));
+}
+function requirementsMetForCase(c){
+  const complete=completedDocumentsForCase(c.id);
+  return documentRequirementsForCase(c).map(requirement=>({
+    ...requirement,
+    document:complete.find(row=>(row.requiredFor||[]).some(ref=>ref.processCode===requirement.processCode&&Number(ref.index)===requirement.index))
+  }));
+}
+function caseDocumentClosureState(c){
+  const complete=completedDocumentsForCase(c.id);
+  const requirements=requirementsMetForCase(c);
+  const missing=requirements.filter(item=>!item.document);
+  return {count:complete.length,missing,ready:complete.length>=5&&missing.length===0};
+}
+function caseDocumentsPanel(c){
+  if(!CASE_DOCUMENTS.loaded.has(c.id)&&!CASE_DOCUMENTS.loading.has(c.id)&&!CASE_DOCUMENTS.errorByCase.has(c.id)) loadCaseDocuments(c.id);
+  const state=caseDocumentClosureState(c);
+  const requirements=requirementsMetForCase(c);
+  const rows=documentRowsForCase(c.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
+  const processOptions=Object.keys(DOCUMENT_PROCESS_MATRIX).map(code=>`<option value="${esc(code)}" ${documentCaseProcessCodes(c).includes(code)?'disabled':''}>${esc(code)} · ${esc(findProcess(code)?.title||code)}</option>`).join('');
+  return `<section class="panel case-documents">
+    <div class="case-documents-heading"><div><div class="eyebrow">Aktenbestand · PDF-Dokumente</div><h2>Dokumente <b>&amp; Aufgaben</b></h2></div><button class="btn primary" onclick="go('document-create','${esc(c.id)}')">+ Neuer Vorgang anlegen</button></div>
+    <p class="case-document-dialog-title">Dokumentvorgang für Akte <strong>${esc(c.stw)}</strong> anlegen.</p>
+    ${CASE_DOCUMENTS.loading.has(c.id)?'<div class="empty">Dokumentbestand wird geladen …</div>':''}
+    ${CASE_DOCUMENTS.errorByCase.has(c.id)?`<div class="case-document-error" role="alert">${esc(CASE_DOCUMENTS.errorByCase.get(c.id))}<button class="btn small" onclick="loadCaseDocuments('${esc(c.id)}',true)">Erneut versuchen</button></div>`:''}
+    <div class="case-document-counts"><div><strong>Abgeschlossene Dokumente: ${state.count} von mindestens 5</strong></div><div><strong>Pflichtunterlagen: ${requirements.filter(item=>item.document).length} von ${requirements.length} erfüllt</strong></div></div>
+    <div class="case-document-process-link"><label for="documentProcessLink">Weiteren Prozess in derselben Akte verknüpfen</label><select id="documentProcessLink" onchange="linkDocumentProcess('${esc(c.id)}',this.value)"><option value="">Prozess auswählen …</option>${processOptions}</select></div>
+    <div class="case-document-process-link"><label for="documentClosureRoute">Abschlussweg</label><select id="documentClosureRoute" onchange="document.getElementById('earlyClosureReason').hidden=this.value!=='early'"><option value="regular" ${c.documentClosureRoute==='early'?'':'selected'}>Regulärer Prozessverlauf</option><option value="early" ${c.documentClosureRoute==='early'?'selected':''}>Frühe Einstellung, Ablehnung oder Zusammenführung</option></select><input id="earlyClosureReason" ${c.documentClosureRoute==='early'?'':'hidden'} value="${esc(c.documentClosureReason||'')}" placeholder="Begründung des frühen Abschlusswegs"><button class="btn small" onclick="saveDocumentClosureRoute('${esc(c.id)}')">Abschlussweg speichern</button></div>
+    ${requirements.length?`<details class="case-document-requirements" open><summary>Pflichtunterlagen je aktivem Prozess</summary><div class="table-scroll"><table><thead><tr><th>Prozess</th><th>Pflichtunterlage</th><th>Status</th><th></th></tr></thead><tbody>${requirements.map(item=>`<tr><td>${esc(item.processCode)}</td><td>${esc(item.title)}</td><td>${item.document?`<span class="tag decided">${esc(item.document.status)}</span>`:'<span class="tag open">Offene Aufgabe</span>'}</td><td>${item.document?`<button class="btn small" onclick="go('document-editor','${esc(item.document.id)}')">Öffnen</button>`:`<button class="btn small gold" onclick="createRequirementDocument('${esc(c.id)}','${esc(item.processCode)}',${item.index})">Anlegen</button>`}</td></tr>`).join('')}</tbody></table></div></details>`:'<div class="note">Für diese Akte ist kein Prozess mit einer Pflichtunterlagen-Checkliste hinterlegt. Verknüpfe bei Bedarf einen Prozess.</div>'}
+    ${caseDocumentSuggestions(c)}
+    <div class="case-document-table-heading"><h3>Dokumentenübersicht</h3><div class="actions"><button class="btn small" onclick="downloadCaseBundle('${esc(c.id)}')">Akten-PDF</button><button class="btn small" onclick="downloadCaseZip('${esc(c.id)}')">Aktenpaket ZIP</button></div></div>
+    ${rows.length?`<div class="table-scroll"><table><thead><tr><th>Dokumentnummer</th><th>Dokumentart / Titel</th><th>Status</th><th>Version</th><th>Ersteller</th><th>Datum</th><th>Freigabe</th><th>PDF</th><th>Aktionen</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.documentNumber||row.documentId.slice(0,8))}</td><td>${esc(documentTypeTitle(row.documentType))}<br><small>${esc(row.title||'—')}</small></td><td><span class="tag ${row.status==='Freigegeben'||row.status==='Finalisiert'?'decided':row.status==='Zur Ergänzung zurückgegeben'?'open':'invest'}">${esc(row.status)}</span></td><td>v${Number(row.version)}</td><td>${esc(row.createdByName||'—')}</td><td>${fmtDateTime(row.updatedAt)}</td><td>${esc(row.approvedByName||row.reviewedByName||'—')}</td><td>${row.pdfPath?'<span class="tag decided">Verfügbar</span>':'<span class="tag open">Fehlt</span>'}</td><td class="doc-row-actions"><button class="btn small" onclick="go('document-editor','${esc(row.id)}')">Öffnen</button><button class="btn small gold" onclick="previewCaseDocument('${esc(row.id)}')">Vorschau</button><button class="btn small" onclick="downloadCaseDocument('${esc(row.id)}')">PDF laden</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Noch keine Dokumentvorgänge in dieser Akte.</div>'}
+    <div class="case-document-close-state ${state.ready?'is-ready':'is-blocked'}"><strong>${state.ready?'Abschluss möglich':'Abschluss gesperrt'}</strong><span>${state.ready?'Mindestens fünf abgeschlossene PDFs und alle Pflichtunterlagen liegen vor.':`${Math.max(0,5-state.count)} weitere abgeschlossene PDF-Dokumente und ${state.missing.length} Pflichtunterlage(n) fehlen.`}</span></div>
+  </section>`;
+}
+function documentTypeTitle(key){
+  return ALL_DOCUMENT_TYPES.find(item=>item.key===key)?.title||key||'Dokument';
+}
+function documentTypeByKey(key){
+  return ALL_DOCUMENT_TYPES.find(item=>item.key===key);
+}
+function documentOptionList(c,search=''){
+  const processes=documentCaseProcessCodes(c);
+  const requirements=requirementsMetForCase(c).filter(item=>!item.document);
+  const requiredKeys=new Set(requirements.map(item=>`${item.processCode}:${item.index}`));
+  const allowed=ALL_DOCUMENT_TYPES.filter(type=>
+    (!type.processCode||processes.includes(type.processCode))&&
+    (!search||`${type.title} ${type.description} ${type.group} ${type.processCode||''}`.toLowerCase().includes(search.toLowerCase()))
+  );
+  return DOCUMENT_GROUPS.map(group=>{
+    const items=allowed.filter(item=>item.group===group);
+    if(!items.length) return '';
+    return `<optgroup label="${esc(group)}">${items.map(item=>{
+      const isMissing=item.processCode&&requiredKeys.has(`${item.processCode}:${item.requirementIndex}`);
+      const marker=isMissing?' · Pflichtaufgabe':'';
+      return `<option value="${esc(item.key)}">${esc(item.title+marker)}</option>`;
+    }).join('')}</optgroup>`;
+  }).join('');
+}
+function pageDocumentCreate(caseId){
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c) return '<div class="empty"><b>Akte nicht gefunden</b></div>';
+  if(!CASE_DOCUMENTS.loaded.has(caseId)&&!CASE_DOCUMENTS.loading.has(caseId)) loadCaseDocuments(caseId);
+  return `<div class="pagehead"><div><div class="eyebrow">${esc(c.stw)} · Dokumentvorgang</div><h1>Dokumentvorgang <b>anlegen</b></h1></div><div class="actions"><button class="btn" onclick="go('caseform','${esc(c.id)}')">← Zur Akte</button></div></div>
+  <section class="panel document-create-panel"><h2>Dokumentvorgang für Akte <b>${esc(c.stw)}</b> anlegen</h2><div class="field"><label for="documentTypeSearch">Vorgangs- / Dokumentart suchen</label><input id="documentTypeSearch" type="search" placeholder="Dokumentart, Prozess oder Zweck suchen …" oninput="filterDocumentOptions('${esc(c.id)}')"></div><div class="field"><label for="documentTypeSelect">Vorgangs- / Dokumentart</label><select id="documentTypeSelect" size="9">${documentOptionList(c)}</select></div><div id="documentTypeInfo" class="document-type-info">Wähle eine Dokumentart, um Zweck, Pflichtfelder und Freigabestufe einzusehen.</div><div id="documentRequirementAssignments" class="document-requirement-assignments"></div><div class="actions"><button class="btn primary" onclick="startCaseDocument('${esc(c.id)}')">Dokumentvorgang beginnen</button><button class="btn" onclick="go('caseform','${esc(c.id)}')">Abbrechen</button></div></section>`;
+}
+function filterDocumentOptions(caseId){
+  const c=DB.cases.find(item=>item.id===caseId), select=document.getElementById('documentTypeSelect'), search=document.getElementById('documentTypeSearch')?.value||'';
+  if(!c||!select) return;
+  select.innerHTML=documentOptionList(c,search);
+  showDocumentTypeInfo(caseId);
+}
+function showDocumentTypeInfo(caseId){
+  const type=documentTypeByKey(document.getElementById('documentTypeSelect')?.value), info=document.getElementById('documentTypeInfo');
+  const assignments=document.getElementById('documentRequirementAssignments');
+  if(!info) return;
+  if(!type){ info.textContent='Wähle eine Dokumentart, um Zweck, Pflichtfelder und Freigabestufe einzusehen.'; if(assignments) assignments.innerHTML=''; return; }
+  const caseItem=DB.cases.find(item=>item.id===caseId);
+  const requiredTier=workflowApprovalTier(type.processCode||caseItem?.processCode||'35');
+  const ceoRequired=processNeedsCeoApproval(type.processCode||caseItem?.processCode);
+  const approvals=type.requiresApproval?`Unabhängige Freigabe durch Tier ${requiredTier}${ceoRequired?' und CEO':''}.`:'Keine unabhängige Freigabe aus der Dokumentart abgeleitet; bei Entscheidungswirkung gilt die Prozessfreigabe.';
+  info.innerHTML=`<p><strong>Wofür wird dieses Dokument benötigt?</strong><br>${esc(type.description)}</p><p><strong>Welche Angaben sind erforderlich?</strong><br>${esc(type.fields.join(' · '))}</p><p><strong>Wer darf es erstellen?</strong><br>Bearbeitungsberechtigte der Akte nach Tier-Zuständigkeit; die Erstellung verleiht keine Entscheidungsbefugnis.</p><p><strong>Welche Freigabe ist erforderlich?</strong><br>${esc(approvals)}</p>`;
+  if(assignments){
+    const matches=requirementsMetForCase(caseItem).filter(item=>!item.document);
+    assignments.innerHTML=matches.length?`<details><summary>Pflichtunterlagen ausdrücklich zuordnen</summary><fieldset><legend>Nur zuordnen, wenn dieses Dokument die Unterlage inhaltlich vollständig abdeckt</legend>${matches.map(item=>`<label class="checkline"><input type="checkbox" name="documentRequirement" value="${esc(item.key)}" ${type.processCode===item.processCode&&type.requirementIndex===item.index||item.title===type.title?'checked':''}> ${esc(item.processCode)} · ${esc(item.title)}</label>`).join('')}</fieldset></details>`:'';
+  }
+}
+async function loadCaseDocuments(caseId,force=false){
+  if(!SUPABASE.client||CASE_DOCUMENTS.loading.has(caseId)||CASE_DOCUMENTS.loaded.has(caseId)&&!force) return;
+  CASE_DOCUMENTS.loading.add(caseId);
+  CASE_DOCUMENTS.errorByCase.delete(caseId);
+  try{
+    const result=await SUPABASE.client.from('zfc_case_documents').select('*').eq('case_id',caseId).order('created_at',{ascending:true});
+    if(result.error) throw result.error;
+    DB.caseDocuments=DB.caseDocuments.filter(row=>row.caseId!==caseId).concat((result.data||[]).map(documentFromRow));
+    const rowIds=(result.data||[]).map(row=>row.id);
+    DB.caseDocumentEvents=DB.caseDocumentEvents.filter(event=>!rowIds.includes(event.documentRowId));
+    if(rowIds.length){
+      const eventResult=await SUPABASE.client.from('zfc_case_document_events').select('*').in('document_row_id',rowIds).order('created_at',{ascending:false});
+      if(eventResult.error) throw eventResult.error;
+      DB.caseDocumentEvents.push(...eventResult.data.map(row=>({
+        id:row.id,documentRowId:row.document_row_id,eventType:row.event_type,actorName:row.actor_name,
+        actorTier:Number(row.actor_tier),details:row.details,createdAt:row.created_at
+      })));
+    }
+    CASE_DOCUMENTS.loaded.add(caseId);
+  }catch(error){
+    CASE_DOCUMENTS.errorByCase.set(caseId,`Dokumentbestand konnte nicht sicher geladen werden: ${error.message||error}`);
+    console.error('Case documents load failed',error);
+  }finally{
+    CASE_DOCUMENTS.loading.delete(caseId);
+    const openDocument=ROUTE.page==='document-editor'?DB.caseDocuments.find(row=>row.id===ROUTE.id):null;
+    if(['caseform','document-create'].includes(ROUTE.page)&&ROUTE.id===caseId||openDocument?.caseId===caseId) render();
+  }
+}
+function documentFromRow(row){
+  return {
+    id:row.id,documentId:row.document_id,version:Number(row.version),caseId:row.case_id,processCode:row.process_code||'',
+    documentType:row.document_type,title:row.title||'',status:row.status,content:row.content||{},
+    recordSnapshot:row.record_snapshot||{},requiredFor:Array.isArray(row.required_for)?row.required_for:[],
+    requiresApproval:Boolean(row.requires_approval),requiredTier:Number(row.required_tier||2),
+    requiresCeo:Boolean(row.requires_ceo),createdBy:row.created_by,createdByName:row.created_by_name||'',
+    createdByTier:Number(row.created_by_tier||0),reviewedBy:row.reviewed_by||'',reviewedByName:row.reviewed_by_name||'',
+    approvedBy:row.approved_by||'',approvedByName:row.approved_by_name||'',reviewNote:row.review_note||'',
+    pdfPath:row.pdf_path||'',pdfGeneratedAt:row.pdf_generated_at||'',revision:Number(row.revision||0),
+    documentNumber:row.document_number||'',createdAt:row.created_at,updatedAt:row.updated_at,
+    previousDocumentId:row.previous_document_id||''
+  };
+}
+function documentToRow(doc){
+  return {
+    id:doc.id,document_id:doc.documentId,version:doc.version,case_id:doc.caseId,process_code:doc.processCode||null,
+    document_type:doc.documentType,title:doc.title||'',status:doc.status,content:doc.content||{},
+    record_snapshot:doc.recordSnapshot||{},required_for:doc.requiredFor||[],requires_approval:Boolean(doc.requiresApproval),
+    required_tier:doc.requiredTier,requires_ceo:Boolean(doc.requiresCeo),created_by:doc.createdBy,
+    created_by_name:doc.createdByName,created_by_tier:doc.createdByTier,reviewed_by:doc.reviewedBy||null,
+    reviewed_by_name:doc.reviewedByName||null,approved_by:doc.approvedBy||null,approved_by_name:doc.approvedByName||null,
+    review_note:doc.reviewNote||'',pdf_path:doc.pdfPath||null,pdf_generated_at:doc.pdfGeneratedAt||null,
+    revision:doc.revision,document_number:doc.documentNumber||'',previous_document_id:doc.previousDocumentId||null
+  };
+}
+function documentSnapshot(c){
+  return {
+    caseNumber:c.stw||'',processCode:c.processCode||'',processTitle:c.processTitle||'',
+    league:c.league||'CFC Esport Division',division:driverById(c.driverInvolved)?.division||'',
+    title:c.category||c.event||'',participants:[driverName(driverById(c.driverInvolved)),driverName(driverById(c.driverAffected))].filter(name=>name&&name!=='—'),
+    author:AUTH.profile?.display_name||AUTH.profile?.email||'',caseOwner:c.processWorkflow?.createdByName||'',
+    event:c.event||'',session:c.sessionType||'',eventTime:c.incidentLap||'',ruleVersion:c.ruleVersion||'Unbekannt',
+    processVersion:c.processVersion||'Unbekannt',regulation:c.regulationBreach||'',description:c.description||''
+  };
+}
+function documentCanCreate(c,processCode=''){
+  const actor=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const workflow=c.processWorkflow||{};
+  if(currentTier()===0) return false;
+  if(processCode&&processCode!==c.processCode){
+    return currentTier()===1?canStartProcess(processCode):currentTier()>=workflowApprovalTier(processCode);
+  }
+  if(c.processCode&&workflow.ownerTier&&Number(workflow.ownerTier)!==currentTier()&&currentTier()<3) return false;
+  if(c.processCode&&workflow.createdById===actor&&workflow.approvalStatus!=='Noch nicht vorgelegt'&&workflow.approvalStatus!=='Zur Ergänzung zurückgegeben') return false;
+  return true;
+}
+async function startCaseDocument(caseId){
+  const c=DB.cases.find(item=>item.id===caseId), type=documentTypeByKey(document.getElementById('documentTypeSelect')?.value);
+  if(!c||!type){ showAccessNotice('Bitte Akte und eine gültige Dokumentart auswählen.'); return; }
+  if(!SUPABASE.client){ showAccessNotice('Dokumente können ohne sichere Supabase-Verbindung nicht gespeichert werden.'); return; }
+  if(!documentCanCreate(c,type.processCode||c.processCode||'')){ showAccessNotice('Deine Tier-Stufe ist für die aktuelle Bearbeitung dieser Akte nicht zuständig.'); return; }
+  const selected=[...document.querySelectorAll('input[name="documentRequirement"]:checked')].map(input=>input.value);
+  const requiredFor=selected.map(key=>{
+    const [processCode,index]=key.split(':');
+    return {processCode,index:Number(index)};
+  });
+  if(type.processCode&&type.requirementIndex&&!requiredFor.length) requiredFor.push({processCode:type.processCode,index:type.requirementIndex});
+  const matching=requirementsMetForCase(c).filter(item=>requiredFor.some(ref=>ref.processCode===item.processCode&&ref.index===item.index));
+  if(matching.some(item=>item.document)){ showAccessNotice('Diese Pflichtunterlage ist bereits durch ein aktuelles, abgeschlossenes Dokument erfüllt. Erstelle bei einer notwendigen Änderung eine neue Version.'); return; }
+  const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const latest=currentDocumentVersions(documentRowsForCase(caseId)).find(row=>row.documentType===type.key);
+  if(latest&&!documentIsComplete(latest)){ go('document-editor',latest.id); return; }
+  const doc={
+    id:uid(),documentId:latest?.documentId||uid(),version:latest?Number(latest.version)+1:1,
+    caseId,processCode:type.processCode||c.processCode||'',documentType:type.key,title:type.title,
+    status:'Entwurf',content:{},recordSnapshot:documentSnapshot(c),requiredFor,
+    requiresApproval:Boolean(type.requiresApproval),    requiredTier:Number(workflowApprovalTier(type.processCode||c.processCode||'35')),
+    requiresCeo:Boolean(processNeedsCeoApproval(type.processCode||c.processCode)&&type.requiresApproval),
+    createdBy:actorId,createdByName:AUTH.profile?.display_name||AUTH.profile?.email||'',
+    createdByTier:currentTier(),reviewedBy:'',reviewedByName:'',approvedBy:'',approvedByName:'',
+    reviewNote:'',pdfPath:'',pdfGeneratedAt:'',revision:0,documentNumber:`${c.stw}-D-${String(DB.caseDocuments.filter(row=>row.caseId===caseId).length+1).padStart(3,'0')}`,
+    createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),previousDocumentId:latest?.id||''
+  };
+  try{
+    const result=await SUPABASE.client.from('zfc_case_documents').insert(documentToRow(doc)).select('*').single();
+    if(result.error) throw result.error;
+    Object.assign(doc,documentFromRow(result.data));
+    DB.caseDocuments.push(doc);
+    go('document-editor',doc.id);
+  }catch(error){
+    showAccessNotice(`Dokumententwurf konnte nicht gespeichert werden: ${error.message||error}`);
+    console.error('Case document creation failed',error);
+  }
+}
+async function createRequirementDocument(caseId,processCode,index){
+  if(processCode==='EARLY'){
+    const title=EARLY_CLOSURE_REQUIREMENTS[index-1], type=ALL_DOCUMENT_TYPES.find(item=>item.title===title);
+    if(type) await startCaseDocumentWithType(caseId,type);
+    else showAccessNotice(`Frühabschluss-Unterlage ${index} fehlt im Dokumentkatalog.`);
+    return;
+  }
+  const type=ALL_DOCUMENT_TYPES.find(item=>item.processCode===processCode&&item.requirementIndex===index);
+  if(!type){ showAccessNotice(`Pflichtdokument für ${processCode} wurde nicht gefunden.`); return; }
+  await startCaseDocumentWithType(caseId,type);
+}
+async function startCaseDocumentWithType(caseId,type){
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c||!SUPABASE.client) return;
+  if(!documentCanCreate(c,type.processCode||c.processCode||'')){ showAccessNotice('Deine Tier-Stufe ist für die aktuelle Bearbeitung dieser Akte nicht zuständig.'); return; }
+  const requirement=requirementsMetForCase(c).find(item=>item.title===type.title&&(item.processCode==='EARLY'||item.processCode===type.processCode&&item.index===type.requirementIndex));
+  const fulfilled=requirement?.document;
+  if(fulfilled){ showAccessNotice('Diese Pflichtunterlage ist bereits erfüllt. Verwende „Neue Version erstellen“, wenn eine Korrektur erforderlich ist.'); return; }
+  const latest=currentDocumentVersions(documentRowsForCase(caseId)).find(row=>row.documentType===type.key);
+  if(latest&&!documentIsComplete(latest)){ go('document-editor',latest.id); return; }
+  const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const doc={
+    id:uid(),documentId:latest?.documentId||uid(),version:latest?Number(latest.version)+1:1,
+    caseId,processCode:type.processCode||c.processCode||'',documentType:type.key,title:type.title,status:'Entwurf',
+    content:{},recordSnapshot:documentSnapshot(c),requiredFor:[requirement?{processCode:requirement.processCode,index:requirement.index}:null].filter(Boolean),
+    requiresApproval:Boolean(type.requiresApproval),requiredTier:Number(workflowApprovalTier(type.processCode||c.processCode||'35')),
+    requiresCeo:Boolean(processNeedsCeoApproval(type.processCode||c.processCode)&&type.requiresApproval),createdBy:actorId,
+    createdByName:AUTH.profile?.display_name||AUTH.profile?.email||'',createdByTier:currentTier(),
+    reviewedBy:'',reviewedByName:'',approvedBy:'',approvedByName:'',reviewNote:'',pdfPath:'',pdfGeneratedAt:'',
+    revision:0,documentNumber:`${c.stw}-D-${String(DB.caseDocuments.filter(row=>row.caseId===caseId).length+1).padStart(3,'0')}`,
+    createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),previousDocumentId:latest?.id||''
+  };
+  try{
+    const result=await SUPABASE.client.from('zfc_case_documents').insert(documentToRow(doc)).select('*').single();
+    if(result.error) throw result.error;
+    Object.assign(doc,documentFromRow(result.data)); DB.caseDocuments.push(doc);
+    go('document-editor',doc.id);
+  }catch(error){
+    showAccessNotice(`Pflichtdokument konnte nicht gespeichert werden: ${error.message||error}`);
+    console.error('Required case document creation failed',error);
+  }
+}
+function documentInputKey(label,index){
+  return `${String(index+1).padStart(2,'0')}_${label.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')}`;
+}
+function documentFieldValue(doc,index,label){
+  return doc.content[documentInputKey(label,index)]||'';
+}
+function pageDocumentEditor(rowId){
+  const doc=DB.caseDocuments.find(row=>row.id===rowId);
+  if(!doc){
+    if(!CASE_DOCUMENTS.loading.has(`doc:${rowId}`)) loadDocumentById(rowId);
+    return `<div class="pagehead"><div><div class="eyebrow">Dokumentvorgang</div><h1>Dokument wird geladen</h1></div></div><div class="panel">Berechtigter Dokumentzugriff wird geprüft …</div>`;
+  }
+  const c=DB.cases.find(item=>item.id===doc.caseId), type=documentTypeByKey(doc.documentType);
+  if(!c||!type) return '<div class="empty"><b>Akte oder Dokumentart nicht verfügbar.</b></div>';
+  const canEdit=['Entwurf','Zur Ergänzung zurückgegeben'].includes(doc.status)&&doc.createdBy===(AUTH.profile?.id||AUTH.session?.user?.id)&&documentCanCreate(c,doc.processCode||c.processCode||'');
+  const canReview=doc.status==='Zur Prüfung'&&documentCanApprove(doc,c);
+  const snapshot=doc.recordSnapshot||{};
+  const events=DB.caseDocumentEvents.filter(event=>event.documentRowId===doc.id);
+  const fields=type.fields.map((label,index)=>{
+    const value=documentFieldValue(doc,index,label);
+    return `<div class="field"><label for="docField${index}">${esc(label)}${canEdit?' *':''}</label><textarea id="docField${index}" data-document-field="${esc(documentInputKey(label,index))}" ${canEdit?'':'readonly'}>${esc(value)}</textarea></div>`;
+  }).join('');
+  return `<div class="pagehead"><div><div class="eyebrow">${esc(c.stw)} · ${esc(doc.documentNumber)}</div><h1>${esc(type.title)}</h1></div><div class="actions"><button class="btn" onclick="go('caseform','${esc(c.id)}')">← Zur Akte</button>${doc.pdfPath?`<button class="btn gold" onclick="downloadCaseDocument('${esc(doc.id)}')">PDF herunterladen</button>`:''}</div></div>
+  <section class="panel document-editor">
+    <div class="document-editor-meta"><span class="tag ${doc.status==='Freigegeben'||doc.status==='Finalisiert'?'decided':'invest'}">${esc(doc.status)}</span><span>Version ${doc.version}</span><span>${esc(doc.processCode||c.processCode||'Kein Prozess')}</span><span>${esc(doc.documentNumber)}</span><span>${doc.pdfPath?'PDF gespeichert':'PDF noch nicht erzeugt'}</span></div>
+    <div class="document-snapshot"><h2>Übernommene Aktenangaben <small>schreibgeschützt · Stand bei Anlegung</small></h2><div class="grid cols-3">${[['Aktennummer',snapshot.caseNumber],['Prozesskennung',snapshot.processCode],['Liga',snapshot.league],['Abteilung',snapshot.division],['Titel',snapshot.title],['Beteiligte',(snapshot.participants||[]).join(', ')],['Bearbeiter',snapshot.author],['Ereignis',snapshot.event],['Ereigniszeitpunkt',snapshot.eventTime],['Regelversion',snapshot.ruleVersion],['Prozessversion',snapshot.processVersion]].map(([label,value])=>`<div><span>${esc(label)}</span><strong>${esc(value||'—')}</strong></div>`).join('')}</div><p>Freigegebene historische Angaben werden nicht mit aktuellen Aktenwerten überschrieben.</p></div>
+    <div class="document-form-head"><h2>${esc(doc.title)}</h2><span>Pflichtfelder sind mit * markiert</span></div>
+    <div class="document-form-fields">${fields}</div>
+    ${type.template==='conversation'?`<div class="field"><label for="docAddendum">Nachtrag / Berichtigung (separater Eintrag)</label><textarea id="docAddendum" placeholder="Später dokumentierte Berichtigung oder Ergänzung">${esc(doc.content.addendum||'')}</textarea></div>`:''}
+    <div class="document-signoff"><strong>Erstellt von:</strong> ${esc(doc.createdByName||'—')} · Tier ${doc.createdByTier} · ${fmtDateTime(doc.createdAt)}${doc.reviewedByName?`<br><strong>Geprüft von:</strong> ${esc(doc.reviewedByName)}`:''}${doc.approvedByName?`<br><strong>Freigegeben von:</strong> ${esc(doc.approvedByName)}`:''}${doc.reviewNote?`<br><strong>Prüfvermerk:</strong> ${esc(doc.reviewNote)}`:''}</div>
+    <details class="document-audit"><summary>Prüf- und Freigabeereignisse</summary>${events.length?`<ol>${events.map(event=>`<li><time>${fmtDateTime(event.createdAt)}</time><strong>${esc(event.eventType)}</strong><span>${esc(event.actorName)} · Tier ${event.actorTier}</span><p>${esc(event.details)}</p></li>`).join('')}</ol>`:'<div class="empty">Noch keine Ereignisse geladen.</div>'}</details>
+    <div id="documentEditorError" class="case-document-error" role="alert"></div>
+    <div class="actions document-editor-actions">
+      ${canEdit?`<button class="btn" onclick="saveCaseDocument('${esc(doc.id)}',false)">Entwurf speichern</button><button class="btn gold" onclick="saveCaseDocument('${esc(doc.id)}',true)">Speichern &amp; PDF aktualisieren</button>${doc.status==='Zur Ergänzung zurückgegeben'?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Erneut zur Prüfung senden</button>`:doc.requiresApproval?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Zur Prüfung senden</button>`:`<button class="btn primary" onclick="finalizeCaseDocument('${esc(doc.id)}')">Finalisieren &amp; PDF speichern</button>`}`:''}
+      ${canReview?`<button class="btn primary" onclick="approveCaseDocument('${esc(doc.id)}')">${doc.requiresCeo?'CEO-Freigabe erteilen':'Freigeben'}</button><button class="btn" onclick="returnCaseDocument('${esc(doc.id)}')">Zur Ergänzung zurückgeben</button>`:''}
+      ${doc.pdfPath?`<button class="btn" onclick="previewCaseDocument('${esc(doc.id)}')">Vorschau</button>`:''}
+      ${['Freigegeben','Finalisiert','Ersetzt'].includes(doc.status)?`<button class="btn gold" onclick="createNewDocumentVersion('${esc(doc.id)}')">Neue Version erstellen</button>`:''}
+    </div>
+  </section>`;
+}
+async function loadDocumentById(rowId){
+  CASE_DOCUMENTS.loading.add(`doc:${rowId}`);
+  try{
+    const result=await SUPABASE.client.from('zfc_case_documents').select('*').eq('id',rowId).single();
+    if(result.error) throw result.error;
+    const doc=documentFromRow(result.data);
+    DB.caseDocuments=DB.caseDocuments.filter(row=>row.id!==rowId).concat(doc);
+    CASE_DOCUMENTS.loading.delete(`doc:${rowId}`);
+    if(ROUTE.page==='document-editor'&&ROUTE.id===rowId) render();
+    await loadCaseDocuments(doc.caseId,true);
+  }catch(error){
+    CASE_DOCUMENTS.loading.delete(`doc:${rowId}`);
+    showAccessNotice(`Dokument kann nicht geöffnet werden: ${error.message||error}`);
+    console.error('Case document load failed',error);
+    go('dashboard');
+  }
+}
+function readDocumentForm(doc){
+  const type=documentTypeByKey(doc.documentType), content={};
+  type.fields.forEach((label,index)=>{
+    content[documentInputKey(label,index)]=document.getElementById(`docField${index}`)?.value.trim()||'';
+  });
+  const addendum=document.getElementById('docAddendum');
+  if(addendum) content.addendum=addendum.value.trim();
+  return content;
+}
+function documentMissingFields(type,content){
+  return type.fields.filter((label,index)=>!String(content[documentInputKey(label,index)]||'').trim());
+}
+async function saveCaseDocument(rowId,generatePdf){
+  const doc=DB.caseDocuments.find(row=>row.id===rowId), errorNode=document.getElementById('documentEditorError');
+  if(!doc||CASE_DOCUMENTS.saving) return false;
+  const content=readDocumentForm(doc), type=documentTypeByKey(doc.documentType);
+  const missing=generatePdf?documentMissingFields(type,content):[];
+  if(missing.length){ if(errorNode) errorNode.textContent=`Bitte diese Pflichtfelder ausfüllen: ${missing.join(', ')}`; return false; }
+  const oldRevision=doc.revision;
+  const next={...doc,content,pdfPath:'',pdfGeneratedAt:'',updatedAt:new Date().toISOString(),revision:oldRevision+1};
+  CASE_DOCUMENTS.saving=true;
+  if(errorNode) errorNode.textContent='';
+  try{
+    const update=SUPABASE.client.from('zfc_case_documents').update({...documentToRow(next),revision:oldRevision+1}).eq('id',rowId).eq('revision',oldRevision).select('*').single();
+    if(generatePdf){
+      const saved=await update;
+      if(saved.error) throw saved.error;
+      Object.assign(doc,documentFromRow(saved.data));
+      const path=await generateAndStoreDocumentPdf(doc,doc.status);
+      const attach=await SUPABASE.client.from('zfc_case_documents').update({pdf_path:path,pdf_generated_at:new Date().toISOString(),revision:doc.revision+1}).eq('id',doc.id).eq('revision',doc.revision).select('*').single();
+      if(attach.error) throw attach.error;
+      Object.assign(doc,documentFromRow(attach.data));
+    }else{
+      const saved=await update;
+      if(saved.error) throw saved.error;
+      Object.assign(doc,documentFromRow(saved.data));
+    }
+    render();
+    return true;
+  }catch(error){
+    const message=error.code==='PGRST116'||/revision|0 rows/i.test(error.message||'')?'Der Entwurf wurde gleichzeitig an anderer Stelle geändert. Deine Eingaben sind noch im Formular; lade die neueste Version und übertrage deine Änderungen erneut.':`Speichern fehlgeschlagen: ${error.message||error}`;
+    if(errorNode) errorNode.textContent=message;
+    else showAccessNotice(message);
+    console.error('Case document save failed',error);
+    return false;
+  }finally{
+    CASE_DOCUMENTS.saving=false;
+  }
+}
+function scheduleDocumentAutosave(rowId){
+  clearTimeout(scheduleDocumentAutosave.timer);
+  scheduleDocumentAutosave.timer=setTimeout(()=>saveCaseDocument(rowId,false),900);
+}
+async function submitCaseDocument(rowId){
+  const doc=DB.caseDocuments.find(row=>row.id===rowId), c=DB.cases.find(item=>item.id===doc?.caseId);
+  if(!doc||!c) return;
+  if(!doc.requiresApproval){ showAccessNotice('Für dieses Dokument ist keine unabhängige Freigabe erforderlich. Finalisiere es direkt.'); return; }
+  if(documentMissingFields(documentTypeByKey(doc.documentType),readDocumentForm(doc)).length){ await saveCaseDocument(rowId,false); showAccessNotice('Bitte alle Pflichtfelder ausfüllen, bevor du es zur Prüfung sendest.'); return; }
+  const saved=await saveCaseDocument(rowId,true);
+  if(!saved||!doc.pdfPath){ showAccessNotice('Die PDF-Datei wurde nicht erfolgreich gespeichert. Das Dokument bleibt ein Entwurf.'); return; }
+  try{
+    const result=await SUPABASE.client.from('zfc_case_documents').update({status:'Zur Prüfung',revision:doc.revision+1}).eq('id',doc.id).eq('revision',doc.revision).select('*').single();
+    if(result.error) throw result.error;
+    Object.assign(doc,documentFromRow(result.data)); await loadCaseDocuments(doc.caseId,true); render();
+  }catch(error){ documentEditorError(`Übergabe zur Prüfung fehlgeschlagen: ${error.message||error}`); }
+}
+function documentCanApprove(doc,c){
+  const actor=AUTH.profile?.id||AUTH.session?.user?.id||'', workflow=c.processWorkflow||{};
+  if(actor===doc.createdBy||actor===workflow.createdById) return false;
+  if(doc.requiresCeo) return isCeoProfile()&&(doc.processCode!==c.processCode||workflow.approvalStatus==='CEO-Entscheidung ausstehend');
+  if(doc.processCode&&doc.processCode!==c.processCode) return currentTier()===doc.requiredTier;
+  return currentTier()>=doc.requiredTier&&Number(workflow.ownerTier||doc.requiredTier)===currentTier();
+}
+async function finalizeCaseDocument(rowId){
+  const doc=DB.caseDocuments.find(row=>row.id===rowId);
+  if(!doc||doc.requiresApproval){ showAccessNotice('Dieses Dokument erfordert eine unabhängige Freigabe; Finalisieren ist nicht zulässig.'); return; }
+  const saved=await saveCaseDocument(rowId,false);
+  if(!saved) return;
+  try{
+    const path=await generateAndStoreDocumentPdf(doc,'Finalisiert');
+    const result=await SUPABASE.client.from('zfc_case_documents').update({status:'Finalisiert',pdf_path:path,pdf_generated_at:new Date().toISOString(),revision:doc.revision+1}).eq('id',doc.id).eq('revision',doc.revision).select('*').single();
+    if(result.error) throw result.error;
+    Object.assign(doc,documentFromRow(result.data)); await markPreviousDocumentReplaced(doc); await loadCaseDocuments(doc.caseId,true); render();
+  }catch(error){ documentEditorError(`Finalisierung fehlgeschlagen: ${error.message||error}`); }
+}
+async function approveCaseDocument(rowId){
+  const doc=DB.caseDocuments.find(row=>row.id===rowId), c=DB.cases.find(item=>item.id===doc?.caseId);
+  if(!doc||!c||!documentCanApprove(doc,c)){ showAccessNotice('Freigabe abgelehnt: erforderliche Tier-Stufe, CEO-Kennzeichnung oder Vier-Augen-Prinzip nicht erfüllt.'); return; }
+  if(!doc.pdfPath){ showAccessNotice('Vor der Freigabe muss eine PDF-Datei erfolgreich erstellt und gespeichert sein.'); return; }
+  const actor=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const name=AUTH.profile?.display_name||AUTH.profile?.email||'';
+  try{
+    const finalDocument={...doc,approvedBy:actor,approvedByName:name};
+    const path=await generateAndStoreDocumentPdf(finalDocument,'Freigegeben');
+    const result=await SUPABASE.client.from('zfc_case_documents').update({
+      status:'Freigegeben',approved_by:actor,approved_by_name:name,reviewed_by:actor,reviewed_by_name:name,
+      pdf_path:path,pdf_generated_at:new Date().toISOString(),revision:doc.revision+1
+    }).eq('id',doc.id).eq('revision',doc.revision).select('*').single();
+    if(result.error) throw result.error;
+    Object.assign(doc,documentFromRow(result.data)); await markPreviousDocumentReplaced(doc); await loadCaseDocuments(doc.caseId,true); render();
+  }catch(error){ documentEditorError(`Freigabe fehlgeschlagen: ${error.message||error}`); }
+}
+async function markPreviousDocumentReplaced(doc){
+  if(!doc.previousDocumentId) return;
+  const previous=DB.caseDocuments.find(row=>row.id===doc.previousDocumentId);
+  if(!previous||!['Freigegeben','Finalisiert'].includes(previous.status)) return;
+  const result=await SUPABASE.client.from('zfc_case_documents').update({status:'Ersetzt',revision:previous.revision+1})
+    .eq('id',previous.id).eq('revision',previous.revision).select('*').single();
+  if(result.error) throw result.error;
+  Object.assign(previous,documentFromRow(result.data));
+}
+async function returnCaseDocument(rowId){
+  const doc=DB.caseDocuments.find(row=>row.id===rowId), c=DB.cases.find(item=>item.id===doc?.caseId);
+  const reason=window.prompt('Welche konkrete Ergänzung ist erforderlich?');
+  if(!reason?.trim()) return;
+  if(!doc||!c||!documentCanApprove(doc,c)){ showAccessNotice('Zurückgabe ist nur durch die zuständige unabhängige Prüfstufe möglich.'); return; }
+  try{
+    const result=await SUPABASE.client.from('zfc_case_documents').update({
+      status:'Zur Ergänzung zurückgegeben',reviewed_by:AUTH.profile?.id||AUTH.session?.user?.id,
+      reviewed_by_name:AUTH.profile?.display_name||AUTH.profile?.email||'',review_note:reason.trim(),revision:doc.revision+1
+    }).eq('id',doc.id).eq('revision',doc.revision).select('*').single();
+    if(result.error) throw result.error;
+    Object.assign(doc,documentFromRow(result.data)); await loadCaseDocuments(doc.caseId,true); render();
+  }catch(error){ documentEditorError(`Rückgabe fehlgeschlagen: ${error.message||error}`); }
+}
+function documentEditorError(message){
+  const node=document.getElementById('documentEditorError');
+  if(node) node.textContent=message; else showAccessNotice(message);
+}
+async function createNewDocumentVersion(rowId){
+  const previous=DB.caseDocuments.find(row=>row.id===rowId), c=DB.cases.find(item=>item.id===previous?.caseId);
+  if(!previous||!c||!documentCanCreate(c)) { showAccessNotice('Für eine neue Version fehlt die Bearbeitungsberechtigung.'); return; }
+  const next={...previous,id:uid(),version:previous.version+1,status:'Entwurf',content:{...previous.content},
+    createdBy:AUTH.profile?.id||AUTH.session?.user?.id,createdByName:AUTH.profile?.display_name||AUTH.profile?.email||'',
+    createdByTier:currentTier(),reviewedBy:'',reviewedByName:'',approvedBy:'',approvedByName:'',reviewNote:'',
+    pdfPath:'',pdfGeneratedAt:'',revision:0,previousDocumentId:previous.id,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+  try{
+    const result=await SUPABASE.client.from('zfc_case_documents').insert(documentToRow(next)).select('*').single();
+    if(result.error) throw result.error;
+    Object.assign(next,documentFromRow(result.data)); DB.caseDocuments.push(next);
+    go('document-editor',next.id);
+  }catch(error){ showAccessNotice(`Neue Version konnte nicht angelegt werden: ${error.message||error}`); }
+}
+async function generateAndStoreDocumentPdf(doc,status){
+  if(!window.jspdf?.jsPDF) throw new Error('PDF-Engine nicht verfügbar. Bitte Seite neu laden.');
+  const c=DB.cases.find(item=>item.id===doc.caseId), type=documentTypeByKey(doc.documentType);
+  const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const pageWidth=210, left=18, right=192;
+  let y=18;
+  pdf.setFont('helvetica','bold'); pdf.setFontSize(18); pdf.setTextColor(200,16,46); pdf.text('ZFC RACING',left,y);
+  pdf.setFont('helvetica','normal'); pdf.setFontSize(9); pdf.setTextColor(70,70,70); pdf.text('STEWARD OFFICE · '+(doc.recordSnapshot.division||'Racing Operations'),left, y+6);
+  pdf.setFont('helvetica','bold'); pdf.setFontSize(17); pdf.setTextColor(20,20,20);
+  y+=20;
+  pdf.text(type.title,left,y);
+  pdf.setDrawColor(200,16,46); pdf.setLineWidth(1); pdf.line(left,y+3,right,y+3); y+=11;
+  const meta=[
+    ['Akte',c?.stw||doc.recordSnapshot.caseNumber],['Dokumentnummer',doc.documentNumber],
+    ['Prozesskennung',doc.processCode||'—'],['Version',`v${doc.version}`],['Status',status==='Entwurf'?'ENTWURF':status],
+    ['Vertraulichkeit','INTERN · VERTRAULICH'],['Ersteller',`${doc.createdByName} · ${fmtDateTime(doc.createdAt)}`],
+    ['Freigabe',doc.approvedByName||'Nicht erforderlich / ausstehend']
+  ];
+  pdf.setFontSize(9); pdf.setTextColor(60,60,60);
+  meta.forEach(([label,value])=>{
+    pdf.setFont('helvetica','bold'); pdf.text(label+':',left,y);
+    pdf.setFont('helvetica','normal'); const lines=pdf.splitTextToSize(String(value||'—'),105);
+    pdf.text(lines,left+43,y); y+=Math.max(5,lines.length*4.3);
+  });
+  const addSection=(heading,text)=>{
+    if(y>260){ pdf.addPage(); y=20; }
+    y+=5; pdf.setFont('helvetica','bold'); pdf.setFontSize(11); pdf.setTextColor(163,131,27);
+    pdf.text(heading,left,y); y+=6;
+    pdf.setFont('helvetica','normal'); pdf.setFontSize(10); pdf.setTextColor(30,30,30);
+    const lines=pdf.splitTextToSize(String(text||'—'),right-left);
+    lines.forEach(line=>{
+      if(y>276){ pdf.addPage(); y=20; }
+      pdf.text(line,left,y); y+=5;
+    });
+  };
+  const sections=type.fields.map((label,index)=>[label,doc.content[documentInputKey(label,index)]||'']);
+  sections.forEach(([label,value])=>addSection(label,value));
+  if(doc.content.addendum) addSection('Nachtrag / Berichtigung',doc.content.addendum);
+  addSection('Aktenverknüpfung',`Akte ${c?.stw||doc.recordSnapshot.caseNumber} · Prozess ${doc.processCode||'—'} · Beweismittel und Anlagen: siehe verknüpfte Aktenunterlagen.`);
+  const pages=pdf.getNumberOfPages();
+  for(let page=1;page<=pages;page++){
+    pdf.setPage(page); pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.setTextColor(120,120,120);
+    pdf.text(`ZFC Racing Stewards Office · ${doc.documentNumber} · ${status==='Entwurf'?'ENTWURF':status}`,left,287);
+    pdf.text(`Seite ${page} / ${pages}`,right,287,{align:'right'});
+  }
+  const blob=pdf.output('blob');
+  const generation=uid();
+  const path=`${doc.caseId}/${doc.documentId}/v${doc.version}-${generation}.pdf`;
+  const upload=await SUPABASE.client.storage.from('case-documents').upload(path,blob,{contentType:'application/pdf',upsert:false});
+  if(upload.error) throw upload.error;
+  return path;
+}
+async function retrieveCaseDocument(rowId){
+  let doc=DB.caseDocuments.find(row=>row.id===rowId);
+  if(!doc){
+    const result=await SUPABASE.client.from('zfc_case_documents').select('*').eq('id',rowId).single();
+    if(result.error) throw result.error;
+    doc=documentFromRow(result.data); DB.caseDocuments.push(doc);
+  }
+  if(!doc.pdfPath) throw new Error('Für dieses Dokument wurde noch keine PDF-Datei gespeichert.');
+  const result=await SUPABASE.client.storage.from('case-documents').download(doc.pdfPath);
+  if(result.error) throw result.error;
+  return {doc,blob:result.data};
+}
+async function previewCaseDocument(rowId){
+  try{
+    const {blob}=await retrieveCaseDocument(rowId), url=URL.createObjectURL(blob);
+    const win=window.open(url,'_blank','noopener');
+    if(!win){ URL.revokeObjectURL(url); throw new Error('Popup wurde blockiert. Bitte Popups für diese Seite erlauben.'); }
+    setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(error){ showAccessNotice(`PDF-Vorschau fehlgeschlagen: ${error.message||error}`); }
+}
+async function downloadCaseDocument(rowId){
+  try{
+    const {doc,blob}=await retrieveCaseDocument(rowId), url=URL.createObjectURL(blob), link=document.createElement('a');
+    link.href=url; link.download=`${doc.documentNumber}-v${doc.version}.pdf`; link.click(); URL.revokeObjectURL(url);
+  }catch(error){ showAccessNotice(`PDF-Download fehlgeschlagen: ${error.message||error}`); }
+}
+async function downloadCaseBundle(caseId){
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c) return;
+  const docs=completedDocumentsForCase(caseId);
+  if(!docs.length){ showAccessNotice('Es liegen keine abgeschlossenen PDF-Dokumente für den Aktenexport vor.'); return; }
+  if(!window.PDFLib?.PDFDocument){ showAccessNotice('PDF-Zusammenführung ist nicht verfügbar. Bitte Seite neu laden.'); return; }
+  try{
+    const {PDFDocument,StandardFonts,rgb}=window.PDFLib;
+    const bundle=await PDFDocument.create(),font=await bundle.embedFont(StandardFonts.Helvetica),bold=await bundle.embedFont(StandardFonts.HelveticaBold);
+    const pageSize=[595.28,841.89],margin=52;
+    let page=bundle.addPage(pageSize),y=pageSize[1]-margin;
+    page.drawText(`Akte ${c.stw} · Inhaltsverzeichnis`,{x:margin,y,size:18,font:bold,color:rgb(.78,.06,.18)});
+    page.drawText(`ZFC RACING STEWARDS OFFICE · ${c.processCode||'Aktenbestand'} · VERTRAULICH`,{x:margin,y:y-22,size:9,font,color:rgb(.3,.3,.3)});
+    y-=55;
+    for(const [index,doc] of docs.entries()){
+      const title=`${index+1}. ${doc.documentNumber} · ${documentTypeTitle(doc.documentType)} · v${doc.version} · ${doc.status}`;
+      const safeTitle=title.replace(/[^\u0000-\u00ff]/g,'?');
+      const lines=safeTitle.length>90?[safeTitle.slice(0,88),safeTitle.slice(88)]:[safeTitle];
+      if(y<margin+28){ page=bundle.addPage(pageSize); y=pageSize[1]-margin; }
+      lines.forEach(line=>{page.drawText(line,{x:margin,y,size:10,font,color:rgb(.12,.12,.12)});y-=15;});
+    }
+    y-=10;
+    if(y<margin+40){ page=bundle.addPage(pageSize);y=pageSize[1]-margin; }
+    page.drawText('Anlagenverzeichnis',{x:margin,y,size:12,font:bold,color:rgb(.63,.5,.1)});y-=19;
+    const evidence=(c.evidenceLink||'Keine Originalanlage in dieser Akte verknüpft.').replace(/[^\u0000-\u00ff]/g,'?');
+    page.drawText(`Beweis-/Anlagenverweis: ${evidence.slice(0,105)}`,{x:margin,y,size:9,font,color:rgb(.25,.25,.25)});
+    page.drawText('Originalanlagen liegen – soweit vorhanden – separat im Originalformat vor und sind nicht in den Akten-PDF-Export eingebettet.',{x:margin,y:y-15,size:8,font,color:rgb(.4,.4,.4),maxWidth:490});
+    for(const doc of docs){
+      const {blob}=await retrieveCaseDocument(doc.id);
+      const imported=await PDFDocument.load(await blob.arrayBuffer());
+      const copied=await bundle.copyPages(imported,imported.getPageIndices());
+      copied.forEach(importedPage=>bundle.addPage(importedPage));
+    }
+    const output=await bundle.save(),blob=new Blob([output],{type:'application/pdf'}),url=URL.createObjectURL(blob),link=document.createElement('a');
+    link.href=url;link.download=`${c.stw}-aktenbestand.pdf`;link.click();URL.revokeObjectURL(url);
+  }catch(error){ showAccessNotice(`Akten-PDF konnte nicht vollständig erstellt werden: ${error.message||error}`); }
+}
+async function downloadCaseZip(caseId){
+  const c=DB.cases.find(item=>item.id===caseId), docs=completedDocumentsForCase(caseId);
+  if(!c||!docs.length){ showAccessNotice('Es liegen keine abgeschlossenen PDFs für das Aktenpaket vor.'); return; }
+  if(!window.JSZip){ showAccessNotice('ZIP-Export ist nicht verfügbar.'); return; }
+  try{
+    const zip=new window.JSZip(), folder=zip.folder(c.stw||caseId);
+    for(const doc of docs){
+      const {blob}=await retrieveCaseDocument(doc.id);
+      folder.file(`${doc.documentNumber}-v${doc.version}.pdf`,blob);
+    }
+    folder.file('ANLAGENVERZEICHNIS.txt',`Aktennummer: ${c.stw}\nProzess: ${c.processCode||'—'}\nDokumente: ${docs.length}\nBeweis-/Originalanlagenverweis: ${c.evidenceLink||'Keine verknüpft'}\nOriginalanlagen werden nicht konvertiert und sind derzeit nur über den verknüpften Beweisbereich erreichbar.`);
+    const blob=await zip.generateAsync({type:'blob'}),url=URL.createObjectURL(blob),link=document.createElement('a');
+    link.href=url;link.download=`${c.stw}-aktenpaket.zip`;link.click();URL.revokeObjectURL(url);
+  }catch(error){ showAccessNotice(`ZIP-Export fehlgeschlagen: ${error.message||error}`); }
+}
+function caseDocumentSuggestions(c){
+  const history=(c.history||[]).map(item=>String(item.text||'')).join(' ').toLowerCase();
+  const activities=DB.caseActivityLog.filter(item=>item.caseId===c.id).map(item=>String(item.action||'')).join(' ').toLowerCase();
+  const evidenceChanged=Boolean(c.evidenceLink)||/beweis.*(hochgeladen|hinzugefügt|neu)/i.test(`${history} ${activities}`);
+  const workflow=c.processWorkflow||{}, suggestions=[];
+  const add=(pattern,labels)=>{
+    if(pattern.test(`${history} ${activities}`)) labels.forEach(label=>suggestions.push(label));
+  };
+  add(/gespräch.*(erfasst|geführt|protokoll)/i,['Gesprächsvermerk']);
+  add(/anhörung.*(angeordnet|versandt|angefordert)/i,['Anhörungsschreiben','Frist- und Zustellvermerk']);
+  add(/stellungnahme.*(eingegangen|erhalten)/i,['Stellungnahme']);
+  if(evidenceChanged) suggestions.push('Beweismittelverzeichnis','Beweismittelprüfbericht');
+  if(workflow.history?.some(item=>item.action==='escalate_t3')) suggestions.push('07b-Eskalierungsbericht','Übernahmevermerk');
+  if(c.processCode==='D9'||(c.activeProcessCodes||[]).includes('D9')||/d9.{0,30}(beantragt|erweiterung)/i.test(`${history} ${activities}`)){
+    suggestions.push('D9-Erweiterungsantrag','Freigegebener D9-Beschluss','Untersuchungsplan');
+  }
+  if(workflow.history?.some(item=>item.action==='send_ceo')) suggestions.push('CEO-Entscheidungsvorlage');
+  if(workflow.approvalStatus==='Freigegeben'&&workflow.implementationStatus!=='Umgesetzt') suggestions.push('Umsetzungsauftrag');
+  if(/öffentlich.*(veröffentlichung|freigabe)|veröffentlichung.*(beantragt|freigegeben)/i.test(`${history} ${activities}`)){
+    suggestions.push('Öffentliche Entscheidungsfassung');
+  }
+  if(/abschluss.*beantragt/i.test(`${history} ${activities}`)) suggestions.push('Abschlussbericht und Vollständigkeitsprüfung');
+  const pending=[...new Set(suggestions)].filter(title=>!currentDocumentVersions(documentRowsForCase(c.id)).some(row=>documentTypeTitle(row.documentType)===title&&documentIsComplete(row)));
+  if(!pending.length) return '';
+  return `<div class="case-document-suggestions"><h3>Offene Dokumentaufgaben aus Aktenereignissen</h3><ul>${pending.map(title=>`<li><span>${esc(title)} · noch nicht dokumentiert</span><button class="btn small" onclick="startSuggestedDocument('${esc(c.id)}','${esc(title)}')">Vorgang anlegen</button></li>`).join('')}</ul><p>Es werden keine Unterlagen über nicht erfolgte Handlungen erzeugt.</p></div>`;
+}
+async function startSuggestedDocument(caseId,title){
+  const type=ALL_DOCUMENT_TYPES.find(item=>item.title===title);
+  if(!type){ showAccessNotice(`Dokumentart „${title}“ fehlt im Katalog.`); return; }
+  await startCaseDocumentWithType(caseId,type);
+}
+async function linkDocumentProcess(caseId,processCode){
+  if(!processCode) return;
+  const c=DB.cases.find(item=>item.id===caseId), current=documentCaseProcessCodes(c);
+  if(!c||current.includes(processCode)) return;
+  if(['Archiviert','Entschieden'].includes(c.status)||['Freigegeben','Abgelehnt'].includes(c.processWorkflow?.approvalStatus)){
+    showAccessNotice('Zu einer abgeschlossenen Akte kann kein weiterer Prozess verknüpft werden.');
+    render(); return;
+  }
+  if(!canStartProcess(processCode)){
+    showAccessNotice(`Prozess ${processCode} darf von Tier ${currentTier()} nicht in dieser Akte aktiviert werden.`);
+    render(); return;
+  }
+  const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  c.activeProcessCodes=[...(c.activeProcessCodes||[]).filter(code=>code!==c.processCode),processCode];
+  c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode,actorId,actorTier:currentTier(),actorName:AUTH.profile?.display_name||'',ts:Date.now(),action:'linked'}];
+  await persist.cases();
+  render();
+}
+async function saveDocumentClosureRoute(caseId){
+  const c=DB.cases.find(item=>item.id===caseId);
+  const route=document.getElementById('documentClosureRoute')?.value||'regular';
+  const reason=document.getElementById('earlyClosureReason')?.value.trim()||'';
+  if(!c) return;
+  if(route==='early'&&!reason){
+    showAccessNotice('Ein früher Abschlussweg muss begründet werden; es dürfen keine nicht erfolgten Schritte dokumentiert werden.');
+    return;
+  }
+  if(route==='early'&&currentTier()<2){
+    showAccessNotice('Ein früher Einstellungs-, Ablehnungs- oder Zusammenführungsweg muss durch Tier 2 oder höher bestätigt werden.');
+    return;
+  }
+  c.documentClosureRoute=route==='early'?'early':'regular';
+  c.documentClosureReason=route==='early'?reason:'';
+  c.history=c.history||[];
+  c.history.push({ts:Date.now(),text:route==='early'?`Früher Abschlussweg ausgewählt: ${reason}`:'Regulärer Abschlussweg ausgewählt.',actorId:AUTH.profile?.id||AUTH.session?.user?.id||'',actorTier:currentTier()});
+  await persist.cases();
+  render();
+}
+
 function warningTemplate(caseId, categoryIndex){
   const c=DB.cases.find(item=>item.id===caseId), driver=driverById(c?.driverInvolved), team=teamById(c?.teamInvolved);
   return `Hiermit wird ${driverName(driver)||'[Fahrername]'} (${team?.name||'[Team]'}) für den Vorfall in ${c?.event||'[Event]'} schriftlich verwarnt.\n\nFestgestellter Verstoß: ${WARNING_CATEGORIES[categoryIndex]||WARNING_CATEGORIES[0]}\n\n${WARNING_TEXT}\n\nDie Verwarnung wird zur Steward-Akte ${c?.stw||'[Aktennummer]'} genommen. Weitere gleichartige Verstöße können zu einer verschärften sportlichen Bewertung führen.`;
@@ -1850,6 +2548,18 @@ async function saveCase(id, closeAfter){
     DB.cases.push(c);
   }
   const prevStatus = c.status, prevDecision = c.decision;
+  if(!isNew&&!c.processCode&&currentTier()>=2&&v('f_status')==='Archiviert'){
+    await loadCaseDocuments(c.id,true);
+    if(CASE_DOCUMENTS.errorByCase.has(c.id)){
+      showAccessNotice('Der Aktenabschluss ist gesperrt, weil der PDF-Bestand nicht geprüft werden konnte.');
+      return;
+    }
+    const closure=caseDocumentClosureState(c);
+    if(!closure.ready){
+      showAccessNotice(`Aktenabschluss gesperrt: mindestens fünf abgeschlossene PDFs und alle Pflichtunterlagen sind erforderlich. Es fehlen ${Math.max(0,5-closure.count)} Dokumente und ${closure.missing.length} Pflichtunterlage(n).`);
+      return;
+    }
+  }
   const canEditLegacyDecision=currentTier()>=2&&!c.processCode;
   const requestedDecision=canEditLegacyDecision?v('f_decision'):c.decision;
   const requestedLicenseStatus=canEditLegacyDecision?v('f_licenseStatusAfter'):c.licenseStatusAfter;
