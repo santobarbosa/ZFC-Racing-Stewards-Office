@@ -1031,6 +1031,7 @@ async function submitProcessCase(event,code){
   const record={
     id:uid(),stw,season:String(values.season||new Date().getFullYear()),status:'Neu',createdAt:now,updatedAt:now,
     caseType:String(values.caseType),
+    league:'ZFC Racing',
     createdById:AUTH.profile?.id||AUTH.session?.user?.id||'',createdByTier:currentTier(),
     event:String(values.event).trim(),sessionType:String(values.session||'Sonstige Session').trim(),incidentLap:String(values.time||'').trim(),
     category:process.categoryName,reportedBy:'Interner Prozess',
@@ -2015,7 +2016,7 @@ function documentToRow(doc){
 function documentSnapshot(c){
   return {
     caseNumber:c.stw||'',processCode:c.processCode||'',processTitle:c.processTitle||'',
-    league:c.league||'CFC Esport Division',division:driverById(c.driverInvolved)?.division||'',
+    league:c.league||'ZFC Racing',division:driverById(c.driverInvolved)?.division||'',
     title:c.category||c.event||'',participants:[driverName(driverById(c.driverInvolved)),driverName(driverById(c.driverAffected))].filter(name=>name&&name!=='—'),
     author:AUTH.profile?.display_name||AUTH.profile?.email||'',caseOwner:c.processWorkflow?.createdByName||'',
     event:c.event||'',session:c.sessionType||'',eventTime:c.incidentLap||'',ruleVersion:c.ruleVersion||'Unbekannt',
