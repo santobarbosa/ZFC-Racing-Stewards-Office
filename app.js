@@ -2423,16 +2423,33 @@ async function downloadCaseDocument(rowId){
 }
 function generateCaseBundleReport(c,docs){
   const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-  const left=18,right=192,bottom=276;
-  let y=20;
+  const left=18,right=192,bottom=274,lineHeight=4.5;
+  let y=22;
+  const addPageHeader=()=>{
+    pdf.setFont('helvetica','bold');
+    pdf.setFontSize(8);
+    pdf.setTextColor(200,16,46);
+    pdf.text('ZFC RACING · STEWARDS OFFICE',left,17);
+    pdf.setFont('helvetica','normal');
+    pdf.setTextColor(105,105,105);
+    pdf.text(`GESAMTAKTE · ${c.stw||'—'}`,right,17,{align:'right'});
+    pdf.setDrawColor(218,218,218);
+    pdf.setLineWidth(.25);
+    pdf.line(left,21,right,21);
+    y=29;
+  };
+  const addContentPage=()=>{
+    pdf.addPage();
+    addPageHeader();
+  };
   const ensureSpace=height=>{
-    if(y+height>bottom){pdf.addPage();y=20;}
+    if(y+height>bottom&&y>29) addContentPage();
   };
   const writeText=(text,{size=10,bold=false,color=[35,35,35],indent=0,lineHeight=5}={})=>{
     pdf.setFont('helvetica',bold?'bold':'normal');
     pdf.setFontSize(size);
     pdf.setTextColor(...color);
-    const lines=pdf.splitTextToSize(String(text||'—'),right-left-indent);
+    const lines=pdf.splitTextToSize(String(text??'—'),right-left-indent);
     lines.forEach(line=>{
       ensureSpace(lineHeight);
       pdf.text(line,left+indent,y);
@@ -2440,39 +2457,64 @@ function generateCaseBundleReport(c,docs){
     });
   };
   const section=title=>{
-    ensureSpace(14);
-    y+=3;
+    ensureSpace(15);
+    y+=2;
+    pdf.setFillColor(246,246,246);
+    pdf.rect(left,y-5,right-left,8,'F');
+    pdf.setFillColor(200,16,46);
+    pdf.rect(left,y-5,1.2,8,'F');
     pdf.setFont('helvetica','bold');
-    pdf.setFontSize(12);
-    pdf.setTextColor(163,131,27);
+    pdf.setFontSize(10);
+    pdf.setTextColor(40,40,40);
     pdf.text(title,left,y);
-    y+=7;
+    y+=9;
   };
   const field=(label,value)=>{
-    ensureSpace(10);
+    const labelWidth=48,valueX=left+52;
     pdf.setFont('helvetica','bold');
-    pdf.setFontSize(9);
-    pdf.setTextColor(50,50,50);
-    pdf.text(`${label}:`,left,y);
+    pdf.setFontSize(8.5);
+    const labelLines=pdf.splitTextToSize(`${label}:`,labelWidth);
     pdf.setFont('helvetica','normal');
-    pdf.setTextColor(35,35,35);
-    const lines=pdf.splitTextToSize(String(value||'—'),right-left-42);
-    lines.forEach(line=>{
-      ensureSpace(5);
-      pdf.text(line,left+42,y);
-      y+=4.5;
-    });
+    pdf.setFontSize(9);
+    const valueLines=pdf.splitTextToSize(String(value??'—'),right-valueX);
+    const rowLines=Math.max(labelLines.length,valueLines.length);
+    for(let index=0;index<rowLines;index++){
+      ensureSpace(lineHeight);
+      if(labelLines[index]){
+        pdf.setFont('helvetica','bold');
+        pdf.setFontSize(8.5);
+        pdf.setTextColor(75,75,75);
+        pdf.text(labelLines[index],left,y);
+      }
+      if(valueLines[index]){
+        pdf.setFont('helvetica','normal');
+        pdf.setFontSize(9);
+        pdf.setTextColor(35,35,35);
+        pdf.text(valueLines[index],valueX,y);
+      }
+      y+=lineHeight;
+    }
+    y+=1;
   };
   pdf.setFont('helvetica','bold');
   pdf.setFontSize(21);
   pdf.setTextColor(200,16,46);
   pdf.text('ZFC RACING',left,y);
-  y+=9;
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(105,105,105);
+  pdf.text('STEWARDS OFFICE · INTERN / VERTRAULICH',right,y,{align:'right'});
+  y+=10;
+  pdf.setFont('helvetica','bold');
+  pdf.setFontSize(19);
+  pdf.setTextColor(28,28,28);
+  pdf.text('GESAMTAKTE',left,y);
+  y+=7;
   pdf.setFont('helvetica','normal');
-  pdf.setFontSize(11);
-  pdf.setTextColor(50,50,50);
-  pdf.text('STEWARD OFFICE · GESAMTAKTE · INTERN / VERTRAULICH',left,y);
-  y+=9;
+  pdf.setFontSize(10);
+  pdf.setTextColor(105,105,105);
+  pdf.text('Vollständige Fallübersicht und Dokumentenverzeichnis',left,y);
+  y+=7;
   pdf.setDrawColor(200,16,46);
   pdf.setLineWidth(.8);
   pdf.line(left,y,right,y);
@@ -2517,7 +2559,7 @@ function generateCaseBundleReport(c,docs){
   field('Steward 3',c.steward3);
 
   const extraFields=Object.entries(c.processFields||{}).filter(([key,value])=>
-    !['caseType','event','summary','priority','owner','dueDate'].includes(key)&&String(value||'').trim()
+    !['caseType','event','summary','priority','owner','dueDate'].includes(key)&&String(value??'').trim()
   );
   if(extraFields.length){
     section('5. Zusätzliche Prozessangaben');
@@ -2550,16 +2592,19 @@ function generateCaseBundleReport(c,docs){
   section('Dokumentenverzeichnis');
   if(!docs.length) writeText('In dieser Akte sind noch keine Einzel-Dokumente angelegt.',{size:9});
   docs.forEach((doc,index)=>{
-    writeText(`${index+1}. ${doc.documentNumber} · ${documentTypeTitle(doc.documentType)} · Version ${doc.version} · ${doc.status}`,{size:9,lineHeight:4.5});
+    writeText(`ANLAGE ${String(index+1).padStart(2,'0')} · ${doc.title||documentTypeTitle(doc.documentType)} · ${doc.documentNumber} · Version ${doc.version} · ${doc.status}`,{size:9,bold:true,lineHeight:4.5});
   });
   const pageCount=pdf.getNumberOfPages();
   for(let page=1;page<=pageCount;page++){
     pdf.setPage(page);
+    pdf.setDrawColor(218,218,218);
+    pdf.setLineWidth(.25);
+    pdf.line(left,281,right,281);
     pdf.setFont('helvetica','normal');
     pdf.setFontSize(8);
     pdf.setTextColor(120,120,120);
-    pdf.text(`ZFC Racing Stewards Office · Akte ${c.stw||'—'} · ${fmtDateTime(Date.now())}`,left,287);
-    pdf.text(`Seite ${page} / ${pageCount}`,right,287,{align:'right'});
+    pdf.text(`ZFC Racing Stewards Office · Akte ${c.stw||'—'} · ${fmtDateTime(Date.now())}`,left,286);
+    pdf.text(`Bericht · Seite ${page} / ${pageCount}`,right,287,{align:'right'});
   }
   return pdf.output('arraybuffer');
 }
@@ -2583,21 +2628,55 @@ async function downloadCaseBundle(caseId){
     const reportPdf=await PDFDocument.load(report);
     const reportPages=await bundle.copyPages(reportPdf,reportPdf.getPageIndices());
     reportPages.forEach(reportPage=>bundle.addPage(reportPage));
-    page=bundle.addPage(pageSize);y=pageSize[1]-margin;
-    page.drawText(`Aktenanlagen · ${c.stw}`,{x:margin,y,size:18,font:bold,color:rgb(.78,.06,.18)});
-    page.drawText('ZFC RACING STEWARDS OFFICE · VOLLSTÄNDIGER DOKUMENTENBESTAND',{x:margin,y:y-22,size:9,font,color:rgb(.3,.3,.3)});
-    y-=55;
+    const drawWrapped=(target,text,{x,y:top,size,font:face,color,maxWidth})=>{
+      const words=String(text??'—').split(/\s+/),lines=[];
+      let line='';
+      words.forEach(word=>{
+        let remaining=word;
+        while(remaining&&face.widthOfTextAtSize(`${line?`${line} `:''}${remaining}`,size)>maxWidth){
+          if(line){lines.push(line);line='';continue;}
+          let split=remaining.length;
+          while(split>1&&face.widthOfTextAtSize(remaining.slice(0,split),size)>maxWidth) split--;
+          lines.push(remaining.slice(0,split));
+          remaining=remaining.slice(split);
+        }
+        if(remaining) line=line?`${line} ${remaining}`:remaining;
+      });
+      if(line) lines.push(line);
+      lines.forEach((item,index)=>target.drawText(item,{x,y:top-index*(size+5),size,font:face,color}));
+      return lines.length;
+    };
     for(const [index,doc] of docs.entries()){
-      const title=`${index+1}. ${doc.documentNumber} · ${documentTypeTitle(doc.documentType)} · v${doc.version} · ${doc.status}`;
-      const safeTitle=title.replace(/[^\u0000-\u00ff]/g,'?');
-      const lines=safeTitle.length>95?[safeTitle.slice(0,88),safeTitle.slice(88)]:[safeTitle];
-      if(y<margin+28){ page=bundle.addPage(pageSize); y=pageSize[1]-margin; }
-      lines.forEach(line=>{page.drawText(line,{x:margin,y,size:10,font,color:rgb(.12,.12,.12)});y-=15;});
-    }
-    for(const doc of docs){
       const {blob}=await retrieveCaseDocument(doc.id);
       const imported=await PDFDocument.load(await blob.arrayBuffer());
       const copied=await bundle.copyPages(imported,imported.getPageIndices());
+      page=bundle.addPage(pageSize);
+      y=pageSize[1]-margin;
+      page.drawRectangle({x:0,y:pageSize[1]-13,width:pageSize[0],height:13,color:rgb(.78,.06,.18)});
+      page.drawText('ZFC RACING  /  STEWARDS OFFICE',{x:margin,y:pageSize[1]-43,size:9,font: bold,color:rgb(.78,.06,.18)});
+      page.drawText(`GESAMTAKTE  ·  ${c.stw||'—'}`,{x:margin,y:pageSize[1]-61,size:9,font,color:rgb(.38,.38,.38)});
+      page.drawLine({start:{x:margin,y:pageSize[1]-73},end:{x:pageSize[0]-margin,y:pageSize[1]-73},thickness:1,color:rgb(.82,.82,.82)});
+      page.drawText(`ANLAGE ${String(index+1).padStart(2,'0')} / ${String(docs.length).padStart(2,'0')}`,{x:margin,y:pageSize[1]-116,size:10,font:bold,color:rgb(.78,.06,.18)});
+      const titleLines=drawWrapped(page,doc.title||documentTypeTitle(doc.documentType),{
+        x:margin,y:pageSize[1]-151,size:20,font:bold,color:rgb(.12,.12,.12),maxWidth:pageSize[0]-margin*2
+      });
+      let fieldY=pageSize[1]-151-titleLines*25-24;
+      const attachmentFields=[
+        ['Dokumentnummer',doc.documentNumber],
+        ['Dokumentart',documentTypeTitle(doc.documentType)],
+        ['Version',`v${doc.version}`],
+        ['Status',doc.status],
+        ['Erstellt von',doc.createdByName||'—'],
+        ['Letzte Änderung',fmtDateTime(doc.updatedAt||doc.createdAt)],
+        ['Umfang',`${copied.length} ${copied.length===1?'Seite':'Seiten'} im Originaldokument`]
+      ];
+      attachmentFields.forEach(([label,value])=>{
+        page.drawText(label.toUpperCase(),{x:margin,y:fieldY,size:8,font:bold,color:rgb(.42,.42,.42)});
+        const valueLines=drawWrapped(page,value,{x:margin,y:fieldY-13,size:10,font,color:rgb(.12,.12,.12),maxWidth:pageSize[0]-margin*2});
+        fieldY-=Math.max(27,13+valueLines*15+12);
+      });
+      page.drawLine({start:{x:margin,y:margin-10},end:{x:pageSize[0]-margin,y:margin-10},thickness:.6,color:rgb(.82,.82,.82)});
+      page.drawText(`Akte ${c.stw||'—'}  ·  Anlage ${index+1} von ${docs.length}  ·  Originaldokument folgt`,{x:margin,y:margin-27,size:8,font,color:rgb(.42,.42,.42)});
       copied.forEach(importedPage=>bundle.addPage(importedPage));
     }
     const output=await bundle.save(),blob=new Blob([output],{type:'application/pdf'}),url=URL.createObjectURL(blob),link=document.createElement('a');
