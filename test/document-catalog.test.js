@@ -12,6 +12,7 @@ const {
 } = require('../document-catalog');
 
 const schema = fs.readFileSync(require.resolve('../supabase_schema.sql'), 'utf8');
+const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
 test('every listed process has exactly five required documents', () => {
   assert.equal(Object.keys(DOCUMENT_PROCESS_MATRIX).length, 30);
@@ -95,4 +96,41 @@ test('Tier 3 bypasses app-state workflow restrictions for inserts and updates', 
   assert.ok(tier3Bypass < firstCaseValidation, 'Tier 3 bypass must occur before validating any case');
   assert.match(schema, /create policy zfc_app_state_authenticated_insert[\s\S]*?with check \(public\.zfc_current_tier\(\) >= 1\)/);
   assert.match(schema, /create policy zfc_app_state_authenticated_update[\s\S]*?using \(public\.zfc_current_tier\(\) >= 1\) with check \(public\.zfc_current_tier\(\) >= 1\)/);
+});
+
+test('Tier 3 can create documents for any catalog process and store their PDFs', () => {
+  const optionList = app.slice(
+    app.indexOf('function documentOptionList('),
+    app.indexOf('function pageDocumentCreate(')
+  );
+  assert.match(optionList, /\(currentTier\(\)>=3\|\|!type\.processCode\|\|processes\.includes\(type\.processCode\)\)/);
+
+  const canCreate = app.slice(
+    app.indexOf('function documentCanCreate('),
+    app.indexOf('async function startCaseDocument(')
+  );
+  assert.ok(canCreate.indexOf('if(currentTier()>=3) return true;')
+    < canCreate.indexOf('if(processCode&&processCode!==c.processCode)'));
+  assert.equal((app.match(/c\.caseType==='steward'&&currentTier\(\)<3/g) || []).length, 2);
+
+  const creator = app.slice(
+    app.indexOf('async function startCaseDocument('),
+    app.indexOf('function documentInputKey(')
+  );
+  assert.match(creator, /requiredFor\.push\(\{processCode:type\.processCode,index:type\.requirementIndex\}\)/);
+  assert.match(creator, /type\.requirementIndex\?\{processCode:type\.processCode,index:type\.requirementIndex\}/);
+
+  const prepareDocument = schema.slice(
+    schema.indexOf('create or replace function public.zfc_prepare_case_document()'),
+    schema.indexOf('drop trigger if exists zfc_prepare_case_document')
+  );
+  assert.match(prepareDocument, /not coalesce\(case_item->'activeProcessCodes','\[\]'::jsonb\) @> to_jsonb\(new\.process_code\)\s+and actor_tier < 3 then/);
+  assert.match(prepareDocument, /not coalesce\(case_item->'activeProcessCodes','\[\]'::jsonb\) @> to_jsonb\(requirement_row->>'processCode'\)\s+and actor_tier < 3 then/);
+  assert.match(prepareDocument, /case_item->>'caseType' = 'steward' and actor_tier < 3 then/);
+
+  const pdfInsertPolicy = schema.slice(
+    schema.indexOf('create policy zfc_case_document_pdf_insert'),
+    schema.indexOf(';', schema.indexOf('create policy zfc_case_document_pdf_insert'))
+  );
+  assert.match(pdfInsertPolicy, /public\.zfc_current_tier\(\) >= 3/);
 });

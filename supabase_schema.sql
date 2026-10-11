@@ -1160,7 +1160,7 @@ begin
 	if case_item is null or not public.zfc_case_document_access(new.case_id) then
 		raise exception 'Kein berechtigter Zugriff auf die zugeordnete Akte.';
 	end if;
-	if case_item->>'caseType' = 'steward' then
+	if case_item->>'caseType' = 'steward' and actor_tier < 3 then
 		raise exception 'Für einen Steward-Fall ist der Dokumentenbereich geschlossen.';
 	end if;
 	if case_item->>'status' = 'Archiviert' and actor_tier < 3 then
@@ -1168,11 +1168,20 @@ begin
 	end if;
 	if nullif(new.process_code,'') is not null
 		and case_item->>'processCode' is distinct from new.process_code
-		and not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> to_jsonb(new.process_code) then
+		and not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> to_jsonb(new.process_code)
+		and actor_tier < 3 then
 		raise exception 'Der Dokumentprozess ist in dieser Akte nicht aktiv verknüpft.';
 	end if;
 	if new.process_code is null then
 		new.process_code := coalesce(case_item->>'processCode','');
+	end if;
+	if new.process_code <> coalesce(case_item->>'processCode','')
+		and not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> to_jsonb(new.process_code)
+		and not exists (
+			select 1 from public.zfc_process_document_requirements required
+			where required.process_code = new.process_code
+		) then
+		raise exception 'Der Dokumentprozess ist nicht im verbindlichen Prozesskatalog enthalten.';
 	end if;
 	code_tier := public.zfc_document_process_review_tier(new.process_code);
 	select catalog.requires_approval into catalog_approval_required
@@ -1238,7 +1247,8 @@ begin
 					raise exception 'Frühabschluss-Unterlagen dürfen nur für den ausdrücklich begründeten Frühabschlussweg verknüpft werden.';
 				end if;
 			elsif requirement_row->>'processCode' <> case_item->>'processCode'
-				and not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> to_jsonb(requirement_row->>'processCode') then
+				and not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> to_jsonb(requirement_row->>'processCode')
+				and actor_tier < 3 then
 				raise exception 'Eine Pflichtunterlage kann nur einem aktiven Prozess dieser Akte zugeordnet werden.';
 			end if;
 			select document_title into required_title
@@ -1522,6 +1532,10 @@ create policy zfc_case_document_pdf_insert
 			where doc.case_id = split_part(name,'/',1)
 				and doc.document_id::text = split_part(name,'/',2)
 				and public.zfc_case_document_access(doc.case_id)
-				and (doc.created_by = auth.uid() or public.zfc_case_document_can_review(doc.id))
+				and (
+					public.zfc_current_tier() >= 3
+					or doc.created_by = auth.uid()
+					or public.zfc_case_document_can_review(doc.id)
+				)
 		)
 	);

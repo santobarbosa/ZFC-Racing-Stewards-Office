@@ -12,6 +12,7 @@ let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht 
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
 let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
 const CASE_DOCUMENTS = { loading:new Set(), loaded:new Set(), errorByCase:new Map(), saving:false };
+const HR = { profiles:[], reviews:[], activity:[], loading:false, loaded:false, error:'', editingReviewId:null };
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -1199,6 +1200,7 @@ const PAGE_TIERS={
   warningform:2,
   rulebook:2,
   manage:3,
+  hr:3,
   archive:3,
   esport:3,
   'esport-drivers':3,
@@ -1217,8 +1219,8 @@ function go(page, id){
     :page==='document-editor'
       ?DB.cases.find(item=>item.id===DB.caseDocuments.find(doc=>doc.id===id)?.caseId)
       :null;
-  if(documentCase?.caseType==='steward'&&['document-create','document-editor'].includes(page)){
-    showAccessNotice('Für einen Steward-Fall ist der Dokumentenbereich geschlossen.');
+  if(documentCase?.caseType==='steward'&&currentTier()<3&&['document-create','document-editor'].includes(page)){
+    showAccessNotice('Für einen Steward-Fall ist der Dokumentenbereich nur für Tier 3 verfügbar.');
     return;
   }
   if(!canAccessPage(page)){
@@ -1322,6 +1324,7 @@ const NAV = [
   {id:'processes', label:'Prozesse', ic:'11'},
   {id:'rulebook', label:'Regelwerk', ic:'12'},
   {id:'manage', label:'Verwaltung', ic:'13'},
+  {id:'hr', label:'HR', ic:'16'},
   {id:'archive', label:'Archiv', ic:'14'},
   {id:'esport', label:'CFC Esport', ic:'15'},
 ];
@@ -1382,6 +1385,7 @@ function render(){
   else if(ROUTE.page==='process-form') main.innerHTML = pageProcessForm(ROUTE.id);
   else if(ROUTE.page==='processes') main.innerHTML = pageProcesses();
   else if(ROUTE.page==='manage') main.innerHTML = pageManage();
+  else if(ROUTE.page==='hr') main.innerHTML = pageHR(ROUTE.id);
   else if(ROUTE.page==='set-password') main.innerHTML = pageSetPassword();
   else if(ROUTE.page==='archive') main.innerHTML = ROUTE.id ? pageArchiveCase(ROUTE.id) : pageArchive();
   else if(ROUTE.page==='rulebook') main.innerHTML = pageRulebook();
@@ -1822,7 +1826,7 @@ function pageCaseForm(existing){
         <button class="btn primary" onclick="saveCase('${c.id||''}', false)">${isNew?'Akte anlegen':'Akte speichern'}</button>
         <button class="btn" onclick="saveCase('${c.id||''}', true)">Speichern &amp; schließen</button>
         ${!isNew? `<button class="btn gold" onclick="downloadCaseBundle('${c.id}')">Gesamte Akte als PDF erstellen</button>${!c.processCode&&currentTier()>=2?`<button class="btn gold" onclick="go('warningform','${c.id}')">Verwarnung setzen</button>`:''}${!c.processCode?`<button class="btn gold" onclick="openTier3EscalationDialog('${c.id}')">Fall weiterleiten</button>`:''}<button class="btn" onclick="sendCaseDiscordNotification('${c.id}')">An Discord senden</button>` : ''}
-        ${!isNew&&currentTier()>=3&&!c.processCode? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte löschen</button>` : ''}
+        ${!isNew&&currentTier()>=3? `<button class="btn danger" onclick="deleteCase('${c.id}')">Akte / Vorgang endgültig löschen</button>` : ''}
       </div>
       ${!isNew ? `<div class="sectiontitle">Verwarnungen in dieser Akte</div>${c.warningDocuments?.length ? `<table><thead><tr><th>Datum</th><th>Kategorie</th><th>Fahrer</th><th></th></tr></thead><tbody>${c.warningDocuments.map((warning,index)=>`<tr><td>${fmtDate(warning.createdAt)}</td><td>${esc(warning.category)}</td><td>${esc(warning.driverName||'—')}</td><td><button class="btn small gold" onclick="printWarning('${c.id}',${index})">PDF öffnen</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">Noch keine schriftliche Verwarnung in dieser Akte abgelegt.</div>'}` : ''}
     </div>
@@ -1902,7 +1906,7 @@ function caseDocumentsPanel(c){
     ${requirements.length?`<details class="case-document-requirements" open><summary>Pflichtunterlagen je aktivem Prozess</summary><div class="table-scroll"><table><thead><tr><th>Prozess</th><th>Pflichtunterlage</th><th>Status</th><th></th></tr></thead><tbody>${requirements.map(item=>`<tr><td>${esc(item.processCode)}</td><td>${esc(item.title)}</td><td>${item.document?`<span class="tag decided">${esc(item.document.status)}</span>`:'<span class="tag open">Offene Aufgabe</span>'}</td><td>${item.document?`<button class="btn small" onclick="go('document-editor','${esc(item.document.id)}')">Öffnen</button>`:`<button class="btn small gold" onclick="createRequirementDocument('${esc(c.id)}','${esc(item.processCode)}',${item.index})">Anlegen</button>`}</td></tr>`).join('')}</tbody></table></div></details>`:'<div class="note">Für diese Akte ist kein Prozess mit einer Pflichtunterlagen-Checkliste hinterlegt. Verknüpfe bei Bedarf einen Prozess.</div>'}
     ${caseDocumentSuggestions(c)}
     <div class="case-document-table-heading"><h3>Dokumentenübersicht</h3><div class="actions"><button class="btn small" onclick="downloadCaseBundle('${esc(c.id)}')">Gesamte Akte als PDF</button><button class="btn small" onclick="downloadCaseZip('${esc(c.id)}')">Aktenpaket ZIP</button></div></div>
-    ${rows.length?`<div class="table-scroll"><table><thead><tr><th>Dokumentnummer</th><th>Dokumentart / Titel</th><th>Status</th><th>Version</th><th>Ersteller</th><th>Datum</th><th>Freigabe</th><th>PDF</th><th>Aktionen</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.documentNumber||row.documentId.slice(0,8))}</td><td>${esc(documentTypeTitle(row.documentType))}<br><small>${esc(row.title||'—')}</small></td><td><span class="tag ${row.status==='Freigegeben'||row.status==='Finalisiert'?'decided':row.status==='Zur Ergänzung zurückgegeben'?'open':'invest'}">${esc(row.status)}</span></td><td>v${Number(row.version)}</td><td>${esc(row.createdByName||'—')}</td><td>${fmtDateTime(row.updatedAt)}</td><td>${esc(row.approvedByName||row.reviewedByName||'—')}</td><td>${row.pdfPath?'<span class="tag decided">Verfügbar</span>':'<span class="tag open">Fehlt</span>'}</td><td class="doc-row-actions"><button class="btn small" onclick="go('document-editor','${esc(row.id)}')">Öffnen</button><button class="btn small gold" onclick="previewCaseDocument('${esc(row.id)}')">Vorschau</button><button class="btn small" onclick="downloadCaseDocument('${esc(row.id)}')">PDF laden</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Noch keine Dokumentvorgänge in dieser Akte.</div>'}
+    ${rows.length?`<div class="table-scroll"><table><thead><tr><th>Dokumentnummer</th><th>Dokumentart / Titel</th><th>Status</th><th>Version</th><th>Ersteller</th><th>Datum</th><th>Freigabe</th><th>PDF</th><th>Aktionen</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.documentNumber||row.documentId.slice(0,8))}</td><td>${esc(documentTypeTitle(row.documentType))}<br><small>${esc(row.title||'—')}</small></td><td><span class="tag ${row.status==='Freigegeben'||row.status==='Finalisiert'?'decided':row.status==='Zur Ergänzung zurückgegeben'?'open':'invest'}">${esc(row.status)}</span></td><td>v${Number(row.version)}</td><td>${esc(row.createdByName||'—')}</td><td>${fmtDateTime(row.updatedAt)}</td><td>${esc(row.approvedByName||row.reviewedByName||'—')}</td><td>${row.pdfPath?'<span class="tag decided">Verfügbar</span>':'<span class="tag open">Fehlt</span>'}</td><td class="doc-row-actions"><button class="btn small" onclick="go('document-editor','${esc(row.id)}')">Öffnen</button><button class="btn small gold" onclick="previewCaseDocument('${esc(row.id)}')">Vorschau</button><button class="btn small" onclick="downloadCaseDocument('${esc(row.id)}')">PDF laden</button>${currentTier()>=3?`<button class="btn small danger" onclick="deleteCaseDocument('${esc(c.id)}','${esc(row.documentId)}')">Alle Versionen löschen</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Noch keine Dokumentvorgänge in dieser Akte.</div>'}
     <div class="case-document-close-state ${canClose?'is-ready':'is-blocked'}"><strong>${state.ready?'Abschluss möglich':currentTier()>=3?'Tier-3-Freigabe möglich':'Abschluss gesperrt'}</strong><span>${state.ready?'Mindestens fünf abgeschlossene PDFs und alle Pflichtunterlagen liegen vor.':currentTier()>=3?'Tier 3 kann den Vorgang ohne weitere Dokumentensperre freigeben.':`${Math.max(0,5-state.count)} weitere abgeschlossene PDF-Dokumente und ${state.missing.length} Pflichtunterlage(n) fehlen.`}</span></div>
   </section>`;
 }
@@ -1917,7 +1921,7 @@ function documentOptionList(c,search=''){
   const requirements=requirementsMetForCase(c).filter(item=>!item.document);
   const requiredKeys=new Set(requirements.map(item=>`${item.processCode}:${item.index}`));
   const allowed=ALL_DOCUMENT_TYPES.filter(type=>
-    (!type.processCode||processes.includes(type.processCode))&&
+    (currentTier()>=3||!type.processCode||processes.includes(type.processCode))&&
     (!search||`${type.title} ${type.description} ${type.group} ${type.processCode||''}`.toLowerCase().includes(search.toLowerCase()))
   );
   return DOCUMENT_GROUPS.map(group=>{
@@ -1933,7 +1937,7 @@ function documentOptionList(c,search=''){
 function pageDocumentCreate(caseId){
   const c=DB.cases.find(item=>item.id===caseId);
   if(!c) return '<div class="empty"><b>Akte nicht gefunden</b></div>';
-  if(c.caseType==='steward') return '<div class="panel"><h2>Dokumentenbereich geschlossen</h2><p>Für einen Steward-Fall können keine Prozessdokumente angelegt werden.</p><button class="btn" onclick="go(\'caseform\',\''+esc(c.id)+'\')">← Zur Akte</button></div>';
+  if(c.caseType==='steward'&&currentTier()<3) return '<div class="panel"><h2>Dokumentenbereich geschlossen</h2><p>Für einen Steward-Fall können nur Konten mit Tier 3 Prozessdokumente anlegen.</p><button class="btn" onclick="go(\'caseform\',\''+esc(c.id)+'\')">← Zur Akte</button></div>';
   if(!CASE_DOCUMENTS.loaded.has(caseId)&&!CASE_DOCUMENTS.loading.has(caseId)) loadCaseDocuments(caseId);
   return `<div class="pagehead"><div><div class="eyebrow">${esc(c.stw)} · Dokumentvorgang</div><h1>Dokumentvorgang <b>anlegen</b></h1></div><div class="actions"><button class="btn" onclick="go('caseform','${esc(c.id)}')">← Zur Akte</button></div></div>
   <section class="panel document-create-panel"><h2>Dokumentvorgang für Akte <b>${esc(c.stw)}</b> anlegen</h2><div class="field"><label for="documentTypeSearch">Vorgangs- / Dokumentart suchen</label><input id="documentTypeSearch" type="search" placeholder="Dokumentart, Prozess oder Zweck suchen …" oninput="filterDocumentOptions('${esc(c.id)}')"></div><div class="field"><label for="documentTypeSelect">Vorgangs- / Dokumentart</label><select id="documentTypeSelect" size="9">${documentOptionList(c)}</select></div><div id="documentTypeInfo" class="document-type-info">Wähle eine Dokumentart, um Zweck, Pflichtfelder und Freigabestufe einzusehen.</div><div id="documentRequirementAssignments" class="document-requirement-assignments"></div><div class="actions"><button class="btn primary" onclick="startCaseDocument('${esc(c.id)}')">Dokumentvorgang beginnen</button><button class="btn" onclick="go('caseform','${esc(c.id)}')">Abbrechen</button></div></section>`;
@@ -1953,7 +1957,7 @@ function showDocumentTypeInfo(caseId){
   const requiredTier=workflowApprovalTier(type.processCode||caseItem?.processCode||'35');
   const ceoRequired=processNeedsCeoApproval(type.processCode||caseItem?.processCode);
   const approvals=type.requiresApproval?`Unabhängige Freigabe durch Tier ${requiredTier}${ceoRequired?' und CEO':''}.`:'Keine unabhängige Freigabe aus der Dokumentart abgeleitet; bei Entscheidungswirkung gilt die Prozessfreigabe.';
-  info.innerHTML=`<p><strong>Wofür wird dieses Dokument benötigt?</strong><br>${esc(type.description)}</p><p><strong>Welche Angaben sind erforderlich?</strong><br>${esc(type.fields.join(' · '))}</p><p><strong>Wer darf es erstellen?</strong><br>Bearbeitungsberechtigte der Akte nach Tier-Zuständigkeit; die Erstellung verleiht keine Entscheidungsbefugnis.</p><p><strong>Welche Freigabe ist erforderlich?</strong><br>${esc(approvals)}</p>`;
+  info.innerHTML=`<p><strong>Wofür wird dieses Dokument benötigt?</strong><br>${esc(type.description)}</p><p><strong>Welche Angaben sind erforderlich?</strong><br>${esc(type.fields.join(' · '))}</p><p><strong>Wer darf es erstellen?</strong><br>${currentTier()>=3?'Tier 3 kann Dokumente zu jedem Katalogprozess in dieser Akte anlegen.':'Bearbeitungsberechtigte der Akte nach Tier-Zuständigkeit.'} Die Erstellung verleiht keine Entscheidungsbefugnis.</p><p><strong>Welche Freigabe ist erforderlich?</strong><br>${esc(approvals)}</p>`;
   if(assignments){
     const matches=requirementsMetForCase(caseItem).filter(item=>!item.document);
     assignments.innerHTML=matches.length?`<details><summary>Pflichtunterlagen ausdrücklich zuordnen</summary><fieldset><legend>Nur zuordnen, wenn dieses Dokument die Unterlage inhaltlich vollständig abdeckt</legend>${matches.map(item=>`<label class="checkline"><input type="checkbox" name="documentRequirement" value="${esc(item.key)}" ${type.processCode===item.processCode&&type.requirementIndex===item.index||item.title===type.title?'checked':''}> ${esc(item.processCode)} · ${esc(item.title)}</label>`).join('')}</fieldset></details>`:'';
@@ -2027,10 +2031,10 @@ function documentCanCreate(c,processCode=''){
   const actor=AUTH.profile?.id||AUTH.session?.user?.id||'';
   const workflow=c.processWorkflow||{};
   if(currentTier()===0) return false;
+  if(currentTier()>=3) return true;
   if(processCode&&processCode!==c.processCode){
     return currentTier()===1?canStartProcess(processCode):currentTier()>=workflowApprovalTier(processCode);
   }
-  if(currentTier()>=3) return true;
   if(c.processCode&&workflow.ownerTier&&Number(workflow.ownerTier)!==currentTier()) return false;
   if(c.processCode&&workflow.createdById===actor&&workflow.approvalStatus!=='Noch nicht vorgelegt'&&workflow.approvalStatus!=='Zur Ergänzung zurückgegeben') return false;
   return true;
@@ -2045,7 +2049,9 @@ async function startCaseDocument(caseId){
     const [processCode,index]=key.split(':');
     return {processCode,index:Number(index)};
   });
-  if(type.processCode&&type.requirementIndex&&!requiredFor.length) requiredFor.push({processCode:type.processCode,index:type.requirementIndex});
+  if(type.processCode&&type.requirementIndex&&!requiredFor.some(ref=>ref.processCode===type.processCode&&ref.index===type.requirementIndex)){
+    requiredFor.push({processCode:type.processCode,index:type.requirementIndex});
+  }
   const matching=requirementsMetForCase(c).filter(item=>requiredFor.some(ref=>ref.processCode===item.processCode&&ref.index===item.index));
   if(matching.some(item=>item.document)){ showAccessNotice('Diese Pflichtunterlage ist bereits durch ein aktuelles, abgeschlossenes Dokument erfüllt. Erstelle bei einer notwendigen Änderung eine neue Version.'); return; }
   const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
@@ -2107,7 +2113,7 @@ async function startCaseDocumentWithType(caseId,type){
   const doc={
     id:uid(),documentId:latest?.documentId||uid(),version:latest?Number(latest.version)+1:1,
     caseId,processCode:type.processCode||c.processCode||'',documentType:type.key,title:type.title,status:'Entwurf',
-    content:{},recordSnapshot:documentSnapshot(c),requiredFor:[requirement?{processCode:requirement.processCode,index:requirement.index}:null].filter(Boolean),
+    content:{},recordSnapshot:documentSnapshot(c),requiredFor:[requirement?{processCode:requirement.processCode,index:requirement.index}:type.processCode&&type.requirementIndex?{processCode:type.processCode,index:type.requirementIndex}:null].filter(Boolean),
     requiresApproval:Boolean(type.requiresApproval),requiredTier:Number(workflowApprovalTier(type.processCode||c.processCode||'35')),
     requiresCeo:Boolean(processNeedsCeoApproval(type.processCode||c.processCode)&&type.requiresApproval),createdBy:actorId,
     createdByName:AUTH.profile?.display_name||AUTH.profile?.email||'',createdByTier:currentTier(),
@@ -2149,7 +2155,7 @@ function pageDocumentEditor(rowId){
   }
   const c=DB.cases.find(item=>item.id===doc.caseId), type=documentTypeByKey(doc.documentType);
   if(!c||!type) return '<div class="empty"><b>Akte oder Dokumentart nicht verfügbar.</b></div>';
-  if(c.caseType==='steward') return '<div class="panel"><h2>Dokumentenbereich geschlossen</h2><p>Für einen Steward-Fall ist der Dokumentenbereich nicht verfügbar.</p><button class="btn" onclick="go(\'caseform\',\''+esc(c.id)+'\')">← Zur Akte</button></div>';
+  if(c.caseType==='steward'&&currentTier()<3) return '<div class="panel"><h2>Dokumentenbereich geschlossen</h2><p>Für einen Steward-Fall ist der Dokumentenbereich nur für Konten mit Tier 3 verfügbar.</p><button class="btn" onclick="go(\'caseform\',\''+esc(c.id)+'\')">← Zur Akte</button></div>';
   const canEdit=['Entwurf','Zur Ergänzung zurückgegeben'].includes(doc.status)&&(currentTier()>=3||doc.createdBy===(AUTH.profile?.id||AUTH.session?.user?.id))&&documentCanCreate(c,doc.processCode||c.processCode||'');
   const canReview=doc.status==='Zur Prüfung'&&documentCanApprove(doc,c);
   const snapshot=doc.recordSnapshot||{};
@@ -2172,6 +2178,7 @@ function pageDocumentEditor(rowId){
       ${canEdit?`<button class="btn" onclick="saveCaseDocument('${esc(doc.id)}',false)">Entwurf speichern</button><button class="btn gold" onclick="saveCaseDocument('${esc(doc.id)}',true)">Speichern &amp; PDF aktualisieren</button>${doc.status==='Zur Ergänzung zurückgegeben'?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Erneut zur Prüfung senden</button>`:doc.requiresApproval&&currentTier()<3?`<button class="btn primary" onclick="submitCaseDocument('${esc(doc.id)}')">Zur Prüfung senden</button>`:`<button class="btn primary" onclick="finalizeCaseDocument('${esc(doc.id)}')">Finalisieren &amp; PDF speichern</button>`}`:''}
       ${canReview?`<button class="btn primary" onclick="approveCaseDocument('${esc(doc.id)}')">${doc.requiresCeo?'CEO-Freigabe erteilen':'Freigeben'}</button><button class="btn" onclick="returnCaseDocument('${esc(doc.id)}')">Zur Ergänzung zurückgeben</button>`:''}
       ${doc.pdfPath?`<button class="btn" onclick="previewCaseDocument('${esc(doc.id)}')">Vorschau</button>`:''}
+      ${currentTier()>=3?`<button class="btn danger" onclick="deleteCaseDocument('${esc(c.id)}','${esc(doc.documentId)}')">Dokument mit allen Versionen löschen</button>`:''}
       ${['Freigegeben','Finalisiert','Ersetzt'].includes(doc.status)?`<button class="btn gold" onclick="createNewDocumentVersion('${esc(doc.id)}')">Neue Version erstellen</button>`:''}
     </div>
   </section>`;
@@ -2885,19 +2892,80 @@ async function saveCase(id, closeAfter){
   if(closeAfter) go('cases'); else go('caseform', c.id);
 }
 
+async function listCaseDocumentFiles(folder){
+  const paths=[];
+  const limit=100;
+  let offset=0;
+  while(true){
+    const result=await SUPABASE.client.storage.from('case-documents').list(folder,{limit,offset});
+    if(result.error) throw result.error;
+    const entries=result.data||[];
+    for(const entry of entries){
+      const path=`${folder}/${entry.name}`;
+      if(entry.id) paths.push(path);
+      else paths.push(...await listCaseDocumentFiles(path));
+    }
+    if(entries.length<limit) break;
+    offset+=limit;
+  }
+  return paths;
+}
+async function removeCaseDocumentFiles(caseId,documentId=''){
+  const folder=documentId?`${caseId}/${documentId}`:caseId;
+  const paths=await listCaseDocumentFiles(folder);
+  for(let index=0;index<paths.length;index+=100){
+    const result=await SUPABASE.client.storage.from('case-documents').remove(paths.slice(index,index+100));
+    if(result.error) throw result.error;
+  }
+}
+async function deleteCaseDocument(caseId,documentId){
+  if(currentTier()<3){ showAccessNotice('Das endgültige Löschen von Dokumenten ist Tier 3 vorbehalten.'); return; }
+  const doc=DB.caseDocuments.find(item=>item.caseId===caseId&&item.documentId===documentId);
+  if(!doc||!SUPABASE.client){ showAccessNotice('Dokument oder sichere Supabase-Verbindung nicht verfügbar.'); return; }
+  if(!confirm(`„${doc.title||documentTypeTitle(doc.documentType)}“ mit sämtlichen Versionen, PDFs und Prüfverläufen endgültig löschen?`)) return;
+  if(CASE_DOCUMENTS.saving){ showAccessNotice('Bitte warte, bis der laufende Dokumententwurf gespeichert wurde.'); return; }
+  clearTimeout(scheduleDocumentAutosave.timer);
+  try{
+    const rowIds=new Set(DB.caseDocuments.filter(item=>item.caseId===caseId&&item.documentId===documentId).map(item=>item.id));
+    await removeCaseDocumentFiles(caseId,documentId);
+    const result=await SUPABASE.client.rpc('zfc_delete_case_documents',{p_case_id:null,p_document_id:documentId});
+    if(result.error) throw result.error;
+    DB.caseDocuments=DB.caseDocuments.filter(item=>!rowIds.has(item.id));
+    DB.caseDocumentEvents=DB.caseDocumentEvents.filter(event=>!rowIds.has(event.documentRowId));
+    showAccessNotice('Dokument, alle Versionen, PDFs und Prüfverläufe wurden endgültig gelöscht.');
+    go('caseform',caseId);
+  }catch(error){
+    showAccessNotice(`Dokument konnte nicht vollständig gelöscht werden: ${error.message||error}`);
+    console.error('Case document deletion failed',error);
+  }
+}
 async function deleteCase(id){
-  if(currentTier()<3){ showAccessNotice('Das Löschen von Akten ist Tier 3 vorbehalten. Für reguläre Abschlüsse bitte den Prozess A1 – Archivierung verwenden.'); return; }
-  if(DB.cases.find(item=>item.id===id)?.processCode){ showAccessNotice('Prozessakten dürfen nicht gelöscht werden. Nutze den dokumentierten Abschluss- und Archivierungsprozess.'); return; }
-  if(!confirm('Diese Akte unwiderruflich löschen?')) return;
+  if(currentTier()<3){ showAccessNotice('Das endgültige Löschen von Akten und Vorgängen ist Tier 3 vorbehalten.'); return; }
   const c=DB.cases.find(item=>item.id===id);
   if(!c) return;
-  DB.deletedCaseLog.unshift({id:uid(),caseId:c.id,stw:c.stw,event:c.event,category:c.category,deletedAt:Date.now()});
-  addCaseActivity(c,'Akte gelöscht.');
-  DB.cases = DB.cases.filter(item=>item.id!==id);
-  await persist.cases();
-  await persist.deletedCaseLog();
-  await persist.caseActivityLog();
-  go('cases');
+  if(!confirm(`Akte ${c.stw||id}${c.processCode?` · Vorgang ${c.processCode}`:''} endgültig löschen? Zugehörige Dokumente, PDFs und Dokumentverläufe werden ebenfalls unwiderruflich entfernt.`)) return;
+  if(!SUPABASE.client){ showAccessNotice('Endgültiges Löschen ist ohne sichere Supabase-Verbindung nicht möglich.'); return; }
+  try{
+    const rowIds=new Set(DB.caseDocuments.filter(doc=>doc.caseId===id).map(doc=>doc.id));
+    await removeCaseDocumentFiles(id);
+    const result=await SUPABASE.client.rpc('zfc_delete_case_documents',{p_case_id:id,p_document_id:null});
+    if(result.error) throw result.error;
+    DB.caseDocuments=DB.caseDocuments.filter(doc=>doc.caseId!==id);
+    DB.caseDocumentEvents=DB.caseDocumentEvents.filter(event=>!rowIds.has(event.documentRowId));
+    CASE_DOCUMENTS.loaded.delete(id);
+    CASE_DOCUMENTS.errorByCase.delete(id);
+    DB.cases=DB.cases.filter(item=>item.id!==id);
+    DB.caseActivityLog=DB.caseActivityLog.filter(item=>item.caseId!==id);
+    DB.deletedCaseLog=DB.deletedCaseLog.filter(item=>item.caseId!==id);
+    await persist.cases();
+    await persist.caseActivityLog();
+    await persist.deletedCaseLog();
+    showAccessNotice('Akte/Vorgang, Dokumente, PDF-Dateien und Dokumentverläufe wurden endgültig gelöscht.');
+    go('cases');
+  }catch(error){
+    showAccessNotice(`Akte/Vorgang konnte nicht vollständig gelöscht werden: ${error.message||error}`);
+    console.error('Case deletion failed',error);
+  }
 }
 
 function addCaseActivity(c, action){
@@ -3954,6 +4022,144 @@ async function loadUserProfiles(container){
   const result=await SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier,created_at').order('created_at');
   if(result.error){ container.innerHTML=`<div class="panel"><h2>Profile konnten nicht geladen werden</h2><p>${esc(result.error.message)}</p></div>`; return; }
   container.innerHTML=`<div class="panel"><h2>Neues Konto <b>einladen</b></h2><p class="footer-note">Die Person erhält einen einmaligen Bestätigungslink per E-Mail und wählt nach der Bestätigung ein eigenes Passwort.</p><div class="grid cols-4"><div class="field"><label>Name</label><input id="new_user_name" autocomplete="name" required></div><div class="field"><label>E-Mail</label><input id="new_user_email" type="email" autocomplete="email" required></div><div class="field"><label>Position</label><input id="new_user_position" placeholder="z. B. Steward" required></div><div class="field"><label>Tier</label><select id="new_user_tier"><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option></select></div></div><button class="btn primary" onclick="createManagedUser()">Einladung senden</button><span id="new_user_status" class="footer-note" role="status" style="margin-left:10px"></span><p class="footer-note">Voraussetzung: Edge Function „admin-create-user“ ist deployed und mit APP_URL sowie SUPABASE_SERVICE_ROLE_KEY konfiguriert.</p></div><div class="panel"><h2>Benutzer <b>und Berechtigungen</b></h2><div style="overflow:auto"><table><thead><tr><th>Benutzer</th><th>Position</th><th>Tier</th><th></th></tr></thead><tbody>${result.data.map(profile=>`<tr><td><strong>${esc(profile.display_name||profile.email)}</strong><div class="footer-note">${esc(profile.email)}</div></td><td><input id="position_${profile.id}" value="${esc(profile.position||'Steward')}" aria-label="Position"></td><td><select id="tier_${profile.id}" aria-label="Tier"><option value="1" ${Number(profile.access_tier)===1?'selected':''}>Tier 1</option><option value="2" ${Number(profile.access_tier)===2?'selected':''}>Tier 2</option><option value="3" ${Number(profile.access_tier)===3?'selected':''}>Tier 3</option></select></td><td><button class="btn small primary" onclick="saveUserProfile('${profile.id}')">Speichern</button></td></tr>`).join('')||'<tr><td colspan="4">Noch keine Benutzerprofile vorhanden.</td></tr>'}</tbody></table></div></div>`;
+}
+async function loadHRData(){
+  if(HR.loading||currentTier()<3) return;
+  if(!SUPABASE.client){ HR.error='Für HR-Daten ist eine sichere Supabase-Verbindung erforderlich.'; HR.loaded=true; if(ROUTE.page==='hr') render(); return; }
+  HR.loading=true; HR.error='';
+  try{
+    const [profiles,reviews,activity]=await Promise.all([
+      SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier,created_at').order('display_name'),
+      SUPABASE.client.from('zfc_hr_reviews').select('*').order('created_at',{ascending:false}),
+      SUPABASE.client.rpc('zfc_hr_activity_summary')
+    ]);
+    if(profiles.error) throw profiles.error;
+    if(reviews.error) throw reviews.error;
+    if(activity.error) throw activity.error;
+    HR.profiles=profiles.data||[];
+    HR.reviews=reviews.data||[];
+    HR.activity=activity.data||[];
+    HR.loaded=true;
+  }catch(error){
+    HR.error=`HR-Daten konnten nicht geladen werden: ${error.message||error}`;
+    HR.loaded=false;
+    console.error('HR data load failed',error);
+  }finally{
+    HR.loading=false;
+    if(ROUTE.page==='hr') render();
+  }
+}
+function pageHR(profileId){
+  if(currentTier()<3) return '<div class="panel"><h2>Zugriff verweigert</h2><p>Der HR-Bereich ist vertraulich und nur für Tier 3 freigegeben.</p></div>';
+  if(!HR.loaded&&!HR.loading) loadHRData();
+  if(HR.loading||!HR.loaded&&!HR.error) return '<div class="pagehead"><div><div class="eyebrow">Tier 3 · Vertraulich</div><h1>HR <b>Mitarbeitendenprofile</b></h1></div></div><div class="panel"><div class="loading">HR-Profile und geschützte Beurteilungen werden geladen …</div></div>';
+  if(HR.error) return `<div class="pagehead"><div><div class="eyebrow">Tier 3 · Vertraulich</div><h1>HR <b>Mitarbeitendenprofile</b></h1></div></div><div class="panel"><div class="case-document-error" role="alert">${esc(HR.error)}</div><button class="btn primary" onclick="retryHRData()">Erneut laden</button></div>`;
+  const selected=HR.profiles.find(profile=>profile.id===profileId);
+  const profileCards=HR.profiles.map(profile=>{
+    const metrics=HR.activity.find(row=>row.employee_id===profile.id)||{};
+    const reviewCount=HR.reviews.filter(review=>review.employee_id===profile.id).length;
+    return `<button class="hr-profile-card ${profile.id===profileId?'active':''}" onclick="go('hr','${profile.id}')"><strong>${esc(profile.display_name||profile.email)}</strong><span>${esc(profile.position||'Steward')} · Tier ${Number(profile.access_tier)||1}</span><small>${Number(metrics.documents_created)||0} Dokumentversionen · ${reviewCount} Beurteilungen</small></button>`;
+  }).join('');
+  const directory=`<section class="panel"><div class="hr-section-heading"><div><h2>Mitarbeitendenprofile</h2><p>Alle angelegten Benutzerkonten · Zugriff ausschließlich für Tier 3</p></div><span class="tag">${HR.profiles.length} Profile</span></div><div class="hr-profile-list">${profileCards||'<div class="empty">Es sind noch keine Benutzerprofile angelegt.</div>'}</div></section>`;
+  if(!selected) return `<div class="pagehead"><div><div class="eyebrow">Personal · Monitoring &amp; Qualität</div><h1>HR <b>Mitarbeitendenprofile</b></h1></div></div><div class="panel hr-privacy-note"><strong>VERTRAULICH · TIER 3</strong><span>Systemkennzahlen dienen nur als Aktivitätskontext. Beurteilungen werden ausschließlich von Tier 3 verfasst; es gibt keine automatische Gesamtnote oder Rangliste.</span></div>${directory}`;
+  const metrics=HR.activity.find(row=>row.employee_id===selected.id)||{};
+  const selectedReviews=HR.reviews.filter(review=>review.employee_id===selected.id);
+  const editing=selectedReviews.find(review=>review.id===HR.editingReviewId);
+  const reviewFields=[
+    ['quality_assessment','Fachliche Qualität'],
+    ['rule_knowledge','Regel- und Prozesskenntnis'],
+    ['documentation','Sorgfalt und Dokumentation'],
+    ['communication','Kommunikation und Zusammenarbeit'],
+    ['reliability','Zuverlässigkeit und Fristen']
+  ];
+  const textarea=(id,label,value='')=>`<div class="field"><label for="hr_${id}">${esc(label)}</label><textarea id="hr_${id}" rows="3">${esc(value)}</textarea></div>`;
+  const reviewForm=`<section class="panel"><div class="hr-section-heading"><div><h2>${editing?'Beurteilung bearbeiten':'Neue Beurteilung'}</h2><p>Qualitative, arbeitsbezogene Einschätzung mit konkreten Beispielen. Keine automatische Bewertung oder Gesamtnote.</p></div>${editing?'<button class="btn" onclick="cancelHREdit()">Abbrechen</button>':''}</div>
+    <div class="grid cols-2"><div class="field"><label for="hr_period_start">Beurteilungszeitraum von</label><input id="hr_period_start" type="date" value="${esc(editing?.period_start||'')}" required></div><div class="field"><label for="hr_period_end">Beurteilungszeitraum bis</label><input id="hr_period_end" type="date" value="${esc(editing?.period_end||'')}" required></div></div>
+    <div class="grid cols-2">${reviewFields.map(([key,label])=>textarea(key,label,editing?.[key]||'')).join('')}</div>
+    <div class="grid cols-2">${textarea('strengths','Stärken und positive Beiträge',editing?.strengths||'')}${textarea('development_areas','Konkrete Entwicklungsfelder',editing?.development_areas||'')}${textarea('agreed_actions','Vereinbarte nächste Schritte',editing?.agreed_actions||'')}${textarea('summary','Zusammenfassung',editing?.summary||'')}</div>
+    <div class="field"><label for="hr_follow_up_date">Vereinbarter Folgetermin (optional)</label><input id="hr_follow_up_date" type="date" value="${esc(editing?.follow_up_date||'')}"></div>
+    <button class="btn primary" onclick="saveHRReview('${selected.id}')">${editing?'Änderungen speichern':'Beurteilung speichern'}</button><span id="hr_review_status" class="footer-note" role="status"></span></section>`;
+  const reviewCards=selectedReviews.map(review=>`<article class="hr-review-card"><div class="hr-section-heading"><div><strong>${fmtDate(review.period_start)} – ${fmtDate(review.period_end)}</strong><small>${esc(review.reviewer_name||'Tier 3')} · ${fmtDateTime(review.created_at)}</small></div><div class="actions"><button class="btn small gold" onclick="generateHRReviewPdf('${review.id}')">Vertrauliches PDF erstellen</button><button class="btn small" onclick="editHRReview('${review.id}')">Bearbeiten</button><button class="btn small danger" onclick="deleteHRReview('${review.id}')">Löschen</button></div></div><div class="grid cols-2">${reviewFields.map(([key,label])=>`<div><b>${esc(label)}</b><p>${nl2br(review[key]||'—')}</p></div>`).join('')}</div><div class="grid cols-2"><div><b>Stärken</b><p>${nl2br(review.strengths||'—')}</p></div><div><b>Entwicklungsfelder</b><p>${nl2br(review.development_areas||'—')}</p></div><div><b>Nächste Schritte</b><p>${nl2br(review.agreed_actions||'—')}</p></div><div><b>Zusammenfassung</b><p>${nl2br(review.summary||'—')}</p></div></div>${review.follow_up_date?`<small>Folgetermin: ${fmtDate(review.follow_up_date)}</small>`:''}</article>`).join('');
+  return `<div class="pagehead"><div><div class="eyebrow">Personal · Monitoring &amp; Qualität · Vertraulich</div><h1>HR <b>${esc(selected.display_name||selected.email)}</b></h1></div><div class="actions"><button class="btn" onclick="go('hr')">Alle Profile</button><button class="btn" onclick="go('manage')">Verwaltung</button></div></div>
+    <div class="panel hr-privacy-note"><strong>VERTRAULICH · TIER 3</strong><span>Beurteilungen sind nur für Tier 3 sichtbar. Aktivitätszahlen sind reine Systemindikatoren, keine Leistungsnote und kein automatisches Urteil.</span></div>${directory}
+    <section class="panel"><div class="hr-section-heading"><div><h2>Profilübersicht</h2><p>${esc(selected.position||'Steward')} · Tier ${Number(selected.access_tier)||1} · Konto seit ${fmtDate(String(selected.created_at||'').slice(0,10))}</p><p>${esc(selected.email)}</p></div><span class="tag">${selectedReviews.length} Beurteilungen</span></div><div class="grid cols-4 hr-metrics"><div class="stat"><div class="n">${Number(metrics.documents_created)||0}</div><div class="l">Dokumentversionen erstellt</div></div><div class="stat"><div class="n">${Number(metrics.draft_documents)||0}</div><div class="l">Aktuelle Entwürfe</div></div><div class="stat"><div class="n">${Number(metrics.returned_documents)||0}</div><div class="l">Zur Ergänzung zurückgegeben</div></div><div class="stat"><div class="n">${Number(metrics.reviews_completed)||0}</div><div class="l">Dokumentenprüfungen</div></div></div><p class="footer-note">Die Kennzahlen zählen dokumentierte Systemereignisse und erfassen nicht alle Tätigkeiten oder deren Schwierigkeit.</p></section>
+    ${reviewForm}<section class="panel"><div class="hr-section-heading"><h2>Beurteilungshistorie</h2><span>${selectedReviews.length} Einträge</span></div>${reviewCards||'<div class="empty">Für dieses Profil liegen noch keine Beurteilungen vor.</div>'}</section>`;
+}
+function retryHRData(){ HR.loaded=false; HR.error=''; loadHRData(); }
+function cancelHREdit(){ HR.editingReviewId=null; render(); }
+function editHRReview(reviewId){ HR.editingReviewId=reviewId; render(); }
+async function saveHRReview(employeeId){
+  if(currentTier()<3) return;
+  const value=id=>document.getElementById(`hr_${id}`)?.value.trim()||'';
+  const status=document.getElementById('hr_review_status');
+  const payload={
+    employee_id:employeeId,period_start:value('period_start'),period_end:value('period_end'),
+    quality_assessment:value('quality_assessment'),rule_knowledge:value('rule_knowledge'),
+    documentation:value('documentation'),communication:value('communication'),reliability:value('reliability'),
+    strengths:value('strengths'),development_areas:value('development_areas'),
+    agreed_actions:value('agreed_actions'),summary:value('summary'),follow_up_date:value('follow_up_date')||null
+  };
+  if(Object.entries(payload).some(([key,item])=>key!=='follow_up_date'&&!String(item||'').trim())){
+    if(status) status.textContent='Bitte den Zeitraum und alle Beurteilungsfelder ausfüllen.';
+    return;
+  }
+  if(payload.period_end<payload.period_start){ if(status) status.textContent='Das Ende des Beurteilungszeitraums muss nach dessen Beginn liegen.'; return; }
+  try{
+    const query=HR.editingReviewId
+      ?SUPABASE.client.from('zfc_hr_reviews').update(payload).eq('id',HR.editingReviewId)
+      :SUPABASE.client.from('zfc_hr_reviews').insert(payload);
+    const result=await query.select('*').single();
+    if(result.error) throw result.error;
+    const index=HR.reviews.findIndex(review=>review.id===result.data.id);
+    if(index>=0) HR.reviews[index]=result.data; else HR.reviews.unshift(result.data);
+    HR.editingReviewId=null;
+    render();
+    showAccessNotice('Vertrauliche HR-Beurteilung gespeichert.');
+  }catch(error){
+    if(status) status.textContent=`Beurteilung konnte nicht gespeichert werden: ${error.message||error}`;
+    console.error('HR review save failed',error);
+  }
+}
+async function deleteHRReview(reviewId){
+  if(currentTier()<3||!confirm('Diese HR-Beurteilung endgültig löschen?')) return;
+  const result=await SUPABASE.client.from('zfc_hr_reviews').delete().eq('id',reviewId);
+  if(result.error){ showAccessNotice(`Beurteilung konnte nicht gelöscht werden: ${result.error.message}`); return; }
+  HR.reviews=HR.reviews.filter(review=>review.id!==reviewId);
+  if(HR.editingReviewId===reviewId) HR.editingReviewId=null;
+  render();
+}
+function generateHRReviewPdf(reviewId){
+  if(currentTier()<3){ showAccessNotice('HR-Berichte sind vertraulich und nur für Tier 3 freigegeben.'); return; }
+  const review=HR.reviews.find(item=>item.id===reviewId), employee=HR.profiles.find(item=>item.id===review?.employee_id);
+  if(!review||!employee){ showAccessNotice('Beurteilung oder Profil nicht gefunden.'); return; }
+  if(!window.jspdf?.jsPDF){ showAccessNotice('PDF-Engine nicht verfügbar. Bitte Seite neu laden.'); return; }
+  const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const left=18,right=192; let y=18;
+  pdf.setFont('helvetica','bold'); pdf.setFontSize(18); pdf.setTextColor(200,16,46); pdf.text('ZFC RACING · HR',left,y);
+  pdf.setFontSize(9); pdf.setTextColor(70,70,70); pdf.text('VERTRAULICH · NUR FÜR TIER 3',right,y,{align:'right'});
+  y+=12; pdf.setFontSize(15); pdf.setTextColor(20,20,20); pdf.text('Mitarbeitendenbeurteilung',left,y); y+=8;
+  const addSection=(heading,text)=>{
+    if(y>265){ pdf.addPage(); y=20; }
+    pdf.setFont('helvetica','bold'); pdf.setFontSize(11); pdf.setTextColor(163,131,27); pdf.text(heading,left,y); y+=6;
+    pdf.setFont('helvetica','normal'); pdf.setFontSize(10); pdf.setTextColor(30,30,30);
+    const lines=pdf.splitTextToSize(String(text||'—'),right-left);
+    for(const line of lines){ if(y>278){ pdf.addPage(); y=20; } pdf.text(line,left,y); y+=5; }
+    y+=3;
+  };
+  addSection('Mitarbeitendenprofil',`${employee.display_name||employee.email} · ${employee.position||'Steward'} · Tier ${employee.access_tier}`);
+  addSection('Beurteilungszeitraum',`${fmtDate(review.period_start)} bis ${fmtDate(review.period_end)}`);
+  addSection('Fachliche Qualität',review.quality_assessment);
+  addSection('Regel- und Prozesskenntnis',review.rule_knowledge);
+  addSection('Sorgfalt und Dokumentation',review.documentation);
+  addSection('Kommunikation und Zusammenarbeit',review.communication);
+  addSection('Zuverlässigkeit und Fristen',review.reliability);
+  addSection('Stärken und positive Beiträge',review.strengths);
+  addSection('Konkrete Entwicklungsfelder',review.development_areas);
+  addSection('Vereinbarte nächste Schritte',review.agreed_actions);
+  addSection('Zusammenfassung',review.summary);
+  if(review.follow_up_date) addSection('Vereinbarter Folgetermin',fmtDate(review.follow_up_date));
+  addSection('Erstellt von',`${review.reviewer_name||'Tier 3'} · ${fmtDateTime(review.created_at)}`);
+  pdf.save(`HR-Beurteilung-${String(employee.display_name||employee.email).replace(/[^a-z0-9-]+/gi,'-')}-${review.period_start}.pdf`);
 }
 async function createManagedUser(){
   const status=document.getElementById('new_user_status');
