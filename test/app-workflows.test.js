@@ -76,3 +76,26 @@ test('Tier 2 can view Tier 1 areas and Tier 3 can view every registered area',()
   vm.runInContext(`AUTH.profile={id:'tier-3',access_tier:3};`,context);
   assert.equal(vm.runInContext(`Object.keys(PAGE_TIERS).every(canAccessPage)`,context),true);
 });
+
+test('Tier 3 HR profile includes staff lifecycle, checklists, training, and review workflows',()=>{
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'reviewer',access_tier:3};HR.loaded=true;HR.profiles=[{id:'employee-1',display_name:'Racing Steward',email:'staff@example.test',position:'Steward',access_tier:1,created_at:'2026-01-01'}];HR.staffRecords=[];HR.reviews=[];HR.training=[];HR.activity=[];`,context);
+  const page=vm.runInContext(`pageHR('employee-1')`,context);
+  for(const section of ['Staff-Stammdaten','Onboarding-Checkliste','Schulungen &amp; Nachweise','Check-in / Gespräch dokumentieren','Offboarding']) {
+    assert.ok(page.includes(section),`HR page should expose ${section}`);
+  }
+  assert.match(page,/id="hr_employment_status"/);
+  assert.match(page,/saveHRStaffRecord/);
+  assert.match(page,/saveHRTraining/);
+  assert.match(page,/saveHRReview/);
+});
+
+test('HR data schema is tier-3-only and supports realtime synchronization',()=>{
+  for(const table of ['zfc_hr_staff_records','zfc_hr_reviews','zfc_hr_training']) {
+    assert.match(schema,new RegExp(`alter table public\\.${table} enable row level security`));
+    assert.match(schema,new RegExp(`create policy ${table}_tier3_all[\\s\\S]*?public\\.zfc_current_tier\\(\\) >= 3`));
+    assert.match(schema,new RegExp(`tablename='${table}'`));
+  }
+  assert.match(schema,/create or replace function public\.zfc_hr_activity_summary\(\)[\s\S]*?if public\.zfc_current_tier\(\) < 3 then/);
+  assert.match(schema,/create trigger zfc_stamp_hr_review/);
+});

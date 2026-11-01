@@ -1649,3 +1649,234 @@ create policy zfc_case_document_pdf_insert
 				)
 		)
 	);
+
+-- Vertraulicher HR-Bereich: getrennt vom für Tier 1/2 sichtbaren App-State.
+create table if not exists public.zfc_hr_staff_records (
+	employee_id uuid primary key references public.zfc_user_profiles(id) on delete cascade,
+	department text not null default '',
+	job_title text not null default '',
+	staff_type text not null default 'Steward'
+		check (staff_type in ('Steward','Administration','Rennleitung','Esport','Support','Gast / befristet')),
+	employment_status text not null default 'Onboarding'
+		check (employment_status in ('Onboarding','Aktiv','Beurlaubt','Offboarding','Inaktiv')),
+	contract_type text not null default 'Freiwillig / ehrenamtlich',
+	start_date date,
+	end_date date,
+	weekly_hours numeric(5,2) check (weekly_hours between 0 and 80),
+	timezone text not null default '',
+	skills text[] not null default '{}',
+	internal_notes text not null default '',
+	onboarding_checklist jsonb not null default '[]'::jsonb check (jsonb_typeof(onboarding_checklist) = 'array'),
+	offboarding_checklist jsonb not null default '[]'::jsonb check (jsonb_typeof(offboarding_checklist) = 'array'),
+	created_by uuid references public.zfc_user_profiles(id),
+	updated_by uuid references public.zfc_user_profiles(id),
+	created_at timestamptz not null default now(),
+	updated_at timestamptz not null default now(),
+	check (start_date is null or end_date is null or end_date >= start_date)
+);
+
+create table if not exists public.zfc_hr_reviews (
+	id uuid primary key default gen_random_uuid(),
+	employee_id uuid not null references public.zfc_user_profiles(id) on delete cascade,
+	review_type text not null default 'Regelmäßiger Check-in'
+		check (review_type in ('Regelmäßiger Check-in','Leistungs- und Entwicklungsdialog','Probezeitgespräch','Rollen- / Aufgabenwechsel','Abschlussgespräch')),
+	review_status text not null default 'Entwurf' check (review_status in ('Entwurf','Abgeschlossen')),
+	period_start date not null,
+	period_end date not null,
+	quality_assessment text not null default '',
+	rule_knowledge text not null default '',
+	documentation text not null default '',
+	communication text not null default '',
+	reliability text not null default '',
+	strengths text not null default '',
+	development_areas text not null default '',
+	agreed_actions text not null default '',
+	summary text not null default '',
+	follow_up_date date,
+	reviewer_id uuid references public.zfc_user_profiles(id),
+	reviewer_name text not null default '',
+	created_by uuid references public.zfc_user_profiles(id),
+	updated_by uuid references public.zfc_user_profiles(id),
+	created_at timestamptz not null default now(),
+	updated_at timestamptz not null default now(),
+	check (period_end >= period_start)
+);
+
+create table if not exists public.zfc_hr_training (
+	id uuid primary key default gen_random_uuid(),
+	employee_id uuid not null references public.zfc_user_profiles(id) on delete cascade,
+	title text not null check (char_length(btrim(title)) between 1 and 160),
+	category text not null default 'Regelwerk',
+	provider text not null default '',
+	status text not null default 'Abgeschlossen' check (status in ('Geplant','In Bearbeitung','Abgeschlossen')),
+	completed_on date not null default current_date,
+	expires_on date,
+	notes text not null default '',
+	created_by uuid references public.zfc_user_profiles(id),
+	updated_by uuid references public.zfc_user_profiles(id),
+	created_at timestamptz not null default now(),
+	updated_at timestamptz not null default now(),
+	check (expires_on is null or expires_on >= completed_on)
+);
+
+create index if not exists zfc_hr_reviews_employee_period_idx
+	on public.zfc_hr_reviews(employee_id, period_start desc);
+create index if not exists zfc_hr_reviews_follow_up_idx
+	on public.zfc_hr_reviews(follow_up_date) where follow_up_date is not null;
+create index if not exists zfc_hr_training_employee_idx
+	on public.zfc_hr_training(employee_id, completed_on desc);
+create index if not exists zfc_hr_training_expiry_idx
+	on public.zfc_hr_training(expires_on) where status = 'Abgeschlossen';
+
+alter table public.zfc_hr_staff_records enable row level security;
+alter table public.zfc_hr_reviews enable row level security;
+alter table public.zfc_hr_training enable row level security;
+alter table public.zfc_hr_staff_records replica identity full;
+alter table public.zfc_hr_reviews replica identity full;
+alter table public.zfc_hr_training replica identity full;
+
+drop policy if exists zfc_hr_staff_records_tier3_all on public.zfc_hr_staff_records;
+create policy zfc_hr_staff_records_tier3_all on public.zfc_hr_staff_records
+	for all to authenticated
+	using (public.zfc_current_tier() >= 3)
+	with check (public.zfc_current_tier() >= 3);
+drop policy if exists zfc_hr_reviews_tier3_all on public.zfc_hr_reviews;
+create policy zfc_hr_reviews_tier3_all on public.zfc_hr_reviews
+	for all to authenticated
+	using (public.zfc_current_tier() >= 3)
+	with check (public.zfc_current_tier() >= 3);
+drop policy if exists zfc_hr_training_tier3_all on public.zfc_hr_training;
+create policy zfc_hr_training_tier3_all on public.zfc_hr_training
+	for all to authenticated
+	using (public.zfc_current_tier() >= 3)
+	with check (public.zfc_current_tier() >= 3);
+
+revoke all on public.zfc_hr_staff_records, public.zfc_hr_reviews, public.zfc_hr_training from anon;
+grant select, insert, update, delete on public.zfc_hr_staff_records, public.zfc_hr_reviews, public.zfc_hr_training to authenticated;
+
+create or replace function public.zfc_stamp_hr_record()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+	if public.zfc_current_tier() < 3 or auth.uid() is null then
+		raise exception 'HR-Datensätze dürfen ausschließlich von Tier 3 bearbeitet werden.';
+	end if;
+	if tg_op = 'INSERT' then
+		new.created_by := auth.uid();
+	end if;
+	new.updated_by := auth.uid();
+	new.updated_at := now();
+	return new;
+end;
+$$;
+
+drop trigger if exists zfc_stamp_hr_staff_record on public.zfc_hr_staff_records;
+create trigger zfc_stamp_hr_staff_record
+	before insert or update on public.zfc_hr_staff_records
+	for each row execute function public.zfc_stamp_hr_record();
+drop trigger if exists zfc_stamp_hr_training on public.zfc_hr_training;
+create trigger zfc_stamp_hr_training
+	before insert or update on public.zfc_hr_training
+	for each row execute function public.zfc_stamp_hr_record();
+
+create or replace function public.zfc_stamp_hr_review()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+	profile_name text;
+begin
+	if public.zfc_current_tier() < 3 or auth.uid() is null then
+		raise exception 'HR-Gespräche dürfen ausschließlich von Tier 3 bearbeitet werden.';
+	end if;
+	select coalesce(nullif(display_name,''),email) into profile_name
+	from public.zfc_user_profiles where id = auth.uid();
+	if tg_op = 'INSERT' then
+		new.created_by := auth.uid();
+		new.reviewer_id := auth.uid();
+		new.reviewer_name := coalesce(profile_name,'Tier 3');
+	end if;
+	new.updated_by := auth.uid();
+	new.updated_at := now();
+	return new;
+end;
+$$;
+
+drop trigger if exists zfc_stamp_hr_review on public.zfc_hr_reviews;
+create trigger zfc_stamp_hr_review
+	before insert or update on public.zfc_hr_reviews
+	for each row execute function public.zfc_stamp_hr_review();
+
+create or replace function public.zfc_hr_activity_summary()
+returns table (
+	employee_id uuid,
+	documents_created bigint,
+	draft_documents bigint,
+	returned_documents bigint,
+	reviews_completed bigint
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+	if public.zfc_current_tier() < 3 then
+		raise exception 'HR-Kennzahlen sind ausschließlich für Tier 3 verfügbar.';
+	end if;
+	return query
+	select profile.id,
+		coalesce(documents.total,0),
+		coalesce(documents.drafts,0),
+		coalesce(documents.returned,0),
+		coalesce(reviews.completed,0)
+	from public.zfc_user_profiles profile
+	left join (
+		select doc.created_by as user_id,
+			count(*) as total,
+			count(*) filter (where doc.status = 'Entwurf') as drafts,
+			count(*) filter (where doc.status = 'Zur Ergänzung zurückgegeben') as returned
+		from public.zfc_case_documents doc
+		group by doc.created_by
+	) documents on documents.user_id = profile.id
+	left join (
+		select actor.user_id, count(distinct actor.document_id) as completed
+		from (
+			select doc.reviewed_by as user_id, doc.id as document_id
+			from public.zfc_case_documents doc
+			where doc.reviewed_by is not null
+			union all
+			select doc.approved_by as user_id, doc.id as document_id
+			from public.zfc_case_documents doc
+			where doc.approved_by is not null
+		) actor
+		group by actor.user_id
+	) reviews on reviews.user_id = profile.id;
+end;
+$$;
+
+revoke all on function public.zfc_stamp_hr_record() from public, anon, authenticated;
+revoke all on function public.zfc_stamp_hr_review() from public, anon, authenticated;
+revoke all on function public.zfc_hr_activity_summary() from public, anon;
+grant execute on function public.zfc_hr_activity_summary() to authenticated;
+
+do $$
+begin
+	if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+		if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='zfc_hr_staff_records') then
+			alter publication supabase_realtime add table public.zfc_hr_staff_records;
+		end if;
+		if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='zfc_hr_reviews') then
+			alter publication supabase_realtime add table public.zfc_hr_reviews;
+		end if;
+		if not exists (select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='zfc_hr_training') then
+			alter publication supabase_realtime add table public.zfc_hr_training;
+		end if;
+	end if;
+end;
+$$;

@@ -1045,3 +1045,97 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 .process-workflow-history table{min-width:720px}
 @media(max-width:820px){.process-workflow-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.access-notice-popup{right:16px;top:16px}}
 @media(max-width:520px){.process-workflow-summary{grid-template-columns:1fr}.process-workflow-actions .btn{width:100%}}
+
+/* ---------- Tier 3 HR staff office ---------- */
+.hr-metrics{margin-bottom:18px}
+.hr-section-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+.hr-section-heading h2{margin:4px 0}
+.hr-section-heading p{margin:3px 0 0;color:var(--grey);font-size:13px}
+.hr-privacy-note{display:flex;gap:12px;align-items:flex-start;border-left:3px solid #54d9e8}
+.hr-privacy-note strong{color:#79e5ef;font:11px var(--mono);letter-spacing:1px;white-space:nowrap}
+.hr-privacy-note span{color:var(--grey);font-size:13px;line-height:1.55}
+.hr-workflow{border-top:2px solid #54d9e8}
+.hr-workflow-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.hr-workflow-steps article{display:grid;align-content:start;gap:8px;min-height:145px;padding:15px;border:1px solid var(--line);border-top:2px solid #54d9e8;background:var(--black-3)}
+.hr-workflow-steps b{color:#b9fbff;font:700 11px var(--mono);letter-spacing:.5px}
+.hr-workflow-steps span{color:var(--grey);font-size:12px;line-height:1.55}
+.hr-search{max-width:520px;margin-bottom:14px}
+.hr-profile-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.hr-profile-card{display:grid;gap:5px;width:100%;padding:14px 15px;border:1px solid var(--line);border-left:3px solid #34444b;background:var(--black-3);color:var(--white);text-align:left;cursor:pointer}
+.hr-profile-card:hover,.hr-profile-card.active{border-color:#54d9e8;background:rgba(84,217,232,.07)}
+.hr-profile-card.active{box-shadow:0 0 18px rgba(84,217,232,.1)}
+.hr-profile-card strong{font-size:14px}
+.hr-profile-card>span{color:#b9fbff;font-size:12px}
+.hr-profile-card small{display:flex;align-items:center;gap:5px;flex-wrap:wrap;color:var(--grey);font-size:11px}
+.hr-profile-card .tag{font-size:9px;padding:3px 6px}
+.hr-checklist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0 18px}
+.hr-checklist label{display:flex;align-items:flex-start;gap:10px;padding:11px;border:1px solid var(--line);background:var(--black-3);color:var(--grey);font-size:12px;line-height:1.45;cursor:pointer}
+.hr-checklist input{accent-color:#54d9e8;margin:2px 0 0}
+.hr-checklist label:has(input:checked){border-color:rgba(84,217,232,.55);color:var(--white)}
+.hr-review-card{padding:17px 0;border-top:1px solid var(--line)}
+.hr-review-card:first-child{border-top:0}
+.hr-review-card .hr-section-heading{align-items:flex-start}
+.hr-review-card .hr-section-heading strong{margin-left:4px}
+.hr-review-card .hr-section-heading small{display:block;color:var(--grey);font-size:11px;margin-top:6px}
+.hr-review-card .grid>div{padding:11px;border:1px solid var(--line);background:var(--black-3)}
+.hr-review-card .grid b{color:#b9fbff;font-size:12px}
+.hr-review-card .grid p{margin:7px 0 0;color:var(--grey);font-size:12px;line-height:1.55;white-space:pre-wrap}
+.hr-profile-list .empty{grid-column:1/-1}
+.hr-search+.hr-profile-list{}
+.hr-profile-card[hidden]{display:none}
+.panel .hr-checklist+h3{margin-top:22px}
+.hr-profile-card small .tag.active{color:#92f2bd;border-color:rgba(84,220,150,.45)}
+.hr-profile-card small .tag.open{color:#f3ce79;border-color:rgba(243,206,121,.4)}
+
+/* Jarves case-opening sequence */
+.case-opening-overlay.is-opening{background:radial-gradient(ellipse at 50% 42%,#112a32 0,#081419 42%,#03070a 100%);animation:jarvesSceneIn .28s ease both}
+.case-opening-overlay.is-opening::before{inset:-10%;opacity:.55;background-image:linear-gradient(rgba(84,217,232,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(84,217,232,.07) 1px,transparent 1px);background-size:38px 38px;transform:perspective(650px) rotateX(58deg) scale(1.35);animation:openingGrid 3s linear infinite}
+.case-opening-stage{width:min(920px,calc(100% - 34px));text-align:left;animation:jarvesStageIn .55s cubic-bezier(.16,.8,.25,1) both}
+.case-opening-hud,.case-opening-footer{display:flex;justify-content:space-between;gap:12px;color:#527a82;font:9px var(--mono);letter-spacing:1.4px}
+.case-opening-hud{padding:0 2px 11px;border-bottom:1px solid rgba(84,217,232,.2)}
+.case-opening-hud span:nth-child(2){color:#79e5ef}
+.case-opening-hud i{display:inline-block;width:6px;height:6px;margin-right:5px;border-radius:50%;background:#79edac;box-shadow:0 0 9px #79edac;animation:jarvesLedPulse 1s ease-in-out infinite alternate}
+.case-opening-shell{display:grid;grid-template-columns:minmax(230px,.8fr) minmax(0,1.2fr);align-items:center;gap:clamp(22px,6vw,72px);padding:clamp(24px,6vw,58px) clamp(10px,4vw,36px)}
+.case-opening-visual{position:relative;display:grid;place-items:center;aspect-ratio:1;max-width:330px;width:100%;margin:auto}
+.case-opening-reactor{width:54%;height:54%;margin:0;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,#d8ffff 0 3%,#53e4ef 4% 8%,#0d3440 9% 29%,#08151a 30% 43%,transparent 44%);border:1px solid rgba(140,249,255,.9);box-shadow:0 0 22px #54d9e8,0 0 80px rgba(84,217,232,.42),inset 0 0 25px rgba(84,217,232,.55);animation:jarvesCoreFloat 2.8s ease-in-out infinite}
+.case-opening-reactor::before{inset:-13%;border:1px solid rgba(84,217,232,.45);border-left-color:transparent;animation:jarvesReactorSpin 4s linear infinite}
+.case-opening-reactor::after{inset:-28%;border:1px dashed rgba(185,251,255,.55);animation:jarvesReactorSpinReverse 8s linear infinite}
+.case-opening-core{width:18px;height:18px;border-radius:50%;background:#eaffff;box-shadow:0 0 10px 5px #54d9e8,0 0 45px 16px rgba(84,217,232,.7);animation:jarvesCorePulse 1.2s ease-in-out infinite alternate}
+.case-opening-core-ring{position:absolute;inset:23%;border:1px solid rgba(185,251,255,.8);border-radius:50%;animation:jarvesReactorSpinReverse 2.5s linear infinite}
+.case-opening-scan{position:absolute;left:8%;right:8%;height:1px;background:#d7ffff;box-shadow:0 0 10px 3px #54d9e8;animation:jarvesScan 2s ease-in-out infinite alternate}
+.case-opening-orbit{position:absolute;inset:12%;border:1px solid rgba(84,217,232,.28);border-radius:50%}
+.case-opening-orbit.orbit-a{transform:rotateX(68deg);animation:jarvesOrbit 6s linear infinite}
+.case-opening-orbit.orbit-b{inset:4%;transform:rotateY(68deg) rotateZ(35deg);border-color:rgba(185,251,255,.25);animation:jarvesOrbitReverse 8s linear infinite}
+.case-opening-orbit.orbit-c{inset:19%;transform:rotateX(74deg) rotateZ(90deg);border-style:dashed;animation:jarvesOrbit 10s linear infinite}
+.case-opening-particle{position:absolute;width:4px;height:4px;border-radius:50%;background:#c9ffff;box-shadow:0 0 12px 3px #54d9e8}
+.particle-a{top:12%;left:28%;animation:jarvesParticle 2.2s ease-in-out infinite alternate}
+.particle-b{right:12%;top:56%;animation:jarvesParticle 1.7s .3s ease-in-out infinite alternate-reverse}
+.particle-c{left:29%;bottom:12%;animation:jarvesParticle 2.5s .6s ease-in-out infinite alternate}
+.case-opening-data{position:absolute;padding:5px 7px;border:1px solid rgba(84,217,232,.3);background:rgba(3,10,13,.8);color:#58838b;font:8px var(--mono);letter-spacing:1px}
+.case-opening-data b{color:#a7faff;margin-left:4px}
+.data-a{top:8%;right:0}.data-b{bottom:8%;left:0}
+.case-opening-kicker{color:#7fe8f0;font:10px var(--mono);letter-spacing:1.8px}
+.case-opening-kicker span{color:#6e8c92}
+.case-opening-title{margin:16px 0 0;color:#e4ffff;font-size:clamp(20px,3vw,34px);line-height:1.15;letter-spacing:1.2px;text-shadow:0 0 24px rgba(84,217,232,.4)}
+.case-opening-copy{min-height:44px;margin:12px 0 0;color:#9ebfc4;font-size:14px;line-height:1.55}
+.case-opening-steps{display:flex;gap:8px;margin-top:23px}
+.case-opening-steps span{padding:7px 9px;border:1px solid #284149;color:#53727a;font:9px var(--mono);letter-spacing:1px;transition:all .3s ease}
+.case-opening-steps b{margin-left:4px;font-weight:400}
+.case-opening-steps span.active{border-color:#54d9e8;color:#bcfbff;background:rgba(84,217,232,.09);box-shadow:0 0 12px rgba(84,217,232,.12)}
+.case-opening-status{margin-top:17px;color:#79e5ef;font:10px var(--mono);letter-spacing:1.2px;text-transform:uppercase}
+.case-opening-progress{height:3px;margin:10px 0 0;max-width:none;border:0;background:#15272d}
+.case-opening-progress span{width:0;background:linear-gradient(90deg,#2c95a6,#b9fbff);animation:jarvesProgress 2s cubic-bezier(.16,.7,.25,1) forwards}
+.case-opening-footer{padding-top:10px;border-top:1px solid rgba(84,217,232,.16)}
+@keyframes jarvesSceneIn{from{opacity:0}to{opacity:1}}
+@keyframes jarvesStageIn{from{opacity:0;transform:translateY(12px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes jarvesLedPulse{to{opacity:.35;box-shadow:0 0 2px #79edac}}
+@keyframes jarvesCoreFloat{0%,100%{transform:translateY(0) scale(.98)}50%{transform:translateY(-5px) scale(1.02)}}
+@keyframes jarvesCorePulse{to{transform:scale(.7);opacity:.7}}
+@keyframes jarvesScan{from{transform:translateY(-58px);opacity:.1}to{transform:translateY(58px);opacity:.9}}
+@keyframes jarvesOrbit{to{transform:rotateX(68deg) rotateZ(360deg)}}
+@keyframes jarvesOrbitReverse{to{transform:rotateY(68deg) rotateZ(-325deg)}}
+@keyframes jarvesParticle{to{transform:translate(8px,-13px);opacity:.35}}
+@keyframes jarvesProgress{to{width:100%}}
+@media(max-width:760px){.hr-workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.case-opening-shell{grid-template-columns:1fr;gap:4px;padding-top:24px;padding-bottom:24px}.case-opening-visual{width:min(245px,70vw)}.case-opening-console{text-align:center}.case-opening-steps{justify-content:center}.case-opening-status{text-align:center}}
+@media(max-width:520px){.hr-profile-list,.hr-checklist,.hr-workflow-steps{grid-template-columns:1fr}.hr-privacy-note{flex-direction:column}.case-opening-hud,.case-opening-footer{font-size:7px;letter-spacing:.8px}.case-opening-visual{width:min(210px,58vw)}.case-opening-shell{padding:16px 4px}.case-opening-copy{min-height:0;font-size:12px}.case-opening-steps span{padding:6px 5px;font-size:8px}}
+@media(prefers-reduced-motion:reduce){.case-opening-overlay.is-opening,.case-opening-stage,.case-opening-reactor,.case-opening-reactor::before,.case-opening-reactor::after,.case-opening-core,.case-opening-core-ring,.case-opening-scan,.case-opening-orbit,.case-opening-particle,.case-opening-hud i,.case-opening-progress span{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}

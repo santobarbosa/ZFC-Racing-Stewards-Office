@@ -12,7 +12,7 @@ let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht 
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
 let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
 const CASE_DOCUMENTS = { loading:new Set(), loaded:new Set(), errorByCase:new Map(), saving:false };
-const HR = { profiles:[], reviews:[], activity:[], loading:false, loaded:false, error:'', editingReviewId:null };
+const HR = { profiles:[], staffRecords:[], reviews:[], training:[], activity:[], loading:false, loaded:false, refreshQueued:false, error:'', editingReviewId:null, editingTrainingId:null };
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -371,7 +371,7 @@ async function initSupabase(){
     SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
     const authState=await SUPABASE.client.auth.getSession();
     if(authState.error) throw authState.error;
-    if(!authState.data.session){ AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false; showPublicHome(); return; }
+    if(!authState.data.session){ AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false; Object.assign(HR,{profiles:[],staffRecords:[],reviews:[],training:[],activity:[],loaded:false,error:''}); showPublicHome(); return; }
     AUTH.session=authState.data.session;
     const profileResult=await SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier').eq('id',AUTH.session.user.id).single();
     if(profileResult.error){
@@ -390,6 +390,7 @@ async function initSupabase(){
       if(event==='SIGNED_OUT'){
         AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false;
         TIER_CHAT={messages:[],loading:false,sending:false,error:'',connected:false};
+        Object.assign(HR,{profiles:[],staffRecords:[],reviews:[],training:[],activity:[],loaded:false,loading:false,refreshQueued:false,error:'',editingReviewId:null,editingTrainingId:null});
         showPublicHome();
       }
     });
@@ -441,6 +442,12 @@ async function initSupabase(){
         if(ROUTE.page.startsWith('tier-office')||ROUTE.page==='escalations') render();
       }).on('postgres_changes',{event:'INSERT',schema:'public',table:'zfc_tier_chat_messages'}, payload=>{
         upsertTierChatMessage(payload.new);
+      }).on('postgres_changes',{event:'*',schema:'public',table:'zfc_hr_staff_records'},()=>{
+        scheduleHRRefresh();
+      }).on('postgres_changes',{event:'*',schema:'public',table:'zfc_hr_reviews'},()=>{
+        scheduleHRRefresh();
+      }).on('postgres_changes',{event:'*',schema:'public',table:'zfc_hr_training'},()=>{
+        scheduleHRRefresh();
       }).subscribe((status)=>{
         if(status==='SUBSCRIBED'){
           TIER_CHAT.connected=true;
@@ -1402,6 +1409,7 @@ function render(){
       overlay.hidden=true;
       overlay.classList.add('is-hidden');
       overlay.classList.remove('is-loading');
+      overlay.classList.remove('is-opening');
       overlay.innerHTML='';
     }
   }
@@ -1468,21 +1476,38 @@ function showCaseOpening(mode,caseId){
   overlay.hidden=false;
   overlay.classList.remove('is-hidden');
   overlay.classList.remove('is-loading');
-  if(!isNew) overlay.classList.add('is-loading');
-  overlay.innerHTML=`<div class="case-opening-stage"><div class="case-opening-reactor" aria-hidden="true"></div><h2 class="case-opening-title">${isNew?'Willkommen bei Jarves':'Akte wird geladen'}</h2><p class="case-opening-copy">${isNew?'Mit erweiterten Funktionen kannst du ab sofort Jarves in den Akten nutzen.':'Jarves lädt die bestehende Akte für dich.'}</p><div class="case-opening-status">${isNew?'Jarves System wird initialisiert':'Akte wird geöffnet'}</div><div class="case-opening-progress" aria-hidden="true"><span></span></div></div>`;
-  if(isNew){
-    setTimeout(()=>{
-      if(CASE_OPENING_SEEN!==key||overlay.hidden) return;
-      overlay.classList.add('is-loading');
-      overlay.querySelector('.case-opening-title').textContent='Akte wird geladen';
-      overlay.querySelector('.case-opening-copy').textContent='Jarves bereitet die Aktenansicht vor.';
-      overlay.querySelector('.case-opening-status').textContent='Ladefortschritt';
-      overlay.querySelector('.case-opening-progress span').style.animation='caseLoading 4s ease-out forwards';
-      setTimeout(()=>closeCaseOpening(overlay,key),4000);
-    },6000);
-  } else setTimeout(()=>closeCaseOpening(overlay,key),1650);
+  overlay.classList.add('is-opening');
+  overlay.innerHTML=`<div class="case-opening-stage" role="status" aria-live="polite">
+    <div class="case-opening-hud"><span>JARVES · CASE OS</span><span><i></i> SECURE SESSION</span><span>${isNew?'NEW CASE':'CASE FILE'}</span></div>
+    <div class="case-opening-shell"><div class="case-opening-visual" aria-hidden="true">
+      <div class="case-opening-orbit orbit-a"></div><div class="case-opening-orbit orbit-b"></div><div class="case-opening-orbit orbit-c"></div>
+      <div class="case-opening-reactor"><span class="case-opening-core"></span><span class="case-opening-core-ring"></span><span class="case-opening-scan"></span></div>
+      <span class="case-opening-particle particle-a"></span><span class="case-opening-particle particle-b"></span><span class="case-opening-particle particle-c"></span>
+      <div class="case-opening-data data-a">SYNC <b>LIVE</b></div><div class="case-opening-data data-b">AUTH <b>T3 / T2</b></div>
+    </div><div class="case-opening-console">
+      <div class="case-opening-kicker">RACING STEWARDS OFFICE <span>· SYSTEM ONLINE</span></div>
+      <h2 class="case-opening-title">${isNew?'JARVES INITIALISIERT':'AKTENZUGRIFF WIRD GEPRÜFT'}</h2>
+      <p class="case-opening-copy">${isNew?'Neue Fallakte wird vorbereitet.':'Berechtigungen und aktueller Aktenstand werden geladen.'}</p>
+      <div class="case-opening-steps"><span class="active">01 <b>AUTH</b></span><span>02 <b>SYNC</b></span><span>03 <b>READY</b></span></div>
+      <div class="case-opening-status">${isNew?'Sichere Sitzung wird aufgebaut …':'Zugriff wird verifiziert …'}</div>
+      <div class="case-opening-progress"><span></span></div>
+    </div></div><div class="case-opening-footer"><span>ENCRYPTED WORKSPACE</span><span>© ZFC STEWARD SYSTEMS</span></div>
+  </div>`;
+  const stage=overlay.querySelector('.case-opening-steps');
+  const status=overlay.querySelector('.case-opening-status');
+  const copy=overlay.querySelector('.case-opening-copy');
+  const steps=stage?.querySelectorAll('span')||[];
+  const updateStage=(index,message,description)=>{
+    if(CASE_OPENING_SEEN!==key||overlay.hidden) return;
+    steps.forEach((step,stepIndex)=>step.classList.toggle('active',stepIndex<=index));
+    if(status) status.textContent=message;
+    if(description) copy.textContent=description;
+  };
+  setTimeout(()=>updateStage(1,'Aktenstand wird synchronisiert …','Änderungen werden mit dem gemeinsamen Arbeitsbereich abgeglichen.'),650);
+  setTimeout(()=>updateStage(2,'Arbeitsbereich bereit','Jarves öffnet die geschützte Aktenansicht.'),1350);
+  setTimeout(()=>closeCaseOpening(overlay,key),isNew?2550:2050);
 }
-function closeCaseOpening(overlay,key){ if(CASE_OPENING_SEEN!==key) return; overlay.hidden=true; overlay.innerHTML=''; }
+function closeCaseOpening(overlay,key){ if(CASE_OPENING_SEEN!==key) return; overlay.hidden=true; overlay.classList.add('is-hidden'); overlay.innerHTML=''; }
 
 /* ============================= FINANCE ============================= */
 const FINANCE_CATEGORIES = ['Startkapital','Sponsoring','Preisgeld','Teilnahmegebühr','Ticketverkauf','Rennveranstaltung','Streckenmiete','Server & Technik','Lizenzen','Marketing','Teamprämien','Reisekosten','Sonstiges'];
@@ -4170,79 +4195,186 @@ async function loadHRData(){
   if(!SUPABASE.client){ HR.error='Für HR-Daten ist eine sichere Supabase-Verbindung erforderlich.'; HR.loaded=true; if(ROUTE.page==='hr') render(); return; }
   HR.loading=true; HR.error='';
   try{
-    const [profiles,reviews,activity]=await Promise.all([
+    const [profiles,staff,reviews,training,activity]=await Promise.all([
       SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier,created_at').order('display_name'),
+      SUPABASE.client.from('zfc_hr_staff_records').select('*').order('updated_at',{ascending:false}),
       SUPABASE.client.from('zfc_hr_reviews').select('*').order('created_at',{ascending:false}),
+      SUPABASE.client.from('zfc_hr_training').select('*').order('completed_on',{ascending:false}),
       SUPABASE.client.rpc('zfc_hr_activity_summary')
     ]);
     if(profiles.error) throw profiles.error;
+    if(staff.error) throw staff.error;
     if(reviews.error) throw reviews.error;
+    if(training.error) throw training.error;
     if(activity.error) throw activity.error;
     HR.profiles=profiles.data||[];
+    HR.staffRecords=staff.data||[];
     HR.reviews=reviews.data||[];
+    HR.training=training.data||[];
     HR.activity=activity.data||[];
     HR.loaded=true;
   }catch(error){
-    HR.error=`HR-Daten konnten nicht geladen werden: ${error.message||error}`;
+    const schemaMissing=['PGRST202','PGRST205','42P01','42883'].includes(error.code)||/could not find the table|function .* does not exist/i.test(error.message||'');
+    HR.error=`HR-Daten konnten nicht geladen werden: ${error.message||error}${schemaMissing?' Bitte das aktuelle supabase_schema.sql im Supabase SQL Editor ausführen.':''}`;
     HR.loaded=false;
     console.error('HR data load failed',error);
   }finally{
     HR.loading=false;
+    if(HR.refreshQueued){
+      HR.refreshQueued=false;
+      HR.loaded=false;
+      loadHRData();
+      return;
+    }
     if(ROUTE.page==='hr') render();
   }
+}
+function scheduleHRRefresh(){
+  if(currentTier()<3) return;
+  if(HR.loading){ HR.refreshQueued=true; return; }
+  HR.loaded=false;
+  if(ROUTE.page==='hr') loadHRData();
+}
+const HR_ONBOARDING_STEPS=[
+  ['account','Konto, Tier und Zuständigkeit geprüft'],
+  ['rules','Regelwerk und Verhaltenskodex bestätigt'],
+  ['tools','Zugänge und Kommunikationskanäle eingerichtet'],
+  ['training','Einweisung und erforderliche Schulungen geplant'],
+  ['mentor','Ansprechperson und erste Aufgaben zugewiesen']
+];
+const HR_OFFBOARDING_STEPS=[
+  ['handover','Offene Aufgaben und Akten übergeben'],
+  ['access','Zugriffe und Rollen zum Austrittsdatum prüfen'],
+  ['equipment','Liga-Eigentum und Unterlagen zurückgegeben'],
+  ['archive','Abschlussgespräch und Personalunterlagen dokumentiert']
+];
+const HR_REVIEW_TYPES=['Regelmäßiger Check-in','Leistungs- und Entwicklungsdialog','Probezeitgespräch','Rollen- / Aufgabenwechsel','Abschlussgespräch'];
+function hrStaffRecord(employeeId){ return HR.staffRecords.find(record=>record.employee_id===employeeId)||null; }
+function hrChecklistHtml(prefix,items,stored=[]){
+  return `<div class="hr-checklist">${items.map(([id,label])=>{
+    const checked=stored.find(item=>item.id===id)?.done;
+    return `<label><input id="hr_${prefix}_${id}" type="checkbox" ${checked?'checked':''}><span>${esc(label)}</span></label>`;
+  }).join('')}</div>`;
 }
 function pageHR(profileId){
   if(currentTier()<3) return '<div class="panel"><h2>Zugriff verweigert</h2><p>Der HR-Bereich ist vertraulich und nur für Tier 3 freigegeben.</p></div>';
   if(!HR.loaded&&!HR.loading) loadHRData();
-  if(HR.loading||!HR.loaded&&!HR.error) return '<div class="pagehead"><div><div class="eyebrow">Tier 3 · Vertraulich</div><h1>HR <b>Mitarbeitendenprofile</b></h1></div></div><div class="panel"><div class="loading">HR-Profile und geschützte Beurteilungen werden geladen …</div></div>';
-  if(HR.error) return `<div class="pagehead"><div><div class="eyebrow">Tier 3 · Vertraulich</div><h1>HR <b>Mitarbeitendenprofile</b></h1></div></div><div class="panel"><div class="case-document-error" role="alert">${esc(HR.error)}</div><button class="btn primary" onclick="retryHRData()">Erneut laden</button></div>`;
+  if(HR.loading||!HR.loaded&&!HR.error) return '<div class="pagehead"><div><div class="eyebrow">Tier 3 · Vertraulich</div><h1>HR <b>Staff Office</b></h1></div></div><div class="panel"><div class="loading">Personalprofile und HR-Daten werden geladen …</div></div>';
+  if(HR.error) return `<div class="pagehead"><div><div class="eyebrow">Tier 3 · Vertraulich</div><h1>HR <b>Staff Office</b></h1></div></div><div class="panel"><div class="case-document-error" role="alert">${esc(HR.error)}</div><button class="btn primary" onclick="retryHRData()">Erneut laden</button></div>`;
+
   const selected=HR.profiles.find(profile=>profile.id===profileId);
+  const statusOf=profile=>hrStaffRecord(profile.id)?.employment_status||'Nicht erfasst';
+  const activeCount=HR.profiles.filter(profile=>statusOf(profile)==='Aktiv').length;
+  const onboardingCount=HR.profiles.filter(profile=>statusOf(profile)==='Onboarding').length;
+  const followUps=HR.reviews.filter(review=>review.follow_up_date&&review.follow_up_date<=new Date(Date.now()+30*86400000).toISOString().slice(0,10)).length;
+  const expiringTraining=HR.training.filter(item=>item.status==='Abgeschlossen'&&item.expires_on&&item.expires_on<=new Date(Date.now()+30*86400000).toISOString().slice(0,10)).length;
   const profileCards=HR.profiles.map(profile=>{
     const metrics=HR.activity.find(row=>row.employee_id===profile.id)||{};
     const reviewCount=HR.reviews.filter(review=>review.employee_id===profile.id).length;
-    return `<button class="hr-profile-card ${profile.id===profileId?'active':''}" onclick="go('hr','${profile.id}')"><strong>${esc(profile.display_name||profile.email)}</strong><span>${esc(profile.position||'Steward')} · Tier ${Number(profile.access_tier)||1}</span><small>${Number(metrics.documents_created)||0} Dokumentversionen · ${reviewCount} Beurteilungen</small></button>`;
+    const staff=hrStaffRecord(profile.id);
+    const searchText=`${profile.display_name||''} ${profile.email||''} ${profile.position||''} ${staff?.department||''}`.toLocaleLowerCase('de').replace(/["']/g,'');
+    return `<button class="hr-profile-card ${profile.id===profileId?'active':''}" data-hr-profile="${esc(searchText)}" onclick="go('hr','${profile.id}')"><strong>${esc(profile.display_name||profile.email)}</strong><span>${esc(staff?.job_title||profile.position||'Steward')} · Tier ${Number(profile.access_tier)||1}</span><small><span class="tag ${statusOf(profile)==='Aktiv'?'active':statusOf(profile)==='Nicht erfasst'?'open':''}">${esc(statusOf(profile))}</span> · ${Number(metrics.documents_created)||0} Dokumentversionen · ${reviewCount} Gespräche</small></button>`;
   }).join('');
-  const directory=`<section class="panel"><div class="hr-section-heading"><div><h2>Mitarbeitendenprofile</h2><p>Alle angelegten Benutzerkonten · Zugriff ausschließlich für Tier 3</p></div><span class="tag">${HR.profiles.length} Profile</span></div><div class="hr-profile-list">${profileCards||'<div class="empty">Es sind noch keine Benutzerprofile angelegt.</div>'}</div></section>`;
-  if(!selected) return `<div class="pagehead"><div><div class="eyebrow">Personal · Monitoring &amp; Qualität</div><h1>HR <b>Mitarbeitendenprofile</b></h1></div></div><div class="panel hr-privacy-note"><strong>VERTRAULICH · TIER 3</strong><span>Systemkennzahlen dienen nur als Aktivitätskontext. Beurteilungen werden ausschließlich von Tier 3 verfasst; es gibt keine automatische Gesamtnote oder Rangliste.</span></div>${directory}`;
+  const directory=`<section class="panel"><div class="hr-section-heading"><div><h2>Staff-Verzeichnis</h2><p>Konten, Rollen und HR-Stammdaten · nur Tier 3</p></div><div class="actions"><span class="tag">${HR.profiles.length} Profile</span><button class="btn small" onclick="go('manage')">Konto einladen / Tier verwalten</button></div></div><div class="field hr-search"><label for="hr_profile_search">Mitarbeitende suchen</label><input id="hr_profile_search" type="search" placeholder="Name, E-Mail, Rolle oder Bereich" oninput="filterHRDirectory(this.value)"></div><div class="hr-profile-list" id="hrProfileList">${profileCards||'<div class="empty">Noch keine Mitarbeitendenkonten vorhanden. Über Verwaltung kannst du Staff einladen.</div>'}</div></section>`;
+  const workflowGuide=`<section class="panel hr-workflow"><div class="hr-section-heading"><div><span class="eyebrow">HR-Arbeitsablauf</span><h2>Vom Eintritt bis zum Austritt</h2></div><span class="tag">Tier 3 · vertraulich</span></div><div class="hr-workflow-steps"><article><b>01 · Konto &amp; Stammdaten</b><span>Ein Konto unter Verwaltung einladen, danach Rolle, Status, Bereich, Startdatum und Arbeitsumfang im Staff-Profil erfassen.</span></article><article><b>02 · Onboarding</b><span>Checkliste je Mitarbeitendem abhaken und Schulungen bzw. Zertifikate mit Ablaufdatum hinterlegen.</span></article><article><b>03 · Check-ins &amp; Entwicklung</b><span>Gespräch, Zeitraum, konkrete Beispiele und Maßnahmen als Entwurf oder abgeschlossenes Review dokumentieren.</span></article><article><b>04 · Nachhalten &amp; Austritt</b><span>Folgetermine und ablaufende Nachweise prüfen. Bei Offboarding Übergabe, Zugriffsentzug und Abschluss dokumentieren.</span></article></div><p class="footer-note">Keine automatische Leistungsnote. Nur notwendige arbeitsbezogene Angaben erfassen; besonders sensible Privat- oder Gesundheitsdaten gehören nicht in HR-Notizen.</p></section>`;
+  if(!selected) return `<div class="pagehead"><div><div class="eyebrow">Personal · Staff &amp; Entwicklung</div><h1>HR <b>Staff Office</b></h1><p>Personalstammdaten, Einstieg, Entwicklung und geordnete Übergaben.</p></div><button class="btn primary" onclick="go('manage')">Mitarbeitendenkonto einladen</button></div><div class="panel hr-privacy-note"><strong>VERTRAULICH · TIER 3</strong><span>Alle HR-Einträge und Systemaktivitäten bleiben Tier 3 vorbehalten. Aktivitätszahlen sind Kontext, keine Leistungsbewertung.</span></div><div class="grid cols-4 hr-metrics"><div class="stat"><div class="n">${HR.profiles.length}</div><div class="l">Konten im Verzeichnis</div></div><div class="stat green"><div class="n">${activeCount}</div><div class="l">Aktive Mitarbeitende</div></div><div class="stat"><div class="n">${onboardingCount}</div><div class="l">Im Onboarding</div></div><div class="stat ${followUps||expiringTraining?'red':''}"><div class="n">${followUps+expiringTraining}</div><div class="l">Fällige Nachverfolgungen · 30 Tage</div></div></div>${workflowGuide}${directory}`;
+
   const metrics=HR.activity.find(row=>row.employee_id===selected.id)||{};
   const selectedReviews=HR.reviews.filter(review=>review.employee_id===selected.id);
+  const staff=hrStaffRecord(selected.id)||{};
+  const selectedTraining=HR.training.filter(item=>item.employee_id===selected.id);
+  if(HR.editingReviewId&&!selectedReviews.some(review=>review.id===HR.editingReviewId)) HR.editingReviewId=null;
+  if(HR.editingTrainingId&&!selectedTraining.some(item=>item.id===HR.editingTrainingId)) HR.editingTrainingId=null;
   const editing=selectedReviews.find(review=>review.id===HR.editingReviewId);
-  const reviewFields=[
-    ['quality_assessment','Fachliche Qualität'],
-    ['rule_knowledge','Regel- und Prozesskenntnis'],
-    ['documentation','Sorgfalt und Dokumentation'],
-    ['communication','Kommunikation und Zusammenarbeit'],
-    ['reliability','Zuverlässigkeit und Fristen']
-  ];
+  const trainingEditing=selectedTraining.find(item=>item.id===HR.editingTrainingId);
+  const reviewFields=[['quality_assessment','Fachliche Qualität'],['rule_knowledge','Regel- und Prozesskenntnis'],['documentation','Sorgfalt und Dokumentation'],['communication','Kommunikation und Zusammenarbeit'],['reliability','Zuverlässigkeit und Fristen']];
   const textarea=(id,label,value='')=>`<div class="field"><label for="hr_${id}">${esc(label)}</label><textarea id="hr_${id}" rows="3">${esc(value)}</textarea></div>`;
-  const reviewForm=`<section class="panel"><div class="hr-section-heading"><div><h2>${editing?'Beurteilung bearbeiten':'Neue Beurteilung'}</h2><p>Qualitative, arbeitsbezogene Einschätzung mit konkreten Beispielen. Keine automatische Bewertung oder Gesamtnote.</p></div>${editing?'<button class="btn" onclick="cancelHREdit()">Abbrechen</button>':''}</div>
-    <div class="grid cols-2"><div class="field"><label for="hr_period_start">Beurteilungszeitraum von</label><input id="hr_period_start" type="date" value="${esc(editing?.period_start||'')}" required></div><div class="field"><label for="hr_period_end">Beurteilungszeitraum bis</label><input id="hr_period_end" type="date" value="${esc(editing?.period_end||'')}" required></div></div>
-    <div class="grid cols-2">${reviewFields.map(([key,label])=>textarea(key,label,editing?.[key]||'')).join('')}</div>
-    <div class="grid cols-2">${textarea('strengths','Stärken und positive Beiträge',editing?.strengths||'')}${textarea('development_areas','Konkrete Entwicklungsfelder',editing?.development_areas||'')}${textarea('agreed_actions','Vereinbarte nächste Schritte',editing?.agreed_actions||'')}${textarea('summary','Zusammenfassung',editing?.summary||'')}</div>
-    <div class="field"><label for="hr_follow_up_date">Vereinbarter Folgetermin (optional)</label><input id="hr_follow_up_date" type="date" value="${esc(editing?.follow_up_date||'')}"></div>
-    <button class="btn primary" onclick="saveHRReview('${selected.id}')">${editing?'Änderungen speichern':'Beurteilung speichern'}</button><span id="hr_review_status" class="footer-note" role="status"></span></section>`;
-  const reviewCards=selectedReviews.map(review=>`<article class="hr-review-card"><div class="hr-section-heading"><div><strong>${fmtDate(review.period_start)} – ${fmtDate(review.period_end)}</strong><small>${esc(review.reviewer_name||'Tier 3')} · ${fmtDateTime(review.created_at)}</small></div><div class="actions"><button class="btn small gold" onclick="generateHRReviewPdf('${review.id}')">Vertrauliches PDF erstellen</button><button class="btn small" onclick="editHRReview('${review.id}')">Bearbeiten</button><button class="btn small danger" onclick="deleteHRReview('${review.id}')">Löschen</button></div></div><div class="grid cols-2">${reviewFields.map(([key,label])=>`<div><b>${esc(label)}</b><p>${nl2br(review[key]||'—')}</p></div>`).join('')}</div><div class="grid cols-2"><div><b>Stärken</b><p>${nl2br(review.strengths||'—')}</p></div><div><b>Entwicklungsfelder</b><p>${nl2br(review.development_areas||'—')}</p></div><div><b>Nächste Schritte</b><p>${nl2br(review.agreed_actions||'—')}</p></div><div><b>Zusammenfassung</b><p>${nl2br(review.summary||'—')}</p></div></div>${review.follow_up_date?`<small>Folgetermin: ${fmtDate(review.follow_up_date)}</small>`:''}</article>`).join('');
-  return `<div class="pagehead"><div><div class="eyebrow">Personal · Monitoring &amp; Qualität · Vertraulich</div><h1>HR <b>${esc(selected.display_name||selected.email)}</b></h1></div><div class="actions"><button class="btn" onclick="go('hr')">Alle Profile</button><button class="btn" onclick="go('manage')">Verwaltung</button></div></div>
-    <div class="panel hr-privacy-note"><strong>VERTRAULICH · TIER 3</strong><span>Beurteilungen sind nur für Tier 3 sichtbar. Aktivitätszahlen sind reine Systemindikatoren, keine Leistungsnote und kein automatisches Urteil.</span></div>${directory}
-    <section class="panel"><div class="hr-section-heading"><div><h2>Profilübersicht</h2><p>${esc(selected.position||'Steward')} · Tier ${Number(selected.access_tier)||1} · Konto seit ${fmtDate(String(selected.created_at||'').slice(0,10))}</p><p>${esc(selected.email)}</p></div><span class="tag">${selectedReviews.length} Beurteilungen</span></div><div class="grid cols-4 hr-metrics"><div class="stat"><div class="n">${Number(metrics.documents_created)||0}</div><div class="l">Dokumentversionen erstellt</div></div><div class="stat"><div class="n">${Number(metrics.draft_documents)||0}</div><div class="l">Aktuelle Entwürfe</div></div><div class="stat"><div class="n">${Number(metrics.returned_documents)||0}</div><div class="l">Zur Ergänzung zurückgegeben</div></div><div class="stat"><div class="n">${Number(metrics.reviews_completed)||0}</div><div class="l">Dokumentenprüfungen</div></div></div><p class="footer-note">Die Kennzahlen zählen dokumentierte Systemereignisse und erfassen nicht alle Tätigkeiten oder deren Schwierigkeit.</p></section>
-    ${reviewForm}<section class="panel"><div class="hr-section-heading"><h2>Beurteilungshistorie</h2><span>${selectedReviews.length} Einträge</span></div>${reviewCards||'<div class="empty">Für dieses Profil liegen noch keine Beurteilungen vor.</div>'}</section>`;
+  const checklists=`<h3>Onboarding-Checkliste</h3>${hrChecklistHtml('onboarding',HR_ONBOARDING_STEPS,staff.onboarding_checklist||[])}<h3>Offboarding-Checkliste</h3>${hrChecklistHtml('offboarding',HR_OFFBOARDING_STEPS,staff.offboarding_checklist||[])}`;
+  const staffForm=`<section class="panel"><div class="hr-section-heading"><div><h2>Staff-Stammdaten</h2><p>Organisatorische Angaben, Rollenstatus und Eintritts-/Austrittsablauf.</p></div><span class="tag">${esc(staff.employment_status||'Nicht erfasst')}</span></div>
+    <div class="grid cols-3"><div class="field"><label for="hr_department">Bereich / Abteilung</label><input id="hr_department" maxlength="100" value="${esc(staff.department||'')}"></div><div class="field"><label for="hr_job_title">Staff-Rolle</label><input id="hr_job_title" maxlength="120" value="${esc(staff.job_title||selected.position||'Steward')}"></div><div class="field"><label for="hr_staff_type">Mitgliedstyp</label><select id="hr_staff_type">${selectOptions(['Steward','Administration','Rennleitung','Esport','Support','Gast / befristet'],staff.staff_type||'Steward')}</select></div>
+    <div class="field"><label for="hr_employment_status">Status</label><select id="hr_employment_status">${selectOptions(['Onboarding','Aktiv','Beurlaubt','Offboarding','Inaktiv'],staff.employment_status||'Onboarding')}</select></div><div class="field"><label for="hr_start_date">Eintritt / Start</label><input id="hr_start_date" type="date" value="${esc(staff.start_date||'')}"></div><div class="field"><label for="hr_end_date">Austritt (falls geplant)</label><input id="hr_end_date" type="date" value="${esc(staff.end_date||'')}"></div>
+    <div class="field"><label for="hr_contract_type">Zusammenarbeitsmodell</label><select id="hr_contract_type">${selectOptions(['Freiwillig / ehrenamtlich','Teilzeit','Vollzeit','Projektbezogen','Gast / befristet'],staff.contract_type||'Freiwillig / ehrenamtlich')}</select></div><div class="field"><label for="hr_weekly_hours">Geplanter Umfang (Std./Woche)</label><input id="hr_weekly_hours" type="number" min="0" max="80" step="0.5" value="${esc(staff.weekly_hours??'')}"></div><div class="field"><label for="hr_timezone">Zeitzone / Region (optional)</label><input id="hr_timezone" maxlength="80" value="${esc(staff.timezone||'')}"></div></div>
+    <div class="field"><label for="hr_skills">Fachgebiete / Qualifikationen (kommagetrennt)</label><input id="hr_skills" maxlength="1000" value="${esc((staff.skills||[]).join(', '))}" placeholder="z. B. Rennleitung, Regelwerk, Kommunikation"></div><div class="field"><label for="hr_internal_notes">Interne arbeitsbezogene Notiz</label><textarea id="hr_internal_notes" rows="3" maxlength="3000">${esc(staff.internal_notes||'')}</textarea><small>Keine Gesundheitsdaten, privaten Zugangsdaten oder unnötigen persönlichen Informationen eintragen.</small></div>
+    ${checklists}<button class="btn primary" onclick="saveHRStaffRecord('${selected.id}')">Staff-Profil &amp; Checklisten speichern</button><span id="hr_staff_status" class="footer-note" role="status"></span></section>`;
+  const reviewForm=`<section class="panel"><div class="hr-section-heading"><div><h2>${editing?'Gespräch bearbeiten':'Check-in / Gespräch dokumentieren'}</h2><p>Konkrete arbeitsbezogene Beispiele, Maßnahmen und Folgetermin. Keine automatische Gesamtnote.</p></div>${editing?'<button class="btn" onclick="cancelHREdit()">Abbrechen</button>':''}</div>
+    <div class="grid cols-3"><div class="field"><label for="hr_review_type">Gesprächsart</label><select id="hr_review_type">${selectOptions(HR_REVIEW_TYPES,editing?.review_type||HR_REVIEW_TYPES[0])}</select></div><div class="field"><label for="hr_review_status">Ablaufstatus</label><select id="hr_review_status">${selectOptions(['Entwurf','Abgeschlossen'],editing?.review_status||'Entwurf')}</select></div><div class="field"><label for="hr_follow_up_date">Nächster Folgetermin</label><input id="hr_follow_up_date" type="date" value="${esc(editing?.follow_up_date||'')}"></div></div>
+    <div class="grid cols-2"><div class="field"><label for="hr_period_start">Zeitraum von</label><input id="hr_period_start" type="date" value="${esc(editing?.period_start||'')}" required></div><div class="field"><label for="hr_period_end">Zeitraum bis</label><input id="hr_period_end" type="date" value="${esc(editing?.period_end||'')}" required></div></div>
+    <div class="grid cols-2">${reviewFields.map(([key,label])=>textarea(key,label,editing?.[key]||'')).join('')}</div><div class="grid cols-2">${textarea('strengths','Stärken und positive Beiträge',editing?.strengths||'')}${textarea('development_areas','Konkrete Entwicklungsfelder',editing?.development_areas||'')}${textarea('agreed_actions','Vereinbarte nächste Schritte',editing?.agreed_actions||'')}${textarea('summary','Gesprächsnotiz / Zusammenfassung',editing?.summary||'')}</div><button class="btn primary" onclick="saveHRReview('${selected.id}')">${editing?'Änderungen speichern':'Gespräch speichern'}</button><span id="hr_review_save_status" class="footer-note" role="status"></span></section>`;
+  const reviewCards=selectedReviews.map(review=>`<article class="hr-review-card"><div class="hr-section-heading"><div><span class="tag ${review.review_status==='Abgeschlossen'?'active':'open'}">${esc(review.review_status||'Abgeschlossen')}</span> <strong>${esc(review.review_type||'Mitarbeitendengespräch')}</strong><small>${fmtDate(review.period_start)} – ${fmtDate(review.period_end)} · ${esc(review.reviewer_name||'Tier 3')} · ${fmtDateTime(review.created_at)}</small></div><div class="actions"><button class="btn small gold" onclick="generateHRReviewPdf('${review.id}')">PDF</button><button class="btn small" onclick="editHRReview('${review.id}')">Bearbeiten</button><button class="btn small danger" onclick="deleteHRReview('${review.id}')">Löschen</button></div></div><div class="grid cols-2">${reviewFields.map(([key,label])=>`<div><b>${esc(label)}</b><p>${nl2br(review[key]||'—')}</p></div>`).join('')}</div><div class="grid cols-2"><div><b>Stärken</b><p>${nl2br(review.strengths||'—')}</p></div><div><b>Entwicklungsfelder</b><p>${nl2br(review.development_areas||'—')}</p></div><div><b>Nächste Schritte</b><p>${nl2br(review.agreed_actions||'—')}</p></div><div><b>Gesprächsnotiz</b><p>${nl2br(review.summary||'—')}</p></div></div>${review.follow_up_date?`<small>Folgetermin: ${fmtDate(review.follow_up_date)}</small>`:''}</article>`).join('');
+  const trainingForm=`<section class="panel"><div class="hr-section-heading"><div><h2>${trainingEditing?'Nachweis bearbeiten':'Schulung / Zertifikat erfassen'}</h2><p>Kompetenzentwicklung und Nachweise mit optionalem Ablaufdatum nachhalten.</p></div>${trainingEditing?'<button class="btn" onclick="cancelHRTrainingEdit()">Abbrechen</button>':''}</div><div class="grid cols-3"><div class="field"><label for="hr_training_title">Schulung / Zertifikat</label><input id="hr_training_title" maxlength="160" value="${esc(trainingEditing?.title||'')}" required></div><div class="field"><label for="hr_training_category">Kategorie</label><select id="hr_training_category">${selectOptions(['Regelwerk','Rennleitung','Sicherheit','Datenschutz','Kommunikation','Technik / Tooling','Sonstiges'],trainingEditing?.category||'Regelwerk')}</select></div><div class="field"><label for="hr_training_provider">Anbieter / verantwortliche Stelle</label><input id="hr_training_provider" maxlength="160" value="${esc(trainingEditing?.provider||'')}"></div><div class="field"><label for="hr_training_status">Status</label><select id="hr_training_status">${selectOptions(['Geplant','In Bearbeitung','Abgeschlossen'],trainingEditing?.status||'Abgeschlossen')}</select></div><div class="field"><label for="hr_training_completed">Abschluss / geplanter Termin</label><input id="hr_training_completed" type="date" value="${esc(trainingEditing?.completed_on||today())}" required></div><div class="field"><label for="hr_training_expires">Gültig bis (optional)</label><input id="hr_training_expires" type="date" value="${esc(trainingEditing?.expires_on||'')}"></div></div>${textarea('training_notes','Notiz / nächster Schritt',trainingEditing?.notes||'')}<button class="btn primary" onclick="saveHRTraining('${selected.id}')">${trainingEditing?'Nachweis aktualisieren':'Nachweis speichern'}</button><span id="hr_training_status_message" class="footer-note" role="status"></span></section>`;
+  const trainingRows=selectedTraining.map(item=>`<tr><td><strong>${esc(item.title)}</strong><small>${esc(item.provider||'Ohne Anbieter')}</small></td><td>${esc(item.category)}</td><td>${fmtDate(item.completed_on)}</td><td>${item.expires_on?fmtDate(item.expires_on):'Ohne Ablauf'}</td><td><span class="tag ${item.status==='Abgeschlossen'?'active':'open'}">${esc(item.status)}</span></td><td><button class="btn small" onclick="editHRTraining('${item.id}')">Bearbeiten</button> <button class="btn small danger" onclick="deleteHRTraining('${item.id}')">Löschen</button></td></tr>`).join('');
+  return `<div class="pagehead"><div><div class="eyebrow">Personal · vertrauliche Staff-Akte</div><h1>HR <b>${esc(selected.display_name||selected.email)}</b></h1><p>${esc(staff.job_title||selected.position||'Steward')} · ${esc(staff.department||'Bereich nicht erfasst')} · Tier ${Number(selected.access_tier)||1}</p></div><div class="actions"><button class="btn" onclick="go('hr')">Staff-Verzeichnis</button><button class="btn" onclick="go('manage')">Konto &amp; Tier verwalten</button></div></div>
+    <div class="panel hr-privacy-note"><strong>VERTRAULICH · TIER 3</strong><span>HR-Daten werden nicht im allgemeinen App-State gespeichert. Nur notwendige arbeitsbezogene Angaben erfassen; keine Gesundheitsdaten oder privaten Zugangsdaten.</span></div>${directory}
+    <section class="panel"><div class="hr-section-heading"><div><h2>Arbeitskontext</h2><p>${esc(selected.email)} · Konto seit ${fmtDate(String(selected.created_at||'').slice(0,10))}</p></div><span class="tag">${selectedReviews.length} Gespräche · ${selectedTraining.length} Nachweise</span></div><div class="grid cols-4 hr-metrics"><div class="stat"><div class="n">${Number(metrics.documents_created)||0}</div><div class="l">Dokumentversionen erstellt</div></div><div class="stat"><div class="n">${Number(metrics.draft_documents)||0}</div><div class="l">Aktuelle Entwürfe</div></div><div class="stat"><div class="n">${Number(metrics.returned_documents)||0}</div><div class="l">Zur Ergänzung zurückgegeben</div></div><div class="stat"><div class="n">${Number(metrics.reviews_completed)||0}</div><div class="l">Dokumentenprüfungen</div></div></div><p class="footer-note">Systemkennzahlen zeigen dokumentierte Ereignisse, nicht Qualität oder vollständige Arbeitsleistung.</p></section>
+    ${staffForm}<section class="panel"><div class="hr-section-heading"><div><h2>Schulungen &amp; Nachweise</h2><p>${selectedTraining.length} Einträge · Ablaufdaten und Status im Blick behalten.</p></div></div><div class="table-scroll"><table><thead><tr><th>Nachweis</th><th>Bereich</th><th>Abschluss</th><th>Gültig bis</th><th>Status</th><th></th></tr></thead><tbody>${trainingRows||'<tr><td colspan="6"><div class="empty">Noch keine Schulungen oder Zertifikate erfasst.</div></td></tr>'}</tbody></table></div></section>${trainingForm}
+    ${reviewForm}<section class="panel"><div class="hr-section-heading"><h2>Check-ins &amp; Gesprächshistorie</h2><span>${selectedReviews.length} Einträge</span></div>${reviewCards||'<div class="empty">Noch keine Gespräche dokumentiert. Starte mit einem regelmäßigen Check-in.</div>'}</section>`;
+}
+function filterHRDirectory(query){
+  const normalized=String(query||'').trim().toLocaleLowerCase('de');
+  document.querySelectorAll('[data-hr-profile]').forEach(card=>{ card.hidden=!card.dataset.hrProfile.includes(normalized); });
 }
 function retryHRData(){ HR.loaded=false; HR.error=''; loadHRData(); }
 function cancelHREdit(){ HR.editingReviewId=null; render(); }
 function editHRReview(reviewId){ HR.editingReviewId=reviewId; render(); }
+async function saveHRStaffRecord(employeeId){
+  if(currentTier()<3) return;
+  const value=id=>document.getElementById(`hr_${id}`)?.value.trim()||'';
+  const status=document.getElementById('hr_staff_status');
+  const weeklyHours=value('weekly_hours');
+  const employmentStatus=value('employment_status')||'Onboarding';
+  const collectChecklist=(type,items)=>items.map(([id,label])=>({id,label,done:!!document.getElementById(`hr_${type}_${id}`)?.checked}));
+  const payload={
+    employee_id:employeeId,department:value('department'),job_title:value('job_title'),
+    staff_type:value('staff_type')||'Steward',employment_status:employmentStatus,
+    contract_type:value('contract_type')||'Freiwillig / ehrenamtlich',
+    start_date:value('start_date')||null,end_date:value('end_date')||null,
+    weekly_hours:weeklyHours===''?null:Number(weeklyHours),timezone:value('timezone'),
+    skills:value('skills').split(',').map(skill=>skill.trim()).filter(Boolean),
+    internal_notes:value('internal_notes'),
+    onboarding_checklist:collectChecklist('onboarding',HR_ONBOARDING_STEPS),
+    offboarding_checklist:collectChecklist('offboarding',HR_OFFBOARDING_STEPS)
+  };
+  if(payload.weekly_hours!==null&&(!Number.isFinite(payload.weekly_hours)||payload.weekly_hours<0||payload.weekly_hours>80)){
+    if(status) status.textContent='Der Wochenumfang muss zwischen 0 und 80 Stunden liegen.';
+    return;
+  }
+  if(payload.start_date&&payload.end_date&&payload.end_date<payload.start_date){
+    if(status) status.textContent='Das Austrittsdatum darf nicht vor dem Eintrittsdatum liegen.';
+    return;
+  }
+  if(status) status.textContent='Staff-Profil wird gespeichert …';
+  const {data,error}=await SUPABASE.client.from('zfc_hr_staff_records').upsert(payload,{onConflict:'employee_id'}).select('*').single();
+  if(error){
+    if(status) status.textContent=`Staff-Profil konnte nicht gespeichert werden: ${error.message}`;
+    console.error('HR staff record save failed',error);
+    return;
+  }
+  const index=HR.staffRecords.findIndex(record=>record.employee_id===employeeId);
+  if(index<0) HR.staffRecords.push(data); else HR.staffRecords[index]=data;
+  HR.loaded=true;
+  render();
+  showAccessNotice('Staff-Stammdaten und Checkliste gespeichert.');
+}
 async function saveHRReview(employeeId){
   if(currentTier()<3) return;
   const value=id=>document.getElementById(`hr_${id}`)?.value.trim()||'';
-  const status=document.getElementById('hr_review_status');
+  const status=document.getElementById('hr_review_save_status');
   const payload={
     employee_id:employeeId,period_start:value('period_start'),period_end:value('period_end'),
+    review_type:value('review_type')||HR_REVIEW_TYPES[0],
+    review_status:value('review_status')||'Entwurf',
     quality_assessment:value('quality_assessment'),rule_knowledge:value('rule_knowledge'),
     documentation:value('documentation'),communication:value('communication'),reliability:value('reliability'),
     strengths:value('strengths'),development_areas:value('development_areas'),
     agreed_actions:value('agreed_actions'),summary:value('summary'),follow_up_date:value('follow_up_date')||null
   };
-  if(Object.entries(payload).some(([key,item])=>key!=='follow_up_date'&&!String(item||'').trim())){
-    if(status) status.textContent='Bitte den Zeitraum und alle Beurteilungsfelder ausfüllen.';
+  if(!payload.period_start||!payload.period_end){
+    if(status) status.textContent='Bitte Beginn und Ende des Gesprächszeitraums eintragen.';
+    return;
+  }
+  const reviewTextFields=['quality_assessment','rule_knowledge','documentation','communication','reliability','strengths','development_areas','agreed_actions','summary'];
+  if(payload.review_status==='Abgeschlossen'&&reviewTextFields.some(key=>!payload[key])){
+    if(status) status.textContent='Für den Abschluss bitte alle Reflexions- und Maßnahmenfelder ausfüllen. Alternativ als Entwurf speichern.';
     return;
   }
   if(payload.period_end<payload.period_start){ if(status) status.textContent='Das Ende des Beurteilungszeitraums muss nach dessen Beginn liegen.'; return; }
@@ -4255,12 +4387,57 @@ async function saveHRReview(employeeId){
     const index=HR.reviews.findIndex(review=>review.id===result.data.id);
     if(index>=0) HR.reviews[index]=result.data; else HR.reviews.unshift(result.data);
     HR.editingReviewId=null;
+    HR.loaded=true;
     render();
     showAccessNotice('Vertrauliche HR-Beurteilung gespeichert.');
   }catch(error){
     if(status) status.textContent=`Beurteilung konnte nicht gespeichert werden: ${error.message||error}`;
     console.error('HR review save failed',error);
   }
+}
+function editHRTraining(trainingId){ HR.editingTrainingId=trainingId; render(); }
+function cancelHRTrainingEdit(){ HR.editingTrainingId=null; render(); }
+async function saveHRTraining(employeeId){
+  if(currentTier()<3) return;
+  const value=id=>document.getElementById(`hr_training_${id}`)?.value.trim()||'';
+  const status=document.getElementById('hr_training_status_message');
+  const payload={
+    employee_id:employeeId,title:value('title'),category:value('category')||'Regelwerk',
+    provider:value('provider'),status:value('status')||'Abgeschlossen',
+    completed_on:value('completed'),expires_on:value('expires')||null,
+    notes:document.getElementById('hr_training_notes')?.value.trim()||''
+  };
+  if(!payload.title||!payload.completed_on){
+    if(status) status.textContent='Bitte Titel und Abschluss- bzw. geplanten Termin eintragen.';
+    return;
+  }
+  if(payload.expires_on&&payload.expires_on<payload.completed_on){
+    if(status) status.textContent='Das Gültigkeitsende darf nicht vor dem Abschlussdatum liegen.';
+    return;
+  }
+  const query=HR.editingTrainingId
+    ?SUPABASE.client.from('zfc_hr_training').update(payload).eq('id',HR.editingTrainingId)
+    :SUPABASE.client.from('zfc_hr_training').insert(payload);
+  const {data,error}=await query.select('*').single();
+  if(error){
+    if(status) status.textContent=`Nachweis konnte nicht gespeichert werden: ${error.message}`;
+    console.error('HR training save failed',error);
+    return;
+  }
+  const index=HR.training.findIndex(item=>item.id===data.id);
+  if(index<0) HR.training.unshift(data); else HR.training[index]=data;
+  HR.editingTrainingId=null;
+  HR.loaded=true;
+  render();
+  showAccessNotice('Schulung / Nachweis gespeichert.');
+}
+async function deleteHRTraining(trainingId){
+  if(currentTier()<3||!confirm('Diesen Schulungs- oder Zertifikatsnachweis endgültig löschen?')) return;
+  const {error}=await SUPABASE.client.from('zfc_hr_training').delete().eq('id',trainingId);
+  if(error){ showAccessNotice(`Nachweis konnte nicht gelöscht werden: ${error.message}`); return; }
+  HR.training=HR.training.filter(item=>item.id!==trainingId);
+  if(HR.editingTrainingId===trainingId) HR.editingTrainingId=null;
+  render();
 }
 async function deleteHRReview(reviewId){
   if(currentTier()<3||!confirm('Diese HR-Beurteilung endgültig löschen?')) return;
@@ -4289,6 +4466,7 @@ function generateHRReviewPdf(reviewId){
     y+=3;
   };
   addSection('Mitarbeitendenprofil',`${employee.display_name||employee.email} · ${employee.position||'Steward'} · Tier ${employee.access_tier}`);
+  addSection('Gesprächsart / Status',`${review.review_type||'Check-in'} · ${review.review_status||'Abgeschlossen'}`);
   addSection('Beurteilungszeitraum',`${fmtDate(review.period_start)} bis ${fmtDate(review.period_end)}`);
   addSection('Fachliche Qualität',review.quality_assessment);
   addSection('Regel- und Prozesskenntnis',review.rule_knowledge);
