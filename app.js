@@ -1503,9 +1503,9 @@ function showCaseOpening(mode,caseId){
     if(status) status.textContent=message;
     if(description) copy.textContent=description;
   };
-  setTimeout(()=>updateStage(1,'Aktenstand wird synchronisiert …','Änderungen werden mit dem gemeinsamen Arbeitsbereich abgeglichen.'),650);
-  setTimeout(()=>updateStage(2,'Arbeitsbereich bereit','Jarves öffnet die geschützte Aktenansicht.'),1350);
-  setTimeout(()=>closeCaseOpening(overlay,key),isNew?2550:2050);
+  setTimeout(()=>updateStage(1,'Aktenstand wird synchronisiert …','Änderungen werden mit dem gemeinsamen Arbeitsbereich abgeglichen.'),1650);
+  setTimeout(()=>updateStage(2,'Arbeitsbereich bereit','Jarves öffnet die geschützte Aktenansicht.'),3300);
+  setTimeout(()=>closeCaseOpening(overlay,key),5000);
 }
 function closeCaseOpening(overlay,key){ if(CASE_OPENING_SEEN!==key) return; overlay.hidden=true; overlay.classList.add('is-hidden'); overlay.innerHTML=''; }
 

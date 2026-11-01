@@ -1124,7 +1124,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 .case-opening-steps span.active{border-color:#54d9e8;color:#bcfbff;background:rgba(84,217,232,.09);box-shadow:0 0 12px rgba(84,217,232,.12)}
 .case-opening-status{margin-top:17px;color:#79e5ef;font:10px var(--mono);letter-spacing:1.2px;text-transform:uppercase}
 .case-opening-progress{height:3px;margin:10px 0 0;max-width:none;border:0;background:#15272d}
-.case-opening-progress span{width:0;background:linear-gradient(90deg,#2c95a6,#b9fbff);animation:jarvesProgress 2s cubic-bezier(.16,.7,.25,1) forwards}
+.case-opening-progress span{width:0;background:linear-gradient(90deg,#2c95a6,#b9fbff);animation:jarvesProgress 5s cubic-bezier(.16,.7,.25,1) forwards}
 .case-opening-footer{padding-top:10px;border-top:1px solid rgba(84,217,232,.16)}
 @keyframes jarvesSceneIn{from{opacity:0}to{opacity:1}}
 @keyframes jarvesStageIn{from{opacity:0;transform:translateY(12px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
