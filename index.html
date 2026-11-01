@@ -24,6 +24,41 @@
   <div id="main"></div>
 </div>
 <div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
+<main id="publicHome" class="public-home" hidden>
+  <header class="public-header">
+    <a class="public-brand" href="#home" aria-label="ZFC Racing Startseite"><strong>ZFC<span>RACING</span></strong><small>STEWARD OFFICE</small></a>
+    <nav aria-label="Seitennavigation">
+      <a href="#league">Die Liga</a>
+      <a href="#principles">Unsere Grundsätze</a>
+      <a href="#workflow">Ablauf</a>
+    </nav>
+    <button class="btn primary public-login" type="button" onclick="openLogin()">Login <span aria-hidden="true">→</span></button>
+  </header>
+  <section id="home" class="public-hero">
+    <div class="public-hero-copy">
+      <p class="eyebrow">ZFC RACING · STEWARDS OFFICE</p>
+      <h1>Fairer Racing.<br><span>Klare Entscheidungen.</span></h1>
+      <p>Wir schaffen einen professionellen, transparenten Rahmen für packenden Motorsport – mit klaren Regeln, nachvollziehbaren Abläufen und Respekt auf und neben der Strecke.</p>
+      <div class="public-hero-actions"><a class="btn primary" href="#principles">Unsere Werte entdecken <span aria-hidden="true">↓</span></a><a class="public-text-link" href="#workflow">So arbeiten wir <span aria-hidden="true">→</span></a></div>
+      <div class="public-hero-signoff"><span>PRECISION</span><i></i><span>FAIRNESS</span><i></i><span>RESPECT</span></div>
+    </div>
+    <div class="public-hero-telemetry" aria-label="ZFC Racing Werte"><span>RACE CONTROL <b>ONLINE</b></span><span>PRINCIPLE <b>FAIR PLAY</b></span><span>STANDARD <b>CONSISTENT</b></span><span class="telemetry-line"></span><small>ZFC / STEWARDS / 2026</small></div>
+  </section>
+  <section id="league" class="public-section public-league">
+    <div class="public-section-heading"><p class="eyebrow">Mehr als nur Rennen</p><h2>Eine Liga, die <span>Racing ernst nimmt.</span></h2><p>Die ZFC Racing League verbindet ambitionierte Fahrerinnen und Fahrer in einer kompetitiven Sim-Racing-Umgebung. Unser Ziel: spannende Rennen, ein respektvolles Miteinander und ein Wettbewerb, auf den sich alle verlassen können.</p></div>
+    <div class="public-metrics"><article><strong>01</strong><h3>Klare Regeln</h3><p>Ein verständliches Regelwerk schafft Orientierung vor, während und nach jeder Session.</p></article><article><strong>02</strong><h3>Starke Community</h3><p>Sportlicher Ehrgeiz und gegenseitiger Respekt gehören für uns zusammen.</p></article><article><strong>03</strong><h3>Verlässliche Abläufe</h3><p>Einheitliche Prozesse sorgen dafür, dass Meldungen sorgfältig und konsistent behandelt werden.</p></article></div>
+  </section>
+  <section id="principles" class="public-section public-principles">
+    <div class="public-section-heading"><p class="eyebrow">Unser Kompass</p><h2>Gleiche Maßstäbe.<br><span>Für alle Beteiligten.</span></h2></div>
+    <div class="public-principle-grid"><article><span>01 / NEUTRALITÄT</span><h3>Unvoreingenommen prüfen</h3><p>Entscheidungen orientieren sich an Belegen und Reglement – nicht an Namen, Teams oder Ergebnissen.</p></article><article><span>02 / NACHVOLLZIEHBARKEIT</span><h3>Gründe offenlegen</h3><p>Bewertungen werden sachlich begründet und in einem klaren, dokumentierten Ablauf festgehalten.</p></article><article><span>03 / VERHÄLTNISMÄSSIGKEIT</span><h3>Kontext berücksichtigen</h3><p>Verantwortung, Vermeidbarkeit und Auswirkungen gehören zur fairen Einordnung eines Vorfalls.</p></article><article><span>04 / WEITERENTWICKLUNG</span><h3>Aus jedem Rennen lernen</h3><p>Feedback und wiederkehrende Situationen helfen uns, Regeln und Zusammenarbeit stetig zu verbessern.</p></article></div>
+  </section>
+  <section id="workflow" class="public-section public-workflow">
+    <div class="public-section-heading"><p class="eyebrow">Race Control · Steward Office</p><h2>Ein Ablauf, dem man <span>vertrauen kann.</span></h2><p>Wenn ein Vorfall gemeldet wird, arbeiten wir strukturiert, sorgfältig und mit klar zugeordneten Verantwortlichkeiten.</p></div>
+    <div class="public-workflow-steps"><article><b>01</b><div><h3>Aufnehmen</h3><p>Der Vorfall und die verfügbaren Informationen werden geordnet erfasst.</p></div></article><article><b>02</b><div><h3>Prüfen</h3><p>Beweise, Reglement und Stellungnahmen werden im Zusammenhang betrachtet.</p></div></article><article><b>03</b><div><h3>Entscheiden</h3><p>Berechtigte Stewards bewerten unabhängig und dokumentieren das Ergebnis.</p></div></article><article><b>04</b><div><h3>Kommunizieren</h3><p>Die Beteiligten erhalten eine klare Rückmeldung und der Vorgang wird nachvollziehbar abgeschlossen.</p></div></article></div>
+    <div class="public-commitment"><span class="eyebrow">Unser Anspruch</span><strong>Fair racing. Stronger together.</strong><p>Mit Leidenschaft für den Wettbewerb – und Verantwortung für die Menschen dahinter.</p></div>
+  </section>
+  <footer class="public-footer"><strong>ZFC RACING <span>STEWARD OFFICE</span></strong><span>PRECISION · FAIRNESS · RESPECT</span><a href="#home">Zurück nach oben ↑</a></footer>
+</main>
 <div id="accessNotice" class="access-notice-popup" role="alert" aria-live="assertive" hidden></div>
 <section id="loginIntro" class="login-intro-overlay" hidden aria-label="ZFC Racing Stewards Office startet" role="status" aria-live="polite">
   <div class="intro-grid" aria-hidden="true"></div>
@@ -78,6 +113,7 @@
 </section>
 <section id="loginScreen" aria-label="Anmeldung">
   <form class="login-panel" onsubmit="event.preventDefault();handleLogin();">
+    <button type="button" class="login-back" onclick="showPublicHome()">← Zur Startseite</button>
     <div class="login-topline"><span class="eyebrow">ZFC Racing</span><span class="login-access"><i></i> Secure access</span></div>
     <div class="login-heading">
       <div class="login-monogram" aria-hidden="true">ZFC</div>

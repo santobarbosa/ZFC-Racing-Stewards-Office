@@ -249,6 +249,9 @@ declare
 	linked_code text;
 	active_history jsonb;
 	old_active_history jsonb;
+	request_item jsonb;
+	old_requests jsonb;
+	new_requests jsonb;
 	completed_pdf_count integer;
 	required_process text;
 	requirement_number integer;
@@ -290,6 +293,7 @@ begin
 			end if;
 			if jsonb_array_length(coalesce(case_item->'activeProcessCodes','[]'::jsonb)) > 0
 				or jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb)) > 0
+				or jsonb_array_length(coalesce(case_item->'processLinkRequests','[]'::jsonb)) > 0
 				or case_item->>'documentClosureRoute' = 'early' then
 				raise exception 'Zusätzliche Prozesse und frühe Abschlusswege müssen nach Aktenanlage mit nachvollziehbarer Berechtigung verknüpft werden.';
 			end if;
@@ -307,7 +311,7 @@ begin
 					or (new_workflow->>'createdByTier')::smallint is distinct from actor_tier then
 					raise exception 'Die Prozessakte muss vom angemeldeten Konto und mit dessen Tier eröffnet werden.';
 				end if;
-				required_tier := case when case_code in ('D4','D8','D9','07b','V2','V3','F1','F2') then 3 else 2 end;
+				required_tier := 3;
 				if (new_workflow->>'requiredApprovalTier')::smallint is distinct from required_tier then
 					raise exception 'Die erforderliche Freigabestufe dieses Prozesses darf nicht verändert werden.';
 				end if;
@@ -315,11 +319,11 @@ begin
 					(case when case_code in ('V2','V3','F1','F2') then 'true' else 'false' end) then
 					raise exception 'Die CEO-Freigabepflicht dieses Prozesses darf nicht verändert werden.';
 				end if;
-				expected_owner_tier := case when actor_tier = 1 then 1 else greatest(actor_tier, required_tier) end;
+				expected_owner_tier := case when actor_tier < 3 then 3 else 0 end;
 				if (new_workflow->>'ownerTier')::smallint is distinct from expected_owner_tier
 					or new_workflow->>'approvalStatus' is distinct from (case
-						when actor_tier = 1 then 'Noch nicht vorgelegt'
-						else 'Tier-' || expected_owner_tier::text || '-Prüfung ausstehend'
+						when actor_tier < 3 then 'Tier-3-Prüfung ausstehend'
+						else 'Freigegeben'
 					end) then
 					raise exception 'Die neue Prozessakte muss mit dem vorgeschriebenen Prüfstatus beginnen.';
 				end if;
@@ -349,6 +353,37 @@ begin
 			raise exception 'Tier 1 darf keine Entscheidungen, Sanktionen oder Abschlussstatus ändern.';
 		end if;
 
+		if case_item->'processLinkRequests' is distinct from old_case->'processLinkRequests' then
+			old_requests := coalesce(old_case->'processLinkRequests','[]'::jsonb);
+			new_requests := coalesce(case_item->'processLinkRequests','[]'::jsonb);
+			history_length := jsonb_array_length(new_requests);
+			if actor_tier <> 2
+				or jsonb_typeof(new_requests) <> 'array'
+				or history_length <> jsonb_array_length(old_requests) + 1
+				or (new_requests #- array[(history_length - 1)::text]) is distinct from old_requests
+				or case_item->>'status' in ('Entschieden','Archiviert') then
+				raise exception 'Eine Prozessanfrage darf nur einmalig durch Tier 2 an Tier 3 vorgelegt werden.';
+			end if;
+			request_item := new_requests->(history_length - 1);
+			if nullif(btrim(request_item->>'id'),'') is null
+				or nullif(btrim(request_item->>'processCode'),'') is null
+				or request_item->>'processCode' not in ('D1','D2','D3','D4','D5','D6','D7','D8','D9','07b','R1','R2','R3','R4','R5','R6','R7','R8','V1','V2','V3','V4','F1','F2','A1')
+				or request_item->>'requestedById' is distinct from auth.uid()::text
+				or (request_item->>'requestedTier')::smallint is distinct from 2
+				or request_item->>'status' is distinct from 'Tier-3-Prüfung ausstehend'
+				or nullif(btrim(request_item->>'reason'),'') is null
+				or request_item ? 'reviewedById'
+				or request_item->>'processCode' = case_item->>'processCode'
+				or coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> to_jsonb(request_item->>'processCode')
+				or exists (
+					select 1 from jsonb_array_elements(old_requests) existing_request
+					where existing_request->>'processCode' = request_item->>'processCode'
+						and existing_request->>'status' = 'Tier-3-Prüfung ausstehend'
+				) then
+				raise exception 'Die Prozessanfrage enthält unzulässige oder bereits aktive Daten.';
+			end if;
+		end if;
+
 		if case_item->'activeProcessCodes' is distinct from old_case->'activeProcessCodes' then
 			if jsonb_typeof(coalesce(case_item->'activeProcessCodes','[]'::jsonb)) <> 'array'
 				or not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> coalesce(old_case->'activeProcessCodes','[]'::jsonb) then
@@ -366,6 +401,9 @@ begin
 				or history_length <> jsonb_array_length(old_active_history) + 1
 				or (active_history #- array[(history_length - 1)::text]) is distinct from old_active_history then
 				raise exception 'Eine Prozessverknüpfung benötigt genau einen neuen, unveränderlichen Historieneintrag.';
+			end if;
+			if actor_tier < 3 then
+				raise exception 'Ein neuer Prozess darf erst nach der Bestätigung durch Tier 3 aktiviert werden.';
 			end if;
 			last_event := active_history->(history_length - 1);
 			if last_event->>'processCode' is distinct from linked_code
@@ -752,25 +790,97 @@ grant usage on schema public to authenticated;
 
 -- Atomarer Merge für parallele Browser-Schreibvorgänge. Neue oder geänderte
 -- Datensätze werden anhand ihrer ID zusammengeführt, statt einen Snapshot zu überschreiben.
+create or replace function public.zfc_merge_json_values(existing jsonb, incoming jsonb)
+returns jsonb
+language plpgsql
+immutable
+as $$
+declare
+	merged jsonb;
+	entry record;
+begin
+	if existing is null then return incoming; end if;
+	if incoming is null then return existing; end if;
+
+	if jsonb_typeof(existing) = 'object' and jsonb_typeof(incoming) = 'object' then
+		merged := existing;
+		for entry in select key, value from jsonb_each(incoming)
+		loop
+			merged := jsonb_set(
+				merged,
+				array[entry.key],
+				case when merged ? entry.key
+					then public.zfc_merge_json_values(merged->entry.key, entry.value)
+					else entry.value
+				end,
+				true
+			);
+		end loop;
+		return merged;
+	elsif jsonb_typeof(existing) = 'array' and jsonb_typeof(incoming) = 'array' then
+		if not exists (
+			select 1
+			from jsonb_array_elements(existing || incoming) item(value)
+			where jsonb_typeof(value) <> 'object' or not (value ? 'id')
+		) then
+			return (
+				with ids as (
+					select value->>'id' as id from jsonb_array_elements(existing)
+					union
+					select value->>'id' as id from jsonb_array_elements(incoming)
+				),
+				old_items as (
+					select value->>'id' as id, value from jsonb_array_elements(existing)
+				),
+				new_items as (
+					select value->>'id' as id, value from jsonb_array_elements(incoming)
+				)
+				select coalesce(jsonb_agg(
+					case
+						when old_items.value is null then new_items.value
+						when new_items.value is null then old_items.value
+						else public.zfc_merge_json_values(old_items.value, new_items.value)
+					end order by ids.id
+				), '[]'::jsonb)
+				from ids
+				left join old_items using (id)
+				left join new_items using (id)
+			);
+		end if;
+		return (
+			select coalesce(jsonb_agg(value), '[]'::jsonb)
+			from (select distinct value from jsonb_array_elements(existing || incoming)) unique_items
+		);
+	end if;
+	return incoming;
+end;
+$$;
+
 create or replace function public.zfc_merge_json_arrays(existing jsonb, incoming jsonb)
 returns jsonb
 language sql
 immutable
 as $$
-	select coalesce(jsonb_agg(item order by item->>'id'), '[]'::jsonb)
-	from (
-		select distinct on (item->>'id') item
+	with grouped as (
+		select id, jsonb_agg(item order by source) as items
 		from (
-			select value as item, 0 as source
+			select value->>'id' as id, value as item, 0 as source
 			from jsonb_array_elements(coalesce(existing, '[]'::jsonb))
 			where value ? 'id'
 			union all
-			select value as item, 1 as source
+			select value->>'id' as id, value as item, 1 as source
 			from jsonb_array_elements(coalesce(incoming, '[]'::jsonb))
 			where value ? 'id'
 		) candidates
-		order by item->>'id', source desc
-	) merged_items;
+		group by id
+	)
+	select coalesce(jsonb_agg(
+		case
+			when jsonb_array_length(grouped.items) = 1 then grouped.items->0
+			else public.zfc_merge_json_values(grouped.items->0, grouped.items->1)
+		end order by grouped.id
+	), '[]'::jsonb)
+	from grouped;
 $$;
 
 create or replace function public.zfc_merge_app_state(incoming_state jsonb)

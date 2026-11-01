@@ -256,30 +256,38 @@ function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,tr
 function cloneState(state){ return state ? JSON.parse(JSON.stringify(state)) : null; }
 function sameState(left,right){ return JSON.stringify(left)===JSON.stringify(right); }
 function mergeState(base,local,remote){
-  if(!base) return cloneState(local||remote||{});
+  const mergeValue=(baseValue,localValue,remoteValue)=>{
+    if(sameState(localValue,baseValue)) return cloneState(remoteValue);
+    if(sameState(remoteValue,baseValue)||sameState(localValue,remoteValue)) return cloneState(localValue);
+    if(localValue&&remoteValue&&typeof localValue==='object'&&typeof remoteValue==='object'&&!Array.isArray(localValue)&&!Array.isArray(remoteValue)){
+      const merged={};
+      const keys=new Set([...Object.keys(baseValue||{}),...Object.keys(localValue),...Object.keys(remoteValue)]);
+      keys.forEach(key=>{
+        const value=mergeValue(baseValue?.[key],localValue[key],remoteValue[key]);
+        if(value!==undefined) merged[key]=value;
+      });
+      return merged;
+    }
+    if(Array.isArray(localValue)&&Array.isArray(remoteValue)){
+      const hasIds=items=>items.every(item=>item&&typeof item==='object'&&!Array.isArray(item)&&item.id);
+      if(hasIds(localValue)&&hasIds(remoteValue)){
+        const byId=items=>new Map(items.map(item=>[item.id,item]));
+        const baseItems=byId(Array.isArray(baseValue)?baseValue:[]);
+        const localItems=byId(localValue), remoteItems=byId(remoteValue);
+        const ids=new Set([...baseItems.keys(),...localItems.keys(),...remoteItems.keys()]);
+        return [...ids].map(id=>{
+          const value=mergeValue(baseItems.get(id),localItems.get(id),remoteItems.get(id));
+          return value===undefined?null:value;
+        }).filter(Boolean);
+      }
+      return [...new Map([...localValue,...remoteValue].map(value=>[JSON.stringify(value),value])).values()];
+    }
+    return cloneState(localValue);
+  };
+  if(!base) return mergeValue(undefined,local,remote)||{};
   const merged={};
   const keys=new Set([...Object.keys(base||{}),...Object.keys(local||{}),...Object.keys(remote||{})]);
-  keys.forEach(key=>{
-    const baseValue=base[key], localValue=local?.[key], remoteValue=remote?.[key];
-    if(sameState(localValue,baseValue)){ merged[key]=cloneState(remoteValue); return; }
-    if(sameState(remoteValue,baseValue)||sameState(localValue,remoteValue)){ merged[key]=cloneState(localValue); return; }
-    if(Array.isArray(localValue)&&Array.isArray(remoteValue)){
-      const baseItems=Array.isArray(baseValue)?baseValue:[];
-      const byId=list=>new Map(list.filter(item=>item&&item.id).map(item=>[item.id,item]));
-      const baseItemsById=byId(baseItems), localItemsById=byId(localValue), remoteItemsById=byId(remoteValue);
-      const ids=new Set([...baseItemsById.keys(),...localItemsById.keys(),...remoteItemsById.keys()]);
-      merged[key]=[...ids].map(id=>{
-        const baseItem=baseItemsById.get(id), localItem=localItemsById.get(id), remoteItem=remoteItemsById.get(id);
-        if(sameState(localItem,baseItem)) return remoteItem;
-        if(sameState(remoteItem,baseItem)||sameState(localItem,remoteItem)) return localItem;
-        if(localItem===undefined && remoteItem!==undefined) return remoteItem;
-        if(remoteItem===undefined && localItem!==undefined) return localItem;
-        return localItem;
-      }).filter(Boolean);
-      return;
-    }
-    merged[key]=cloneState(localValue);
-  });
+  keys.forEach(key=>{ const value=mergeValue(base?.[key],local?.[key],remote?.[key]); if(value!==undefined) merged[key]=value; });
   return merged;
 }
 function applyRemoteState(state){
@@ -311,7 +319,7 @@ async function syncAppState(){
     applyRemoteState(nextState);
     SUPABASE.applyingRemote=false;
     const result=await SUPABASE.client.rpc('zfc_merge_app_state',{incoming_state:nextState});
-    if(result.error){ SUPABASE.status='Synchronisierung fehlgeschlagen'; console.warn('Supabase-State konnte nicht synchronisiert werden',result.error); }
+    if(result.error){ SUPABASE.status='Synchronisierung fehlgeschlagen'; SUPABASE.lastSyncError=result.error; console.warn('Supabase-State konnte nicht synchronisiert werden',result.error); }
     else { applyRemoteState(result.data||nextState); SUPABASE.baseState=cloneState(result.data||nextState); }
   }).catch(error=>{
     SUPABASE.applyingRemote=false;
@@ -363,7 +371,7 @@ async function initSupabase(){
     SUPABASE.client = window.supabase.createClient(config.url, config.anonKey);
     const authState=await SUPABASE.client.auth.getSession();
     if(authState.error) throw authState.error;
-    if(!authState.data.session){ AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false; showLogin(); return; }
+    if(!authState.data.session){ AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false; showPublicHome(); return; }
     AUTH.session=authState.data.session;
     const profileResult=await SUPABASE.client.from('zfc_user_profiles').select('id,email,display_name,position,access_tier').eq('id',AUTH.session.user.id).single();
     if(profileResult.error){
@@ -376,12 +384,13 @@ async function initSupabase(){
     TIER_CHAT={messages:[],loading:Number(AUTH.profile.access_tier)>=2,sending:false,error:'',connected:false};
     if(new URLSearchParams(location.search).get('flow')==='set-password') ROUTE={page:'set-password',id:null};
     document.getElementById('loginScreen').style.display='none';
+    document.getElementById('publicHome').hidden=true;
     renderAccountBadge();
     const authListener=SUPABASE.client.auth.onAuthStateChange((event,session)=>{
       if(event==='SIGNED_OUT'){
         AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false;
         TIER_CHAT={messages:[],loading:false,sending:false,error:'',connected:false};
-        showLogin();
+        showPublicHome();
       }
     });
     SUPABASE.authSubscription=authListener.data.subscription;
@@ -471,8 +480,21 @@ async function initSupabase(){
 function showLogin(message=''){
   document.getElementById('shell').style.display='none';
   document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('publicHome').hidden=true;
   document.getElementById('loginMessage').textContent=message;
   document.getElementById('loginScreen').style.display='grid';
+}
+function showPublicHome(){
+  document.getElementById('shell').style.display='none';
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('publicHome').hidden=false;
+  document.getElementById('knowledgePortal').hidden=true;
+  document.body.dataset.page='public';
+}
+function openLogin(){
+  document.getElementById('loginMessage').textContent='';
+  showLogin();
 }
 async function handleLogin(){
   const config=supabaseConfig();
@@ -604,9 +626,15 @@ function nextStw(){
   return `STW-${number}`;
 }
 function nextLicenseNo(){
-  const nums = DB.drivers.filter(d=>d.licenseNo).map(d=>parseInt((d.licenseNo||'').split('-').pop())||0);
-  const next = (nums.length? Math.max(...nums):0)+1;
-  return `ZFC-LIC-${String(next).padStart(3,'0')}`;
+  const used=new Set(DB.drivers.map(driver=>String(driver.licenseNo||'')));
+  if(used.size>=9000) throw new Error('Alle vierstelligen Lizenznummern sind vergeben.');
+  const values=new Uint16Array(1);
+  let candidate='';
+  do{
+    crypto.getRandomValues(values);
+    candidate=String(1000+(values[0]%9000));
+  }while(used.has(candidate));
+  return candidate;
 }
 function statusTagClass(s){
   return {Neu:'open',Offen:'open','In Untersuchung':'invest',Entschieden:'decided',Archiviert:'archived',
@@ -767,14 +795,12 @@ const TIER3_PROCESS_CODES=new Set(['D4','D8','D9']);
 function currentTier(){ return Number(AUTH.profile?.access_tier||0); }
 function isCeoProfile(){ return currentTier()===3&&String(AUTH.profile?.position||'').trim().toLowerCase()==='ceo'; }
 function processRequiredTier(code){
-  if(TIER3_PROCESS_CODES.has(code)) return 3;
-  if(code==='07b') return 1;
-  return 2;
+  return 3;
 }
 function canStartProcess(code){
   const tier=currentTier();
   if(tier>=3) return true;
-  if(tier>=processRequiredTier(code)) return true;
+  if(tier===2) return !TIER3_PROCESS_CODES.has(code);
   return tier===1&&TIER1_PROCESS_CODES.has(code);
 }
 function showAccessNotice(message){
@@ -798,14 +824,14 @@ function processNeedsCeoApproval(code){
 }
 function makeProcessWorkflow(code){
   const tier=currentTier(), userId=AUTH.profile?.id||AUTH.session?.user?.id||'';
-  const initialTier=tier===1?1:Math.max(tier,workflowApprovalTier(code));
-  const approvalStatus=tier===1?'Noch nicht vorgelegt':`Tier-${initialTier}-Prüfung ausstehend`;
+  const createdByName=AUTH.profile?.display_name||AUTH.profile?.email||'';
+  const approvalStatus=tier>=3?'Freigegeben':'Tier-3-Prüfung ausstehend';
   return {
-    createdById:userId,createdByName:AUTH.profile?.display_name||AUTH.profile?.email||'',
-    createdByTier:tier,ownerTier:initialTier,approvalStatus,
-    nextAction:tier===1?'Unterlagen vervollständigen und an Tier 2 senden':tier>=3?'Vorgang prüfen oder direkt freigeben':'Unabhängige Prüfung und dokumentierte Freigabe',
-    requiredApprovalTier:workflowApprovalTier(code),requiresCeoApproval:processNeedsCeoApproval(code),
-    history:[{id:uid(),action:'created',actorId:userId,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',actorTier:tier,reason:`Prozess ${code} eröffnet.`,ts:Date.now()}]
+    createdById:userId,createdByName,
+    createdByTier:tier,ownerTier:tier>=3?0:3,approvalStatus,
+    nextAction:tier>=3?'Durch Tier 3 eröffnet; keine zusätzliche Bestätigung erforderlich.':'Unabhängige Prüfung und dokumentierte Freigabe durch Tier 3',
+    requiredApprovalTier:3,requiresCeoApproval:processNeedsCeoApproval(code),
+    history:[{id:uid(),action:'created',actorId:userId,actorName:createdByName,actorTier:tier,reason:tier>=3?`Prozess ${code} durch Tier 3 eröffnet und freigegeben.`:`Prozess ${code} eröffnet; Tier-3-Prüfung erforderlich.`,ts:Date.now()}]
   };
 }
 function processWorkflowPanel(c){
@@ -831,9 +857,6 @@ function processWorkflowPanel(c){
     buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','approve_t3')">Tier-3-Prüfung abschließen</button>`);
     buttons.push(`<button class="btn gold" onclick="actOnProcessCase('${c.id}','send_ceo')">CEO-Entscheidung anfordern</button>`);
     buttons.push(`<button class="btn" onclick="actOnProcessCase('${c.id}','return_t1')">Zur Ergänzung zurückgeben</button>`);
-  }
-  if(canTier3&&!['Freigegeben','Abgelehnt'].includes(pending)){
-    buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','admin_approve')">Als Tier 3 direkt freigeben</button>`);
   }
   if((isCeoProfile()||canTier3)&&workflow.ownerTier===3&&pending==='CEO-Entscheidung ausstehend'){
     if((!ownCase&&last?.actorId!==actorId)||canTier3) buttons.push(`<button class="btn primary" onclick="actOnProcessCase('${c.id}','ceo_decide')">CEO-Entscheidung dokumentieren</button>`);
@@ -864,7 +887,6 @@ async function actOnProcessCase(caseId,action){
     approve_t2:tier>=2&&workflow.ownerTier===2&&workflow.approvalStatus==='Tier-2-Prüfung ausstehend'&&(tier===3||!ownCase)&&Number(workflow.requiredApprovalTier||2)<=2,
     escalate_t3:(tier>=2&&workflow.ownerTier===2&&workflow.approvalStatus==='Tier-2-Prüfung ausstehend')||(tier===1&&c.processCode==='07b'&&workflow.ownerTier===1&&['Noch nicht vorgelegt','Zur Ergänzung zurückgegeben'].includes(workflow.approvalStatus)),
     approve_t3:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='Tier-3-Prüfung ausstehend',
-    admin_approve:tier===3&&!['Freigegeben','Abgelehnt'].includes(workflow.approvalStatus),
     send_ceo:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='Tier-3-Prüfung ausstehend',
     ceo_decide:tier===3&&workflow.ownerTier===3&&workflow.approvalStatus==='CEO-Entscheidung ausstehend',
     implement_measure:tier===1&&c.processCode==='D5'&&workflow.approvalStatus==='Freigegeben'&&workflow.implementationStatus!=='Umgesetzt',
@@ -883,7 +905,7 @@ async function actOnProcessCase(caseId,action){
     showAccessNotice('Der CEO ist selbst betroffen. Es ist keine unabhängige Vertretungsstelle im System hinterlegt; die Entscheidung wurde daher gesperrt.');
     return;
   }
-  const labels={submit_tier2:'An Tier 2 übergeben',approve_t2:'Tier-2-Prüfung freigegeben',escalate_t3:'An Tier 3 eskaliert',approve_t3:'Tier-3-Prüfung freigegeben',admin_approve:'Durch Tier 3 direkt freigegeben',send_ceo:'CEO-Entscheidung angefordert',ceo_decide:'CEO-Entscheidung dokumentiert',return_t1:'Zur Ergänzung zurückgegeben',implement_measure:'Freigegebene Maßnahme umgesetzt'};
+  const labels={submit_tier2:'An Tier 2 übergeben',approve_t2:'Tier-2-Prüfung freigegeben',escalate_t3:'An Tier 3 eskaliert',approve_t3:'Tier-3-Prüfung freigegeben',send_ceo:'CEO-Entscheidung angefordert',ceo_decide:'CEO-Entscheidung dokumentiert',return_t1:'Zur Ergänzung zurückgegeben',implement_measure:'Freigegebene Maßnahme umgesetzt'};
   const needsReason=action!=='submit_tier2'||workflow.approvalStatus==='Zur Ergänzung zurückgegeben';
   const reason=needsReason?window.prompt('Begründung / konkreter nächster Arbeitsauftrag:',''):'Übergabe zur fachlichen Prüfung.';
   if(reason===null) return;
@@ -896,8 +918,6 @@ async function actOnProcessCase(caseId,action){
   if(['approve_t2','approve_t3'].includes(action)){
     decision=window.prompt('Freizugebendes Ergebnis / Entscheidung:','Freigegeben')?.trim()||'';
     if(!decision) return;
-  }else if(action==='admin_approve'){
-    decision='Freigegeben';
   }else if(action==='ceo_decide'){
     const outcomes=['Freigegeben','Abgelehnt','Änderung verlangt','Weitere Prüfung angeordnet','Bearbeitung delegiert'];
     decision=window.prompt(`CEO-Ergebnis:\n${outcomes.map((item,index)=>`${index+1}. ${item}`).join('\n')}`,'Freigegeben')?.trim()||'';
@@ -978,8 +998,8 @@ function findProcess(code){
   return null;
 }
 function pageProcessCatalog(){
-  return `<div class="pagehead"><div><div class="eyebrow">Vorgänge · Prozessübersicht</div><h1>Prozesskatalog</h1><p>Wähle einen Prozess, um Zuständigkeit und Ablauf einzusehen oder einen Vorgang anzulegen. Tier 3 kann jeden Prozess starten; Tier 1 und 2 werden an den vorgesehenen Eskalationsstellen geführt.</p></div><div class="actions"><button class="btn" onclick="go('processes')">Wissensportal</button><button class="btn" onclick="go('dashboard')">← Arbeitsplatz</button></div></div>
-    ${PROCESS_CATALOG.map(category=>`<section class="process-catalog-section"><div class="process-catalog-heading"><div><span class="eyebrow">${esc(category.processes.length)} Prozesse</span><h2>${esc(category.name)}</h2></div></div><div class="process-catalog-grid">${category.processes.map(process=>`<article class="process-catalog-card"><div class="process-catalog-code">${esc(process.code)}</div><span class="process-tier-label">${currentTier()>=3?'Tier 3: alle Prozesse freigegeben':TIER1_PROCESS_CODES.has(process.code)?'Tier 1 Aufnahme möglich':`Entscheidung ab Tier ${workflowApprovalTier(process.code)}`}</span><h3>${esc(process.title)}</h3><p>${esc(process.purpose)}</p><div class="process-catalog-actions"><button class="btn small" onclick="go('process-detail','${esc(process.code)}')">Prozess ansehen</button><button class="btn small primary" onclick="go('process-form','${esc(process.code)}')">Vorgang anlegen</button></div></article>`).join('')}</div></section>`).join('')}`;
+  return `<div class="pagehead"><div><div class="eyebrow">Vorgänge · Prozessübersicht</div><h1>Prozesskatalog</h1><p>Wähle einen Prozess, um Zuständigkeit und Ablauf einzusehen. Tier 2 legt Vorgänge an und reicht sie zur unabhängigen Tier-3-Prüfung ein. Tier 3 kann Vorgänge direkt eröffnen.</p></div><div class="actions"><button class="btn" onclick="go('processes')">Wissensportal</button><button class="btn" onclick="go('dashboard')">← Arbeitsplatz</button></div></div>
+    ${PROCESS_CATALOG.map(category=>`<section class="process-catalog-section"><div class="process-catalog-heading"><div><span class="eyebrow">${esc(category.processes.length)} Prozesse</span><h2>${esc(category.name)}</h2></div></div><div class="process-catalog-grid">${category.processes.map(process=>`<article class="process-catalog-card"><div class="process-catalog-code">${esc(process.code)}</div><span class="process-tier-label">${currentTier()>=3?'Tier 3: direkt anlegen':TIER3_PROCESS_CODES.has(process.code)?'Tier 3: eigene Zuständigkeit':currentTier()===1&&TIER1_PROCESS_CODES.has(process.code)?'Tier 1: Aufnahme · Prüfung durch Tier 3':'Tier 2: Anlage · Prüfung durch Tier 3'}</span><h3>${esc(process.title)}</h3><p>${esc(process.purpose)}</p><div class="process-catalog-actions"><button class="btn small" onclick="go('process-detail','${esc(process.code)}')">Prozess ansehen</button><button class="btn small primary" onclick="go('process-form','${esc(process.code)}')" ${canStartProcess(process.code)?'':'disabled'}>Vorgang anlegen</button></div></article>`).join('')}</div></section>`).join('')}`;
 }
 function pageProcessDetail(code){
   const process=findProcess(code);
@@ -1197,6 +1217,8 @@ const PAGE_TIERS={
   'process-catalog':1,
   'process-detail':1,
   'process-form':1,
+  'case-processes':2,
+  'process-reviews':3,
   warningform:2,
   rulebook:2,
   manage:3,
@@ -1209,8 +1231,10 @@ const PAGE_TIERS={
   'esport-presentation':3,
 };
 function canAccessPage(page){
+  const tier=Number(AUTH.profile?.access_tier||0);
+  if(tier>=3) return true;
   const requiredTier=PAGE_TIERS[page]??1;
-  return Number(AUTH.profile?.access_tier||0)>=requiredTier;
+  return tier>=requiredTier;
 }
 function go(page, id){
   if(page==='tier-office') page=currentTier()===3?'tier-office-t3':'tier-office-t2';
@@ -1241,35 +1265,55 @@ function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
 function portalAccessCard(){
   const canCreateProcess=Number(AUTH.profile?.access_tier||0)>=2;
   return `<section class="portal-launch-card">
-    <div><span class="eyebrow">ZFC · CFC · Steward Office</span><h2>Wissen &amp; Vorgänge</h2><p>Öffne Arbeitsanleitungen und Abläufe oder ${canCreateProcess?'starte einen Vorgang mit dem passenden Prozessformular.':'nimm einen für Tier 1 freigegebenen Vorgang auf.'}</p></div>
-    <div class="portal-launch-actions"><button class="btn primary" onclick="go('process-catalog')">${canCreateProcess?'Vorgang anlegen':'Vorgang aufnehmen'}</button><button class="btn gold" onclick="go('processes')">Wissensportal öffnen</button></div>
+    <div><span class="eyebrow">ZFC · CFC · Steward Office</span><h2>Wissen &amp; Vorgänge</h2><p>${canCreateProcess?'Erfasse Vorgänge über das passende Prozessformular. Anfragen aus Tier 2 werden Tier 3 zur Prüfung vorgelegt.':'Sieh dir Arbeitsanleitungen und Abläufe an. Prozessvorgänge können ab Tier 2 angelegt werden.'}</p></div>
+    <div class="portal-launch-actions"><button class="btn primary" onclick="go('process-catalog')">${canCreateProcess?'Vorgang anlegen':'Prozesskatalog ansehen'}</button><button class="btn gold" onclick="go('processes')">Wissensportal öffnen</button></div>
   </section>`;
 }
 function pageTierOffice(tier){
-  const otherTier=tier===2?3:2;
   const tierEscalations=DB.escalations.filter(item=>Number(item.targetTier||3)===tier);
   const openEscalations=tierEscalations.filter(item=>!['Zurück an Tier 1','Abgeschlossen'].includes(item.status));
   const escalationPage=tier===2?'escalations-t2':'escalations-t3';
+  const workflowCases=DB.cases.filter(c=>{
+    const workflow=c.processWorkflow||{};
+    const open=!['Freigegeben','Abgelehnt'].includes(workflow.approvalStatus);
+    return open&&(Number(workflow.ownerTier)===tier||(tier===2&&Number(workflow.createdByTier)===2&&workflow.createdById===AUTH.profile?.id));
+  });
+  const requestedLinks=DB.cases.flatMap(c=>(c.processLinkRequests||[])
+    .filter(request=>request.status==='Tier-3-Prüfung ausstehend')
+    .map(request=>({caseRecord:c,request})));
+  const ownLinkRequests=DB.cases.flatMap(c=>(c.processLinkRequests||[])
+    .filter(request=>request.status==='Tier-3-Prüfung ausstehend'&&request.requestedById===AUTH.profile?.id)
+    .map(request=>({caseRecord:c,request})));
+  const tasks=tier===3
+    ?[
+      ...workflowCases.map(c=>`<button class="tier-office-task" onclick="go('caseform','${esc(c.id)}')"><strong>${esc(c.stw||'Akte')} · ${esc(c.processCode||'Vorgang')}</strong><span>${esc(c.processTitle||c.event||'Tier-3-Prüfung erforderlich')} →</span></button>`),
+      ...requestedLinks.map(({caseRecord,request})=>`<button class="tier-office-task" onclick="go('case-processes','${esc(caseRecord.id)}')"><strong>${esc(request.processCode)} · ${esc(caseRecord.stw||'Akte')}</strong><span>${esc(request.reason||'Vorgang prüfen')} →</span></button>`)
+    ].join('')
+    :[
+      ...workflowCases.map(c=>`<button class="tier-office-task" onclick="go('caseform','${esc(c.id)}')"><strong>${esc(c.stw||'Akte')} · ${esc(c.processCode||'Vorgang')}</strong><span>${esc(c.processTitle||c.event||'Prüfung erforderlich')} →</span></button>`),
+      ...ownLinkRequests.map(({caseRecord,request})=>`<button class="tier-office-task" onclick="go('case-processes','${esc(caseRecord.id)}')"><strong>${esc(request.processCode)} · ${esc(caseRecord.stw||'Akte')}</strong><span>Tier-3-Prüfung ausstehend · ${esc(request.reason||'')} →</span></button>`)
+    ].join('');
+  const taskCount=tier===3?requestedLinks.length:workflowCases.length+ownLinkRequests.length;
   return `<div class="tier-office-page">
     <div class="pagehead"><div><div class="eyebrow">Interner Arbeitsbereich · Tier ${tier}</div><h1>Tier ${tier} <b>Arbeitsplatz</b></h1></div><span class="tier-office-badge">ZUGANG: TIER ${tier}</span></div>
     <div class="grid cols-3 tier-office-stats">
       <div class="stat red"><div class="n">${openEscalations.length}</div><div class="l">Offene Eskalierungen</div></div>
-      <div class="stat"><div class="n">${tierEscalations.length}</div><div class="l">Zugewiesene Vorgänge</div></div>
+      <div class="stat"><div class="n">${workflowCases.length+ (tier===3?requestedLinks.length:0)}</div><div class="l">Zugewiesene Vorgänge</div></div>
       <div class="stat green"><div class="n">${esc(AUTH.profile?.position||'—')}</div><div class="l">Deine Position</div></div>
     </div>
     ${portalAccessCard()}
     <div class="grid cols-2 tier-office-panels">
       <section class="panel tier-office-card">
-        <div class="eyebrow">Fallverwaltung</div><h2>Fälle &amp; Aufgaben</h2>
-        <p>Hier werden künftig die Fälle und Aufgaben für Tier ${tier} gesammelt und bearbeitet.</p>
-        <div class="workspace-placeholder"><strong>Arbeitsliste wird vorbereitet</strong><span>Fallzuweisung und Aufgabenbearbeitung folgen später.</span></div>
-        <button class="btn" type="button" disabled aria-disabled="true">Fälle und Aufgaben öffnen</button>
+        <div class="eyebrow">Arbeitskorb · Tier ${tier}</div><h2>Fälle &amp; Aufgaben</h2>
+        <p>${tier===3?'Offene Tier-3-Prüfungen und Vorgangsanfragen.':'Deine zugewiesenen Prozessvorgänge und offenen Aufgaben.'}</p>
+        <div class="tier-office-tasklist">${tasks||'<div class="workspace-placeholder"><strong>Keine offenen Aufgaben</strong><span>Neue Zuweisungen und Prüfanfragen erscheinen hier automatisch.</span></div>'}</div>
+        <button class="btn primary" type="button" onclick="go('${tier===3?'process-reviews':'cases'}')">${tier===3?'Alle Prüfungen öffnen':'Aktenübersicht öffnen'}</button>
       </section>
       <section class="panel tier-office-card">
-        <div class="eyebrow">Übergabe</div><h2>Mit Tier ${otherTier} abstimmen</h2>
-        <p>Vorgänge sollen künftig zwischen Tier ${tier} und Tier ${otherTier} übergeben werden können.</p>
-        <div class="workspace-placeholder"><strong>Übergaben werden später aktiviert</strong><span>Die Weitergabe von Fällen und Aufgaben ist noch nicht verfügbar.</span></div>
-        <button class="btn" type="button" disabled aria-disabled="true">Fall an Tier ${otherTier} übergeben</button>
+        <div class="eyebrow">${tier===3?'Leitung & Freigaben':'Anlage & Übergabe'}</div><h2>${tier===3?'Tier-3-Verwaltung':'Mit Tier 3 abstimmen'}</h2>
+        <p>${tier===3?'Prüfungen freigeben, Verwaltung steuern und den Arbeitsstand der Liga überblicken.':'Vorgänge erfassen, Akten vervollständigen und Prüfungen nachvollziehbar an Tier 3 übergeben.'}</p>
+        <div class="workspace-placeholder"><strong>${tier===3?'Tier 3 · unabhängige Prüfung und Freigabe':'Tier 2 · fachliche Bearbeitung und Dokumentation'}</strong><span>${taskCount} offene Aufgabe(n) · ${openEscalations.length} Eskalierung(en)</span></div>
+        <div class="actions"><button class="btn" type="button" onclick="go('${tier===3?'manage':'process-catalog'}')">${tier===3?'Verwaltung öffnen':'Vorgang anlegen'}</button><button class="btn gold" type="button" onclick="go('${escalationPage}')">Tier ${tier} Eskalierungen</button></div>
       </section>
       <section class="panel tier-office-card tier-office-chat">
         <div class="eyebrow">Kommunikation</div><h2>Nachrichten</h2>
@@ -1293,6 +1337,7 @@ function pageTierOffice(tier){
   </div>`;
 }
 window.addEventListener('hashchange', ()=>{
+  if(!AUTH.profile) return;
   const h = location.hash.replace('#','');
   let [page,id] = h.split('/');
   if(page==='tier-office') page=Number(AUTH.profile?.access_tier)===3?'tier-office-t3':'tier-office-t2';
@@ -1318,6 +1363,7 @@ const NAV = [
   {id:'escalations-t2', label:'ESKALIERUNG T2', ic:'07'},
   {id:'escalations', label:'ESKALIERUNGEN', ic:'07a'},
   {id:'escalations-t3', label:'ESKALIERUNG T3', ic:'07b'},
+  {id:'process-reviews', label:'Vorgangsprüfungen', ic:'P3'},
   {id:'teams', label:'Teams', ic:'08'},
   {id:'transfers', label:'Transfers', ic:'09'},
   {id:'finance', label:'Finanzen', ic:'10'},
@@ -1383,6 +1429,8 @@ function render(){
   else if(ROUTE.page==='process-catalog') main.innerHTML = pageProcessCatalog();
   else if(ROUTE.page==='process-detail') main.innerHTML = pageProcessDetail(ROUTE.id);
   else if(ROUTE.page==='process-form') main.innerHTML = pageProcessForm(ROUTE.id);
+  else if(ROUTE.page==='case-processes') main.innerHTML = pageCaseProcessManagement(ROUTE.id);
+  else if(ROUTE.page==='process-reviews') main.innerHTML = pageProcessReviews();
   else if(ROUTE.page==='processes') main.innerHTML = pageProcesses();
   else if(ROUTE.page==='manage') main.innerHTML = pageManage();
   else if(ROUTE.page==='hr') main.innerHTML = pageHR(ROUTE.id);
@@ -1547,7 +1595,7 @@ function pageDashboard(){
 
     <div class="dashboard-section-head"><h2>Race Control <b>Shortcuts</b></h2><span>Arbeitsbereiche</span></div>
     <div class="dashboard-quicklinks">
-      <div class="dashboard-quicklink" onclick="go('process-catalog')"><span class="quick-no">01</span><div><strong>${currentTier()>=2?'Vorgang anlegen':'Vorgang aufnehmen'}</strong><span>Prozess auswählen und Vorgang bearbeiten</span></div></div>
+      <div class="dashboard-quicklink" onclick="go('process-catalog')"><span class="quick-no">01</span><div><strong>${currentTier()>=2?'Vorgang anlegen':'Prozesskatalog ansehen'}</strong><span>${currentTier()>=2?'Prozess auswählen und zur Prüfung einreichen':'Zuständigkeiten und Ablauf einsehen'}</span></div></div>
       <div class="dashboard-quicklink" onclick="go('cases')"><span class="quick-no">02</span><div><strong>Akten prüfen</strong><span>Status und Entscheidungen</span></div></div>
       <div class="dashboard-quicklink" onclick="go('drivers')"><span class="quick-no">03</span><div><strong>Fahrerregister</strong><span>Lizenzen und Profile</span></div></div>
       <div class="dashboard-quicklink" onclick="go('rulebook')"><span class="quick-no">04</span><div><strong>Regelwerk</strong><span>Sportliche Grundlage</span></div></div>
@@ -1894,14 +1942,13 @@ function caseDocumentsPanel(c){
   const canClose=state.ready||currentTier()>=3;
   const requirements=requirementsMetForCase(c);
   const rows=documentRowsForCase(c.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
-  const processOptions=Object.keys(DOCUMENT_PROCESS_MATRIX).map(code=>`<option value="${esc(code)}" ${documentCaseProcessCodes(c).includes(code)?'disabled':''}>${esc(code)} · ${esc(findProcess(code)?.title||code)}</option>`).join('');
   return `<section class="panel case-documents">
     <div class="case-documents-heading"><div><div class="eyebrow">Aktenbestand · PDF-Dokumente</div><h2>Dokumente <b>&amp; Aufgaben</b></h2></div><button class="btn primary" onclick="go('document-create','${esc(c.id)}')">+ Neuer Vorgang anlegen</button></div>
     <p class="case-document-dialog-title">Dokumentvorgang für Akte <strong>${esc(c.stw)}</strong> anlegen.</p>
     ${CASE_DOCUMENTS.loading.has(c.id)?'<div class="empty">Dokumentbestand wird geladen …</div>':''}
     ${CASE_DOCUMENTS.errorByCase.has(c.id)?`<div class="case-document-error" role="alert">${esc(CASE_DOCUMENTS.errorByCase.get(c.id))}<button class="btn small" onclick="loadCaseDocuments('${esc(c.id)}',true)">Erneut versuchen</button></div>`:''}
     <div class="case-document-counts"><div><strong>Abgeschlossene Dokumente: ${state.count} von mindestens 5</strong></div><div><strong>Pflichtunterlagen: ${requirements.filter(item=>item.document).length} von ${requirements.length} erfüllt</strong></div></div>
-    <div class="case-document-process-link"><label for="documentProcessLink">Weiteren Prozess in derselben Akte verknüpfen</label><select id="documentProcessLink" onchange="linkDocumentProcess('${esc(c.id)}',this.value)"><option value="">Prozess auswählen …</option>${processOptions}</select></div>
+    ${currentTier()>=2?`<div class="case-document-process-link case-process-launch"><div><strong>Vorgänge außerhalb der Akte verwalten</strong><span>Tier 2 reicht neue Vorgänge zur Tier-3-Prüfung ein. Tier 3 kann direkt anlegen und freigeben.</span></div><button class="btn primary" onclick="go('case-processes','${esc(c.id)}')">Vorgangsverwaltung öffnen</button></div>`:'<p class="note">Die Verwaltung zusätzlicher Vorgänge ist für Tier 2 und Tier 3 freigeschaltet.</p>'}
     <div class="case-document-process-link"><label for="documentClosureRoute">Abschlussweg</label><select id="documentClosureRoute" onchange="document.getElementById('earlyClosureReason').hidden=this.value!=='early'"><option value="regular" ${c.documentClosureRoute==='early'?'':'selected'}>Regulärer Prozessverlauf</option><option value="early" ${c.documentClosureRoute==='early'?'selected':''}>Frühe Einstellung, Ablehnung oder Zusammenführung</option></select><input id="earlyClosureReason" ${c.documentClosureRoute==='early'?'':'hidden'} value="${esc(c.documentClosureReason||'')}" placeholder="Begründung des frühen Abschlusswegs"><button class="btn small" onclick="saveDocumentClosureRoute('${esc(c.id)}')">Abschlussweg speichern</button></div>
     ${requirements.length?`<details class="case-document-requirements" open><summary>Pflichtunterlagen je aktivem Prozess</summary><div class="table-scroll"><table><thead><tr><th>Prozess</th><th>Pflichtunterlage</th><th>Status</th><th></th></tr></thead><tbody>${requirements.map(item=>`<tr><td>${esc(item.processCode)}</td><td>${esc(item.title)}</td><td>${item.document?`<span class="tag decided">${esc(item.document.status)}</span>`:'<span class="tag open">Offene Aufgabe</span>'}</td><td>${item.document?`<button class="btn small" onclick="go('document-editor','${esc(item.document.id)}')">Öffnen</button>`:`<button class="btn small gold" onclick="createRequirementDocument('${esc(c.id)}','${esc(item.processCode)}',${item.index})">Anlegen</button>`}</td></tr>`).join('')}</tbody></table></div></details>`:'<div class="note">Für diese Akte ist kein Prozess mit einer Pflichtunterlagen-Checkliste hinterlegt. Verknüpfe bei Bedarf einen Prozess.</div>'}
     ${caseDocumentSuggestions(c)}
@@ -2738,21 +2785,8 @@ async function startSuggestedDocument(caseId,title){
 }
 async function linkDocumentProcess(caseId,processCode){
   if(!processCode) return;
-  const c=DB.cases.find(item=>item.id===caseId), current=documentCaseProcessCodes(c);
-  if(!c||current.includes(processCode)) return;
-  if(['Archiviert','Entschieden'].includes(c.status)||['Freigegeben','Abgelehnt'].includes(c.processWorkflow?.approvalStatus)){
-    showAccessNotice('Zu einer abgeschlossenen Akte kann kein weiterer Prozess verknüpft werden.');
-    render(); return;
-  }
-  if(!canStartProcess(processCode)){
-    showAccessNotice(`Prozess ${processCode} darf von Tier ${currentTier()} nicht in dieser Akte aktiviert werden.`);
-    render(); return;
-  }
-  const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
-  c.activeProcessCodes=[...(c.activeProcessCodes||[]).filter(code=>code!==c.processCode),processCode];
-  c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode,actorId,actorTier:currentTier(),actorName:AUTH.profile?.display_name||'',ts:Date.now(),action:'linked'}];
-  await persist.cases();
-  render();
+  if(currentTier()<2){ showAccessNotice('Die Vorgangsverwaltung ist ausschließlich für Tier 2 und Tier 3 verfügbar.'); return; }
+  go('case-processes',caseId);
 }
 async function saveDocumentClosureRoute(caseId){
   const c=DB.cases.find(item=>item.id===caseId);
@@ -2983,7 +3017,7 @@ function pageCaseList(){
   return `
   <div class="pagehead">
     <div><div class="eyebrow">Übersicht</div><h1>Alle Akten</h1></div>
-    <div class="actions"><button class="btn" onclick="go('process-catalog')">Prozessvorgang aufnehmen</button><button class="btn primary" onclick="go('caseform')">+ Neue Akte</button></div>
+    <div class="actions">${currentTier()>=2?'<button class="btn" onclick="go(\'process-catalog\')">Vorgang anlegen</button>':''}<button class="btn primary" onclick="go('caseform')">+ Neue Akte</button></div>
   </div>
   <div class="panel">
     <div class="searchbar">
@@ -2995,6 +3029,116 @@ function pageCaseList(){
     <div id="caseTableWrap"></div>
   </div>
   `;
+}
+
+function pageCaseProcessManagement(caseId){
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(currentTier()<2) return `<div class="panel"><h2>Zugriff nicht freigegeben</h2><p>Die Vorgangsverwaltung ist ausschließlich für Tier 2 und Tier 3 verfügbar.</p><button class="btn" onclick="go('cases')">Zur Aktenübersicht</button></div>`;
+  if(!c) return `<div class="panel"><h2>Akte nicht gefunden</h2><button class="btn" onclick="go('cases')">Zur Aktenübersicht</button></div>`;
+  const active=documentCaseProcessCodes(c);
+  const requests=Array.isArray(c.processLinkRequests)?c.processLinkRequests:[];
+  const pendingCodes=requests.filter(item=>item.status==='Tier-3-Prüfung ausstehend').map(item=>item.processCode);
+  const available=PROCESS_CATALOG.flatMap(category=>category.processes)
+    .filter(process=>!active.includes(process.code)&&!pendingCodes.includes(process.code));
+  const activeRows=active.map(code=>{
+    const process=findProcess(code);
+    return `<article class="case-process-item"><span class="process-catalog-code">${esc(code)}</span><div><strong>${esc(process?.title||code)}</strong><small>Aktiv in dieser Akte</small></div><span class="tag decided">Aktiv</span></article>`;
+  }).join('')||'<div class="empty">Noch keine zusätzlichen Vorgänge mit dieser Akte verknüpft.</div>';
+  const requestRows=requests.slice().reverse().map(request=>{
+    const process=findProcess(request.processCode);
+    const pending=request.status==='Tier-3-Prüfung ausstehend';
+    const actions=currentTier()>=3&&pending?`<div class="actions"><button class="btn small primary" onclick="reviewCaseProcessLink('${esc(c.id)}','${esc(request.id)}',true)">Bestätigen &amp; verknüpfen</button><button class="btn small danger" onclick="reviewCaseProcessLink('${esc(c.id)}','${esc(request.id)}',false)">Ablehnen</button></div>`:'';
+    return `<article class="case-process-request"><div class="case-process-request-head"><div><span class="process-catalog-code">${esc(request.processCode)}</span><strong>${esc(process?.title||request.processCode)}</strong></div><span class="tag ${statusTagClass(request.status)}">${esc(request.status)}</span></div><p>${esc(request.reason||'—')}</p><small>Erstellt von ${esc(request.requestedByName||'Steward')} · Tier ${esc(request.requestedTier||'—')} · ${fmtDateTime(request.createdAt)}</small>${request.reviewReason?`<p class="case-process-review-note"><b>Prüfvermerk:</b> ${esc(request.reviewReason)}</p>`:''}${actions}</article>`;
+  }).join('')||'<div class="empty">Noch keine Prozessanfragen vorhanden.</div>';
+  const canCreate=!['Archiviert','Entschieden'].includes(c.status);
+  return `<div class="pagehead"><div><div class="eyebrow">Aktenverwaltung · ${esc(c.stw)}</div><h1>Vorgänge verwalten</h1><p>${esc(c.event||'')} · Neue Vorgänge werden außerhalb der Akte erfasst und danach hier dokumentiert.</p></div><div class="actions"><button class="btn" onclick="go('caseform','${esc(c.id)}')">← Zur Akte</button>${currentTier()>=3?'<button class="btn gold" onclick="go(\'process-reviews\')">Prüfungsübersicht</button>':''}</div></div>
+  <section class="panel case-process-management">
+    <div class="case-process-section-title"><div><span class="eyebrow">Aktive Zuordnungen</span><h2>Vorgänge dieser Akte</h2></div><span class="tag">${active.length} aktiv</span></div>
+    <div class="case-process-list">${activeRows}</div>
+    ${canCreate?`<form class="case-process-create" onsubmit="requestCaseProcess(event,'${esc(c.id)}')"><div><span class="eyebrow">${currentTier()===3?'Tier 3 · Direktanlage':'Tier 2 · Prüfanfrage'}</span><h3>Vorgang hinzufügen</h3><p>${currentTier()===3?'Tier 3 kann den Vorgang direkt anlegen.':'Die Zuordnung wird erst nach Bestätigung durch Tier 3 aktiviert.'}</p></div><div class="field"><label for="caseProcessCode">Prozess auswählen</label><select id="caseProcessCode" required><option value="">Prozess auswählen …</option>${available.map(process=>`<option value="${esc(process.code)}">${esc(process.code)} · ${esc(process.title)}</option>`).join('')}</select></div><div class="field"><label for="caseProcessReason">Auftrag / Begründung</label><textarea id="caseProcessReason" required maxlength="2000" rows="3" placeholder="Warum ist dieser Vorgang für die Akte erforderlich?"></textarea></div><button class="btn primary" type="submit">${currentTier()===3?'Vorgang anlegen':'Zur Tier-3-Prüfung senden'}</button></form>`:'<p class="note">Diese Akte ist abgeschlossen; weitere Vorgänge können nicht hinzugefügt werden.</p>'}
+  </section>
+  <section class="panel"><div class="case-process-section-title"><div><span class="eyebrow">Nachvollziehbare Freigabe</span><h2>Prüfungen &amp; Rückmeldungen</h2></div><span class="tag invest">${requests.filter(item=>item.status==='Tier-3-Prüfung ausstehend').length} offen</span></div><div class="case-process-requests">${requestRows}</div></section>`;
+}
+
+function pageProcessReviews(){
+  const pending=DB.cases.flatMap(c=>(c.processLinkRequests||[])
+    .filter(request=>request.status==='Tier-3-Prüfung ausstehend')
+    .map(request=>({caseRecord:c,request,kind:'link'})))
+    .concat(DB.cases.filter(c=>Number(c.processWorkflow?.ownerTier)===3&&['Tier-3-Prüfung ausstehend','CEO-Entscheidung ausstehend'].includes(c.processWorkflow?.approvalStatus))
+      .map(caseRecord=>({caseRecord,request:{processCode:caseRecord.processCode,processTitle:caseRecord.processTitle,reason:caseRecord.description,requestedByName:caseRecord.processWorkflow?.createdByName,createdAt:caseRecord.createdAt,status:caseRecord.processWorkflow?.approvalStatus},kind:'case'})));
+  return `<div class="pagehead"><div><div class="eyebrow">Arbeitsplatz Tier 3 · Freigaben</div><h1>Vorgangsprüfungen</h1><p>Offene Anfragen aus den Akten prüfen und begründet bestätigen oder ablehnen.</p></div><div class="actions"><button class="btn" onclick="go('tier-office-t3')">Tier-3-Arbeitsplatz</button><button class="btn" onclick="go('cases')">Alle Akten</button></div></div>
+  <section class="panel"><div class="case-process-requests">${pending.map(({caseRecord,request,kind})=>`<article class="case-process-request"><div class="case-process-request-head"><div><span class="process-catalog-code">${esc(request.processCode||'Vorgang')}</span><strong>${esc(request.processTitle||findProcess(request.processCode)?.title||request.processCode||'Vorgang')}</strong></div><span class="tag invest">${esc(request.status||'Tier-3-Prüfung ausstehend')}</span></div><a class="case-process-case-link" href="#${kind==='link'?'case-processes':'caseform'}/${encodeURIComponent(caseRecord.id)}"><b>${esc(caseRecord.stw||'Akte')}</b> · ${esc(caseRecord.event||'Ohne Event')}</a><p>${esc(request.reason||'—')}</p><small>Angefordert von ${esc(request.requestedByName||'Steward')} · ${fmtDateTime(request.createdAt)}</small><button class="btn small primary" onclick="go('${kind==='link'?'case-processes':'caseform'}','${esc(caseRecord.id)}')">Prüfen und entscheiden →</button></article>`).join('')||'<div class="empty"><b>Keine offenen Prüfungen</b>Tier-2-Anfragen und neue Akten warten hier auf eine Entscheidung.</div>'}</div></section>`;
+}
+
+async function requestCaseProcess(event,caseId){
+  event.preventDefault();
+  const c=DB.cases.find(item=>item.id===caseId);
+  const processCode=document.getElementById('caseProcessCode')?.value||'';
+  const reason=document.getElementById('caseProcessReason')?.value.trim()||'';
+  const process=findProcess(processCode);
+  if(!c||!process||currentTier()<2||!reason){ showAccessNotice('Bitte einen gültigen Vorgang und eine Begründung angeben.'); return; }
+  if(!canStartProcess(processCode)){ showAccessNotice(`Vorgänge können erst ab Tier 2 angelegt werden.`); return; }
+  if(documentCaseProcessCodes(c).includes(processCode)||(c.processLinkRequests||[]).some(item=>item.processCode===processCode&&item.status==='Tier-3-Prüfung ausstehend')){
+    showAccessNotice('Dieser Vorgang ist bereits aktiv oder wartet schon auf Prüfung.'); return;
+  }
+  if(['Archiviert','Entschieden'].includes(c.status)){
+    showAccessNotice('Zu einer abgeschlossenen Akte kann kein weiterer Vorgang hinzugefügt werden.'); return;
+  }
+  const previous=JSON.parse(JSON.stringify(c));
+  const actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const createdAt=Date.now();
+  if(currentTier()===3){
+    c.activeProcessCodes=[...new Set([...(c.activeProcessCodes||[]),...(c.processCode?[c.processCode]:[]),processCode])];
+    c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode,actorId,actorTier:3,actorName:AUTH.profile?.display_name||'',ts:createdAt,action:'linked'}];
+  }else{
+    c.processLinkRequests=[...(c.processLinkRequests||[]),{id:uid(),processCode,reason,requestedById:actorId,requestedByName:AUTH.profile?.display_name||AUTH.profile?.email||'',requestedTier:2,status:'Tier-3-Prüfung ausstehend',createdAt}];
+  }
+  c.history=[...(c.history||[]),{ts:createdAt,actorId,actorTier:currentTier(),text:currentTier()===3?`Vorgang ${processCode} durch Tier 3 angelegt.`:`Vorgang ${processCode} zur Tier-3-Prüfung vorgelegt.`}];
+  c.updatedAt=createdAt;
+  addCaseActivity(c,currentTier()===3?`Vorgang ${processCode} durch Tier 3 angelegt.`:`Vorgang ${processCode} zur Tier-3-Prüfung vorgelegt.`);
+  await persistCaseMutation(c,previous,'Vorgang konnte nicht gespeichert werden.');
+}
+
+async function reviewCaseProcessLink(caseId,requestId,approve){
+  if(currentTier()<3){ showAccessNotice('Nur Tier 3 darf Vorgangszuordnungen bestätigen oder ablehnen.'); return; }
+  const c=DB.cases.find(item=>item.id===caseId);
+  const request=c?.processLinkRequests?.find(item=>item.id===requestId);
+  if(!c||!request||request.status!=='Tier-3-Prüfung ausstehend'){ showAccessNotice('Diese Vorgangsanfrage ist nicht mehr offen.'); return; }
+  if(approve&&documentCaseProcessCodes(c).includes(request.processCode)){
+    showAccessNotice('Der Vorgang ist inzwischen bereits aktiv. Bitte die Anfrage nicht doppelt bestätigen.'); return;
+  }
+  const reason=window.prompt(approve?'Prüfvermerk zur Bestätigung:':'Begründung für die Ablehnung:','');
+  if(reason===null) return;
+  if(!reason.trim()){ showAccessNotice('Bitte einen Prüfvermerk oder eine Ablehnungsbegründung eintragen.'); return; }
+  const previous=JSON.parse(JSON.stringify(c));
+  const now=Date.now(), actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  request.status=approve?'Freigegeben':'Abgelehnt';
+  request.reviewedAt=now; request.reviewedById=actorId;
+  request.reviewedByName=AUTH.profile?.display_name||AUTH.profile?.email||'';
+  request.reviewedByTier=3;
+  request.reviewReason=reason.trim();
+  if(approve){
+    c.activeProcessCodes=[...new Set([...(c.activeProcessCodes||[]),...(c.processCode?[c.processCode]:[]),request.processCode])];
+    c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode:request.processCode,actorId,actorTier:3,actorName:AUTH.profile?.display_name||'',ts:now,action:'linked'}];
+  }
+  c.history=[...(c.history||[]),{ts:now,actorId,actorTier:3,text:`Tier 3 hat Vorgang ${request.processCode} ${approve?'bestätigt':'abgelehnt'}: ${reason.trim()}`}];
+  c.updatedAt=now;
+  addCaseActivity(c,`Tier 3 hat Vorgang ${request.processCode} ${approve?'bestätigt':'abgelehnt'}.`);
+  await persistCaseMutation(c,previous,'Prüfentscheidung konnte nicht gespeichert werden.');
+}
+
+async function persistCaseMutation(caseRecord,previous,errorLabel){
+  try{
+    await persist.cases();
+    if(SUPABASE.lastSyncError) throw SUPABASE.lastSyncError;
+    render();
+  }catch(error){
+    const index=DB.cases.findIndex(item=>item.id===caseRecord.id);
+    if(index>=0) DB.cases[index]=previous;
+    saveKey(KEYS.cases,DB.cases);
+    console.error(errorLabel,error);
+    showAccessNotice(`${errorLabel} ${error?.message||'Bitte Verbindung und Berechtigungen prüfen.'}`);
+  }
 }
 function renderCaseTable(){
   const q = (document.getElementById('cf_q')?.value||'').toLowerCase();
@@ -3078,25 +3222,22 @@ function renderDriverTable(){
     if(q && !driverName(d).toLowerCase().includes(q)) return false;
     return true;
   });
-  const rows = list.map(d=>{
+  const cards = list.map(d=>{
     const t = teamById(d.teamId);
     const pts = driverPenaltyPoints(d.id);
     const ptsClass = pts>=12?'crit':pts>=8?'warn':'';
     const ls = d.licenseStatus || 'Nicht ausgestellt';
-    return `<tr class="rowlink" onclick="go('driverform','${d.id}')">
-      <td>${divisionBadge(d)}${esc(driverName(d))} ${d.number? `<span style="color:var(--grey-2)">#${esc(d.number)}</span>`:''}</td>
-      <td>${t? `<span class="teamchip"><span class="dot" style="background:${t.color}"></span>${esc(t.name)}</span>`:'<span class="tag none">Free Driver</span>'}</td>
-      <td class="pts">${esc(d.licenseNo||'—')}</td>
-      <td><span class="tag ${licenseTagClass(ls)}">${esc(ls)}</span></td>
-      <td class="pts ${ptsClass}">${pts} / 12</td>
-      <td>${casesForDriver(d.id).length}</td>
-    </tr>`;
+    const initials=esc(`${d.firstName?.[0]||''}${d.lastName?.[0]||''}`||'ZFC');
+    return `<article class="driver-card" role="link" tabindex="0" onclick="go('driverform','${esc(d.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('driverform','${esc(d.id)}')}">
+      <div class="driver-card-cover" style="--team-accent:${esc(t?.color||'#45d9ff')}">${d.photoUrl?`<img src="${esc(d.photoUrl)}" alt="" loading="lazy">`:''}<span class="driver-card-number">${d.number?`#${esc(d.number)}`:'DRIVER'}</span><div class="driver-card-avatar">${d.photoUrl?'':initials}</div></div>
+      <div class="driver-card-body"><div class="driver-card-identity">${divisionBadge(d)}<h2>${esc(driverName(d)||'Unbenannter Fahrer')}</h2><p>${t?esc(t.name):'Free Driver'} · ${esc(d.division||'Division offen')}</p></div>
+        <div class="driver-card-license"><span>LICENZ</span><strong>${esc(d.licenseNo||'NOCH OFFEN')}</strong><span class="tag ${licenseTagClass(ls)}">${esc(ls)}</span></div>
+        <div class="driver-card-stats"><div><strong class="${ptsClass}">${pts}<small> / 12</small></strong><span>Strafpunkte</span></div><div><strong>${casesForDriver(d.id).length}</strong><span>Akten</span></div><div><strong>${esc(d.platform||'—')}</strong><span>Plattform</span></div></div>
+        <div class="driver-card-action">Fahrerakte öffnen <span aria-hidden="true">→</span></div>
+      </div>
+    </article>`;
   }).join('');
-  document.getElementById('driverTableWrap').innerHTML = `
-    <table><thead><tr><th>Fahrer</th><th>Team</th><th>Lizenz-Nr.</th><th>Lizenzstatus</th><th>Strafpunkte</th><th>Akten</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="6"><div class="empty"><b>Noch keine Fahrer erfasst</b>Lege deinen ersten Fahrer an, um eine Fahrerakte zu erstellen.</div></td></tr>`}</tbody></table>
-    <div class="footer-note">${list.length} von ${DB.drivers.length} Fahrern angezeigt.</div>
-  `;
+  document.getElementById('driverTableWrap').innerHTML = cards?`<div class="driver-card-grid">${cards}</div><div class="footer-note">${list.length} von ${DB.drivers.length} Fahrern angezeigt.</div>`:`<div class="empty"><b>Noch keine Fahrer erfasst</b>Lege deinen ersten Fahrer an, um eine Fahrerakte zu erstellen.</div>`;
 }
 
 function pageDriverForm(existing){
@@ -3118,8 +3259,8 @@ function pageDriverForm(existing){
     <div class="actions"><button class="btn" onclick="go('drivers')">← Zur Übersicht</button>${!isNew?`<button class="btn gold" onclick="go('drivercases','${d.id}')">Cases Overview</button>`:''}</div>
   </div>
 
-  <div class="dossier">
-    <div class="dossier-head">
+  <div class="dossier driver-record ${isNew?'is-new':''}">
+    <div class="dossier-head driver-record-head">
       <div style="display:flex;align-items:center;gap:16px;">
         <div class="driverface">${d.photoUrl? `<img src="${esc(d.photoUrl)}">` : (d.firstName? esc((d.firstName[0]||'')+(d.lastName[0]||'')) : '—')}</div>
         <div>
@@ -3701,7 +3842,8 @@ async function issueLicense(id){
   const d = driverById(id);
   const accepted = document.getElementById('d_rulesAccepted').checked;
   if(!accepted){ alert('Der Fahrer muss das Sportreglement akzeptieren, bevor die Lizenz erteilt werden kann.'); return; }
-  d.licenseNo = nextLicenseNo();
+  try{ d.licenseNo = nextLicenseNo(); }
+  catch(error){ showAccessNotice(error.message); return; }
   d.licenseStatus = 'Aktiv';
   d.licenseIssued = today();
   const exp = new Date(); exp.setFullYear(exp.getFullYear()+1);

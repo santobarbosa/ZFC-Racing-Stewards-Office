@@ -1,0 +1,78 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
+
+const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
+const schema = fs.readFileSync(require.resolve('../supabase_schema.sql'), 'utf8');
+
+function createAppContext(){
+  const context=vm.createContext({
+    window:{addEventListener(){}},
+    document:{},
+    location:{hash:'',search:'',pathname:'/',origin:'http://localhost'},
+    crypto:webcrypto,
+    console
+  });
+  vm.runInContext(appSource,context,{timeout:5000});
+  return context;
+}
+
+test('parallel changes to separate case fields and history entries are merged',()=>{
+  const context=createAppContext();
+  const base={cases:[{id:'case-1',description:'Original',processFields:{subject:'Alt',incident:'Alt'},history:[]}]};
+  const local={cases:[{id:'case-1',description:'Original',processFields:{subject:'Lokal',incident:'Alt'},history:[{id:'local-event',action:'created'}]}]};
+  const remote={cases:[{id:'case-1',description:'Original',processFields:{subject:'Alt',incident:'Remote'},history:[{id:'remote-event',action:'reviewed'}]}]};
+  const result=JSON.parse(JSON.stringify(vm.runInContext(`mergeState(${JSON.stringify(base)},${JSON.stringify(local)},${JSON.stringify(remote)})`,context)));
+  assert.equal(result.cases[0].processFields.subject,'Lokal');
+  assert.equal(result.cases[0].processFields.incident,'Remote');
+  assert.deepEqual(result.cases[0].history.map(item=>item.id).sort(),['local-event','remote-event']);
+});
+
+test('Tier 2 process creation always awaits Tier 3 review and Tier 3 creation is direct',()=>{
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'tier-2',display_name:'Tier 2',access_tier:2};`,context);
+  const tier2=JSON.parse(JSON.stringify(vm.runInContext(`makeProcessWorkflow('D1')`,context)));
+  assert.equal(tier2.ownerTier,3);
+  assert.equal(tier2.requiredApprovalTier,3);
+  assert.equal(tier2.approvalStatus,'Tier-3-Prüfung ausstehend');
+  vm.runInContext(`AUTH.profile={id:'tier-3',display_name:'Tier 3',access_tier:3};`,context);
+  const tier3=JSON.parse(JSON.stringify(vm.runInContext(`makeProcessWorkflow('D1')`,context)));
+  assert.equal(tier3.ownerTier,0);
+  assert.equal(tier3.approvalStatus,'Freigegeben');
+  assert.equal(tier3.history.length,1);
+});
+
+test('driver license numbers are unique four-digit random values',()=>{
+  const context=createAppContext();
+  vm.runInContext(`DB.drivers=[{licenseNo:'1234'},{licenseNo:'ZFC-LIC-123'}];`,context);
+  const number=vm.runInContext('nextLicenseNo()',context);
+  assert.match(number,/^\d{4}$/);
+  assert.notEqual(number,'1234');
+});
+
+test('Tier 2 cannot start Tier 3-only processes, and process link requests require review',()=>{
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'tier-2',display_name:'Tier 2',access_tier:2};`,context);
+  assert.equal(vm.runInContext(`canStartProcess('D1')`,context),true);
+  assert.equal(vm.runInContext(`canStartProcess('D9')`,context),false);
+  assert.match(schema,/Eine Prozessanfrage darf nur einmalig durch Tier 2 an Tier 3 vorgelegt werden/);
+  assert.match(schema,/Ein neuer Prozess darf erst nach der Bestätigung durch Tier 3 aktiviert werden/);
+});
+
+test('Tier 2 can view Tier 1 areas and Tier 3 can view every registered area',()=>{
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'tier-1',access_tier:1};`,context);
+  assert.equal(vm.runInContext(`canAccessPage('dashboard')`,context),true);
+  assert.equal(vm.runInContext(`canAccessPage('finance')`,context),false);
+
+  vm.runInContext(`AUTH.profile={id:'tier-2',access_tier:2};`,context);
+  assert.equal(vm.runInContext(`canAccessPage('dashboard')`,context),true);
+  assert.equal(vm.runInContext(`canAccessPage('cases')`,context),true);
+  assert.equal(vm.runInContext(`canAccessPage('finance')`,context),false);
+  assert.equal(vm.runInContext(`canAccessPage('tier-office-t3')`,context),false);
+
+  vm.runInContext(`AUTH.profile={id:'tier-3',access_tier:3};`,context);
+  assert.equal(vm.runInContext(`Object.keys(PAGE_TIERS).every(canAccessPage)`,context),true);
+});
