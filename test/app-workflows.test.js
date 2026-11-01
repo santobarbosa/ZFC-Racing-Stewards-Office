@@ -99,3 +99,29 @@ test('HR data schema is tier-3-only and supports realtime synchronization',()=>{
   assert.match(schema,/create or replace function public\.zfc_hr_activity_summary\(\)[\s\S]*?if public\.zfc_current_tier\(\) < 3 then/);
   assert.match(schema,/create trigger zfc_stamp_hr_review/);
 });
+
+test('Jarves turns short incident keywords into grounded case drafts in selectable styles',()=>{
+  const context=createAppContext();
+  const draft={
+    event:'Monaco GP',sessionType:'Rennen',incidentLap:'Runde 12',category:'Kollision',
+    driverInvolved:'driver-a',driverAffected:'driver-b',evidenceLink:'Replay 00:31',
+    regulationBreach:'Verursachen von Kollisionen'
+  };
+  vm.runInContext(`DB.drivers=[{id:'driver-a',firstName:'Alex',lastName:'Racer'},{id:'driver-b',firstName:'Sam',lastName:'Pilot'}];`,context);
+  const detailed=vm.runInContext(`jarvesProfessionalText('T4 · Kontakt · Gegner neben Strecke · Position behalten',${JSON.stringify(draft)},'detailed')`,context);
+  const formal=vm.runInContext(`jarvesProfessionalText('T4 · Kontakt',${JSON.stringify(draft)},'formal')`,context);
+  const concise=vm.runInContext(`jarvesProfessionalText('T4 · Kontakt',${JSON.stringify(draft)},'concise')`,context);
+  assert.match(detailed,/Monaco GP/);
+  assert.match(detailed,/Runde 12/);
+  assert.match(detailed,/Alex Racer und Sam Pilot/);
+  assert.match(detailed,/Kurve 4/);
+  assert.match(detailed,/Kontakt/);
+  assert.match(detailed,/Replay 00:31/);
+  assert.match(detailed,/NOCH ZU PRÜFEN/);
+  assert.match(formal,/AKTENNOTIZ/);
+  assert.doesNotMatch(concise,/NOCH ZU PRÜFEN/);
+  assert.match(appSource,/setTimeout\(\(\)=>setBootStep\(1,[\s\S]*?\),1650\)/);
+  assert.match(appSource,/setTimeout\(\(\)=>setBootStep\(2,[\s\S]*?\),3300\)/);
+  assert.match(appSource,/},5000\)/);
+  assert.match(appSource,/function jarvesUseDraft\(\)/);
+});

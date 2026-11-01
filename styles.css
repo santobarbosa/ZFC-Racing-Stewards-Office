@@ -1139,3 +1139,106 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 @media(max-width:760px){.hr-workflow-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.case-opening-shell{grid-template-columns:1fr;gap:4px;padding-top:24px;padding-bottom:24px}.case-opening-visual{width:min(245px,70vw)}.case-opening-console{text-align:center}.case-opening-steps{justify-content:center}.case-opening-status{text-align:center}}
 @media(max-width:520px){.hr-profile-list,.hr-checklist,.hr-workflow-steps{grid-template-columns:1fr}.hr-privacy-note{flex-direction:column}.case-opening-hud,.case-opening-footer{font-size:7px;letter-spacing:.8px}.case-opening-visual{width:min(210px,58vw)}.case-opening-shell{padding:16px 4px}.case-opening-copy{min-height:0;font-size:12px}.case-opening-steps span{padding:6px 5px;font-size:8px}}
 @media(prefers-reduced-motion:reduce){.case-opening-overlay.is-opening,.case-opening-stage,.case-opening-reactor,.case-opening-reactor::before,.case-opening-reactor::after,.case-opening-core,.case-opening-core-ring,.case-opening-scan,.case-opening-orbit,.case-opening-particle,.case-opening-hud i,.case-opening-progress span{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}
+
+/* Jarves writer workspace and five-second startup */
+.jarves-launcher{justify-content:flex-start;max-width:900px;margin:26px auto 30px;padding:18px 22px;border:1px solid rgba(84,217,232,.28);background:linear-gradient(110deg,rgba(13,28,34,.97),rgba(17,21,25,.96));box-shadow:0 12px 40px rgba(0,0,0,.24),inset 0 0 35px rgba(84,217,232,.04)}
+.jarves-launch-button{flex:0 0 84px;width:84px;height:84px;background:radial-gradient(circle,#e8ffff 0 4%,#54d9e8 5% 10%,#10252d 11% 37%,#071116 38% 41%,transparent 42%),conic-gradient(from 0deg,transparent 0 8deg,#54d9e8 10deg 14deg,transparent 16deg 38deg,#b9fbff 40deg 43deg,transparent 45deg 70deg,#54d9e8 72deg 79deg,transparent 81deg 135deg,#b9fbff 137deg 141deg,transparent 143deg 200deg,#54d9e8 202deg 210deg,transparent 212deg 270deg,#b9fbff 272deg 276deg,transparent 278deg 360deg);animation:jarvesLauncherPulse 2.8s ease-in-out infinite,jarvesReactorSpin 24s linear infinite}
+.jarves-launch-button span{position:absolute;inset:0;display:grid;place-items:center;color:#e4ffff;font:900 28px var(--mono);text-shadow:0 0 16px #54d9e8;animation:jarvesReactorSpinReverse 24s linear infinite}
+.jarves-launch-copy{flex:1}
+.jarves-launch-copy .jarves-launch-kicker{display:block;color:#62cbd6;font:9px var(--mono);letter-spacing:1.6px}
+.jarves-launch-copy strong{margin:4px 0;color:#dffcff;font-size:20px;letter-spacing:.3px}
+.jarves-launch-copy span:last-child{color:#8eaab0;font-size:12px}
+.jarves-launch-cta{white-space:nowrap}
+.jarves-panel{margin:22px 0 28px;border:1px solid rgba(84,217,232,.4);border-left:3px solid #54d9e8;border-radius:8px;background:linear-gradient(145deg,#111a1e 0%,#0b1115 70%,#10181b 100%);box-shadow:0 20px 60px rgba(0,0,0,.35),0 0 35px rgba(84,217,232,.08);overflow:hidden}
+.jarves-panel::after{right:25px;top:-30px;color:rgba(84,217,232,.035);font-size:230px}
+.jarves-panel::before{opacity:.55}
+.jarves-head{padding:16px 21px;background:rgba(4,10,13,.44)}
+.jarves-avatar{position:relative;width:48px;height:48px;border-width:1px;background:radial-gradient(circle,#e9ffff 0 5%,#54d9e8 6% 14%,#10252d 15% 50%,#071116 51%);overflow:hidden}
+.jarves-avatar i{font:900 17px var(--mono);font-style:normal;text-shadow:0 0 12px #54d9e8}
+.jarves-avatar b{position:absolute;left:4px;right:4px;height:1px;background:#d8ffff;box-shadow:0 0 9px 2px #54d9e8;animation:jarvesAvatarScan 2s ease-in-out infinite alternate}
+.jarves-head strong{color:#e5ffff}
+.jarves-online-dot{display:inline-block;width:7px;height:7px;margin-left:4px;border-radius:50%;background:#79edac;box-shadow:0 0 9px #79edac;vertical-align:middle}
+.jarves-head-actions{display:flex;align-items:center;gap:14px}
+.jarves-head-actions .btn{margin:0!important}
+.jarves-status{font-size:9px}
+.jarves-agent-banner{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:24px clamp(18px,4vw,36px);border-bottom:1px solid rgba(84,217,232,.15);background:radial-gradient(ellipse at 86% 30%,rgba(31,130,143,.17),transparent 35%),linear-gradient(100deg,rgba(84,217,232,.05),transparent 64%)}
+.jarves-agent-banner>div:first-child{max-width:620px}
+.jarves-banner-label,.jarves-section-no{color:#58bfca;font:9px var(--mono);letter-spacing:1.4px}
+.jarves-agent-banner h2{margin:7px 0;color:#e6ffff;font-size:clamp(20px,3vw,28px);text-transform:none;letter-spacing:0}
+.jarves-agent-banner h2 b{color:#79e5ef}
+.jarves-agent-banner p{max-width:620px;margin:0;color:#98adb1;font-size:12px;line-height:1.55}
+.jarves-banner-orb{position:relative;display:grid;place-items:center;flex:0 0 90px;width:90px;height:90px;border:1px solid rgba(84,217,232,.5);border-radius:50%;box-shadow:0 0 25px rgba(84,217,232,.12),inset 0 0 22px rgba(84,217,232,.12);animation:jarvesLauncherPulse 3s ease-in-out infinite}
+.jarves-banner-orb::before,.jarves-banner-orb::after{content:"";position:absolute;inset:11px;border:1px dashed rgba(185,251,255,.55);border-radius:50%;animation:jarvesReactorSpin 9s linear infinite}
+.jarves-banner-orb::after{inset:-8px;border-color:rgba(84,217,232,.35);animation:jarvesReactorSpinReverse 13s linear infinite}
+.jarves-banner-orb i{width:25px;height:25px;border-radius:50%;background:#c9ffff;box-shadow:0 0 18px 8px rgba(84,217,232,.75)}
+.jarves-banner-orb b{position:absolute;width:60px;height:1px;background:#c9ffff;box-shadow:0 0 8px #54d9e8;transform:rotate(38deg)}
+.jarves-body{padding:0 22px 22px}
+.jarves-welcome{margin:15px 0 0;font-size:10px}
+.jarves-welcome.is-playing{animation:jarvesWelcome 2.1s ease both}
+.jarves-tabs{gap:7px;padding:16px 0 0}
+.jarves-tab{padding:10px 14px;border-radius:5px;font:10px var(--mono)}
+.jarves-tab span{margin-right:7px;color:#527981}
+.jarves-tab.active span{color:#79e5ef}
+.jarves-view{padding-top:16px}
+.jarves-view>p{max-width:760px;color:#9eb2b6}
+.jarves-writer-layout{display:grid;grid-template-columns:minmax(0,.92fr) minmax(0,1.08fr);gap:14px;align-items:stretch}
+.jarves-writer-input,.jarves-writer-output{min-width:0;padding:17px;border:1px solid #263d44;border-radius:6px;background:rgba(4,10,13,.48)}
+.jarves-writer-input{border-top:2px solid #54d9e8}
+.jarves-writer-output{border-top:2px solid #c9a227}
+.jarves-section-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.jarves-section-heading h3{margin:5px 0 0;color:#e1f9fb;font-size:16px}
+.jarves-section-heading .jarves-section-no{font-size:8px}
+.jarves-input-hint,.jarves-draft-badge{padding:5px 7px;border:1px solid rgba(84,217,232,.28);border-radius:3px;color:#79e5ef;font:8px var(--mono);letter-spacing:.6px;text-transform:uppercase}
+.jarves-draft-badge{border-color:rgba(201,162,39,.4);color:#e2c76f}
+.jarves-writer-input>p{min-height:37px;margin:10px 0;color:#859da2;font-size:11px;line-height:1.5}
+.jarves-writer-input textarea{width:100%;min-height:105px;margin:0;padding:12px;border:1px solid #314951;border-radius:4px;background:#0a1216;color:#e3f7f8;font-size:13px;line-height:1.55;resize:vertical}
+.jarves-writer-input textarea:focus,.jarves-output:focus{border-color:#54d9e8;outline:1px solid rgba(84,217,232,.2)}
+.jarves-keyword-label{display:flex;justify-content:space-between;gap:8px;margin:12px 0 7px;color:#668a91;font:8px var(--mono);letter-spacing:.8px}
+.jarves-keyword-label span{color:#60757a;letter-spacing:0;text-transform:none}
+.jarves-keyword-chips{display:flex;flex-wrap:wrap;gap:5px}
+.jarves-keyword-chips button{padding:5px 7px;border:1px solid #293e45;border-radius:3px;background:#101b20;color:#a6c4c9;font:9px var(--mono);cursor:pointer}
+.jarves-keyword-chips button:hover{border-color:#54d9e8;color:#dffcff}
+.jarves-style-field{display:flex;align-items:center;gap:10px;margin:13px 0 8px}
+.jarves-style-field label{margin:0;color:#77969c;font:8px var(--mono);text-transform:uppercase}
+.jarves-style-field select{flex:1;min-width:0;margin:0;padding:7px 8px;border-color:#263d44;background:#0a1216;font-size:11px}
+.jarves-generate{width:100%;justify-content:center;margin-top:8px;padding:11px}
+.jarves-generate span{margin-right:7px;color:#b9fbff}
+.jarves-privacy{display:block;margin-top:9px;color:#637a80;font:8px var(--mono);text-align:center}
+.jarves-output{display:block;min-height:270px;height:calc(100% - 70px);margin:12px 0 0;padding:13px;border:1px solid #283b40;border-radius:4px;background:#080e11;color:#d0e3e5;font:12px/1.65 var(--mono);resize:vertical}
+.jarves-copy-row{align-items:flex-start;margin-top:10px}
+.jarves-copy-row>div{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.jarves-copy-row .btn{font-size:10px;padding:7px 9px}
+.jarves-copy-row .jarves-note{max-width:180px;font-size:9px;line-height:1.4}
+.jarves-result{border-radius:4px}
+.jarves-analysis-hints{border-radius:4px}
+.jarves-panel.is-booting{min-height:550px}
+.jarves-panel.is-booting>.jarves-head,.jarves-panel.is-booting>.jarves-agent-banner,.jarves-panel.is-booting>.jarves-body{visibility:hidden}
+.jarves-boot{position:absolute;z-index:5;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;overflow:hidden;padding:28px;background:radial-gradient(ellipse at 50% 40%,#132c34 0%,#091317 47%,#070a0d 100%);text-align:center;animation:jarvesBootIn .25s ease both}
+.jarves-boot::before{content:"";position:absolute;inset:-30%;opacity:.5;background-image:linear-gradient(rgba(84,217,232,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(84,217,232,.07) 1px,transparent 1px);background-size:35px 35px;transform:perspective(500px) rotateX(58deg) scale(1.4);animation:jarvesBootGrid 4s linear infinite}
+.jarves-boot-reactor{position:relative;display:grid;place-items:center;width:120px;height:120px;margin-bottom:20px;border:1px solid rgba(84,217,232,.65);border-radius:50%;box-shadow:0 0 35px rgba(84,217,232,.2),inset 0 0 28px rgba(84,217,232,.15);animation:jarvesBootPulse 1.8s ease-in-out infinite}
+.jarves-boot-reactor::before,.jarves-boot-reactor::after{content:"";position:absolute;inset:-13px;border:1px dashed rgba(185,251,255,.6);border-radius:50%;animation:jarvesReactorSpin 5s linear infinite}
+.jarves-boot-reactor::after{inset:15px;border-style:solid;border-left-color:transparent;border-right-color:transparent;animation:jarvesReactorSpinReverse 2.6s linear infinite}
+.jarves-boot-reactor i{width:26px;height:26px;border-radius:50%;background:#eaffff;box-shadow:0 0 15px 6px #54d9e8,0 0 40px 15px rgba(84,217,232,.48);animation:jarvesBootCore 1.1s ease-in-out infinite alternate}
+.jarves-boot-reactor b{position:absolute;inset:30px;border:1px solid rgba(185,251,255,.8);border-radius:50%;animation:jarvesReactorSpin 2s linear infinite}
+.jarves-boot-reactor span{position:absolute;width:100%;height:1px;background:#dfffff;box-shadow:0 0 12px 3px #54d9e8;animation:jarvesBootScan 1.8s ease-in-out infinite alternate}
+.jarves-boot-brand{position:relative;color:#cfffff;font:800 16px var(--mono);letter-spacing:4px;text-shadow:0 0 16px rgba(84,217,232,.6)}
+.jarves-boot-brand small{display:block;margin-top:4px;color:#668a91;font-size:8px;font-weight:400;letter-spacing:2px}
+.jarves-boot-title{position:relative;margin-top:18px;color:#e4ffff;font:700 12px var(--mono);letter-spacing:1.1px;text-transform:uppercase}
+.jarves-boot-message{position:relative;min-height:18px;margin-top:8px;color:#79e5ef;font:10px var(--mono);letter-spacing:.4px}
+.jarves-boot-steps{position:relative;display:flex;gap:8px;margin-top:17px}
+.jarves-boot-steps span{padding:6px 9px;border:1px solid #29424a;color:#52727a;font:8px var(--mono);letter-spacing:1px}
+.jarves-boot-steps span.active{border-color:#54d9e8;color:#c7fcff;box-shadow:0 0 12px rgba(84,217,232,.15)}
+.jarves-boot-progress{position:relative;width:min(330px,80%);height:2px;margin-top:16px;background:#1a3036}
+.jarves-boot-progress i{display:block;width:0;height:100%;background:#b9fbff;box-shadow:0 0 10px 2px #54d9e8;animation:jarvesBootProgress 5s linear forwards}
+.jarves-boot-close{position:relative;margin-top:17px;color:#789499;font-size:9px}
+@keyframes jarvesLauncherPulse{0%,100%{filter:brightness(.86);box-shadow:0 0 0 7px rgba(84,217,232,.06),0 0 24px rgba(84,217,232,.35),inset 0 0 18px rgba(84,217,232,.4)}50%{filter:brightness(1.2);box-shadow:0 0 0 12px rgba(84,217,232,.08),0 0 38px rgba(84,217,232,.65),inset 0 0 24px rgba(84,217,232,.7)}}
+@keyframes jarvesAvatarScan{from{top:7px;opacity:.25}to{top:39px;opacity:1}}
+@keyframes jarvesBootIn{from{opacity:0}to{opacity:1}}
+@keyframes jarvesBootGrid{from{background-position:0 0;transform:perspective(500px) rotateX(58deg) translateY(0) scale(1.4)}to{background-position:0 70px;transform:perspective(500px) rotateX(58deg) translateY(25px) scale(1.4)}}
+@keyframes jarvesBootPulse{50%{transform:scale(1.06);box-shadow:0 0 55px rgba(84,217,232,.35),inset 0 0 32px rgba(84,217,232,.3)}}
+@keyframes jarvesBootCore{to{transform:scale(.72);opacity:.65}}
+@keyframes jarvesBootScan{from{transform:translateY(-42px);opacity:.2}to{transform:translateY(42px);opacity:1}}
+@keyframes jarvesBootProgress{to{width:100%}}
+@media(max-width:760px){.jarves-launcher{margin:18px 0;padding:14px;gap:12px}.jarves-launch-button{flex-basis:68px;width:68px;height:68px}.jarves-launch-cta{padding:8px 10px;font-size:10px}.jarves-writer-layout{grid-template-columns:1fr}.jarves-writer-input>p{min-height:0}.jarves-output{height:auto;min-height:230px}.jarves-agent-banner{padding:18px}.jarves-banner-orb{flex-basis:65px;width:65px;height:65px}.jarves-banner-orb i{width:17px;height:17px}}
+@media(max-width:520px){.jarves-launch-copy strong{font-size:15px}.jarves-launch-copy span:last-child{font-size:10px}.jarves-launch-cta{font-size:0}.jarves-launch-cta span{font-size:13px}.jarves-head{align-items:center;flex-direction:row}.jarves-head-actions{gap:7px;flex-direction:column;align-items:flex-end}.jarves-agent-banner{align-items:flex-start}.jarves-banner-orb{display:none}.jarves-body{padding:0 12px 14px}.jarves-writer-input,.jarves-writer-output{padding:12px}.jarves-keyword-label{font-size:7px}.jarves-copy-row{flex-direction:column}.jarves-copy-row>div{justify-content:flex-start}.jarves-boot{padding:18px}.jarves-panel.is-booting{min-height:520px}}
+@media(prefers-reduced-motion:reduce){.jarves-launch-button,.jarves-launch-button::before,.jarves-launch-button::after,.jarves-launch-button span,.jarves-avatar,.jarves-avatar b,.jarves-banner-orb,.jarves-banner-orb::before,.jarves-banner-orb::after,.jarves-boot,.jarves-boot::before,.jarves-boot-reactor,.jarves-boot-reactor::before,.jarves-boot-reactor::after,.jarves-boot-reactor i,.jarves-boot-reactor b,.jarves-boot-reactor span,.jarves-boot-progress i{animation-duration:.01ms!important;animation-iteration-count:1!important;transition:none!important}}

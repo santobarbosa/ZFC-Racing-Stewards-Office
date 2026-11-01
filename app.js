@@ -13,6 +13,7 @@ let AUTH = { session:null, profile:null, authSubscription:null, loginIntroReques
 let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
 const CASE_DOCUMENTS = { loading:new Set(), loaded:new Set(), errorByCase:new Map(), saving:false };
 const HR = { profiles:[], staffRecords:[], reviews:[], training:[], activity:[], loading:false, loaded:false, refreshQueued:false, error:'', editingReviewId:null, editingTrainingId:null };
+let JARVES_BOOT_TIMERS=[];
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
@@ -1707,24 +1708,53 @@ function jarvesRepeatAnalysis(draft){
   }).filter(item=>item.score>0).sort((a,b)=>b.score-a.score);
   return {cases:previous,score:previous[0]?.score||0};
 }
-function jarvesHash(value){ return [...String(value||'')].reduce((hash,char)=>(hash*31+char.charCodeAt(0))>>>0,7); }
-function jarvesSentences(value){ return String(value||'').replace(/\s+/g,' ').trim().split(/(?<=[.!?])\s+/).filter(Boolean); }
-function jarvesProfessionalText(input,draft){
-  const clean=String(input||'').trim().replace(/\s+/g,' ');
+function jarvesProfessionalText(input,draft,style='detailed'){
+  const clean=String(input||'').trim().replace(/[•▪●]/g,'\n').replace(/\r/g,'\n');
   if(!clean) return '';
-  const seed=jarvesHash(clean);
-  const sentences=jarvesSentences(clean).map(sentence=>sentence.charAt(0).toUpperCase()+sentence.slice(1).replace(/[.!?]+$/,'')+'.');
-  const driver=draft.driverInvolved?driverName(driverById(draft.driverInvolved)):'der betroffene Fahrer';
-  const context=[draft.event,draft.sessionType,draft.incidentLap].filter(Boolean).join(', ');
-  const openings=[`Nach Auswertung der vorliegenden Angaben war ${driver}`,`Aus der bisherigen Aktenaufnahme ergibt sich, dass ${driver}`,`Gegenstand der Prüfung ist ein Vorfall, an dem ${driver}`];
-  const transitions=['Im weiteren Ablauf ist festzuhalten:','Der konkrete Ablauf wird wie folgt zusammengefasst:','Für die sportrechtliche Prüfung ist insbesondere folgender Ablauf maßgeblich:'];
-  const review=['Die Bewertung hat sich auf die Kontrolle des Fahrzeugs, die Vorhersehbarkeit des Manövers und die Möglichkeit einer sicheren Vermeidung zu beziehen.','Für die Würdigung sind Ausgangslage, Abstand, Geschwindigkeit, verfügbare Fahrbahn und die Reaktion der Beteiligten getrennt zu betrachten.','Maßgeblich sind die konkrete Überlappung, die gewählte Linie, die Reaktionsmöglichkeit des jeweils anderen Fahrers und die unmittelbare Auswirkung auf das Renngeschehen.'];
-  const setting=context?` ${context}`:' in der betreffenden Rennsession';
-  const category=draft.category?` Der Vorgang wird vorläufig der Kategorie „${draft.category}“ zugeordnet.`:'';
-  const evidence=draft.evidenceLink?` Der hinterlegte Replay- oder Telemetrieverweis ist mit den Fahrzeugpositionen, Abständen und entstandenen Zeit- oder Positionsverlusten abzugleichen.`:' Zur abschließenden Feststellung sind Replay, Onboard-Aufnahmen und gegebenenfalls Telemetriedaten heranzuziehen.';
-  const rule=draft.regulationBreach?` Die Prüfung erfolgt dabei insbesondere im Hinblick auf „${draft.regulationBreach}“.`:' Die einschlägige Regelstelle und der konkrete Strafrahmen sind nach Abschluss der Beweismittelprüfung festzulegen.';
-  const incident=sentences.length>1?sentences.join(' '):sentences[0];
-  return `SACHVERHALT\n${openings[seed%openings.length]}${setting} an dem nachfolgend dokumentierten Ereignis beteiligt.\n\n${transitions[(seed>>3)%transitions.length]}\n${incident}${category}\n\nVORLÄUFIGE WÜRDIGUNG\n${review[(seed>>6)%review.length]} ${evidence}${rule}\n\nPRÜFHINWEIS\nDiese Fassung gibt ausschließlich die eingegebene Kurzbeschreibung und die derzeit bekannten Falldaten wieder. Sie stellt keine abschließende Schuld- oder Sanktionsentscheidung dar; die endgültige Bewertung obliegt den Stewards nach vollständiger Sichtung der Beweismittel.`;
+  const rawSegments=clean.split(/[\n;]+|,\s*(?=[^,]{1,34}(?:,|$))/).map(item=>item.trim()).filter(Boolean);
+  const segments=rawSegments.length?rawSegments:[clean.replace(/\s+/g,' ')];
+  const source=jarvesText(segments.join(' '));
+  const context=[
+    draft.event&&`Event: ${draft.event}`,
+    draft.sessionType&&`Session: ${draft.sessionType}`,
+    draft.incidentLap&&`Zeitpunkt: ${draft.incidentLap}`,
+    draft.category&&`Kategorie: ${draft.category}`
+  ].filter(Boolean);
+  const parties=[
+    draft.driverInvolved&&driverName(driverById(draft.driverInvolved)),
+    draft.driverAffected&&driverName(driverById(draft.driverAffected))
+  ].filter(Boolean);
+  const turnMatch=clean.match(/(?:kurve|turn|corner|t)\s*#?\s*(\d{1,2})/i)||clean.match(/\bT\s*(\d{1,2})\b/i);
+  const place=turnMatch?`Kurve ${turnMatch[1]}`:'';
+  const facts=[];
+  if(place) facts.push(`Als Ort wird ${place} genannt.`);
+  if(/kontakt|kollision|crash|ber[uü]hr|zusammensto[sß]/i.test(source)) facts.push('Die Stichpunkte nennen einen Kontakt beziehungsweise eine Kollision.');
+  if(/[üu]berhol|vorbei|position gewonnen/i.test(source)) facts.push('Die Stichpunkte beschreiben einen Überholvorgang oder Positionsgewinn.');
+  if(/verteidig|blockier|spurwechsel|abwehr/i.test(source)) facts.push('Die Stichpunkte betreffen eine Verteidigung der Position beziehungsweise einen Spurwechsel.');
+  if(/abgedr[aä]ng|von der strecke|strecke gedr[aä]ng|au[sß]erhalb der strecke|off track/i.test(source)) facts.push('Als Folge wird ein Verlassen der Strecke oder ein Abdrängen genannt.');
+  if(/position behalten|position gehalten|position nicht abgegeben/i.test(source)) facts.push('Die Kurzangaben besagen, dass die Position behalten wurde.');
+  if(/position verloren|position abgegeben|platz verloren/i.test(source)) facts.push('Die Kurzangaben nennen einen Positionsverlust.');
+  if(/bremst|bremsman[oö]ver|sp[aä]t gebremst|brake check/i.test(source)) facts.push('Die Angaben beziehen sich auf ein Bremsmanöver.');
+  if(/zeitverlust|schaden|fl[uü]gel|reifenschaden|ausfall|dnf/i.test(source)) facts.push('Ein möglicher Zeitverlust, Schaden oder Ausfall wird in den Stichpunkten erwähnt.');
+  const genericSegments=segments.filter(segment=>!facts.some(fact=>{
+    const words=jarvesWords(fact);
+    return [...jarvesWords(segment)].some(word=>words.has(word));
+  }));
+  const who=parties.length?`Beteiligte laut Akte: ${parties.join(' und ')}.`:'Die Namen der Beteiligten sind in den Falddaten nicht vollständig zugeordnet.';
+  const opener=context.length?`Der Vorfall wird für ${context.join(' · ')} erfasst.`:'Der Vorfall ereignete sich in einer noch nicht näher bezeichneten Session.';
+  const factText=facts.length?facts.join(' '):'Die Stichpunkte beschreiben den Vorfall, enthalten aber noch keinen eindeutig zuordenbaren Manöver- oder Folgenhinweis.';
+  const remaining=genericSegments.length?`Weitere übermittelte Angaben: ${genericSegments.join('; ')}.`:'';
+  const evidence=draft.evidenceLink?`Als Beleg ist folgender Verweis hinterlegt: ${draft.evidenceLink}.`:'In den Falddaten ist noch kein Beweislink hinterlegt.';
+  const rule=draft.regulationBreach?`Als zu prüfende Regelstelle ist „${draft.regulationBreach}“ eingetragen.`:'Eine konkrete Regelstelle ist noch nicht zugeordnet.';
+  const missing=[];
+  if(!draft.incidentLap&&!/\brunde\s*\d+|\bminute\s*\d+/i.test(clean)) missing.push('genauer Zeitpunkt / Runde');
+  if(!place&&!/kurve|turn|corner/i.test(clean)) missing.push('Ort oder Kurve');
+  if(!draft.evidenceLink) missing.push('Replay, Onboard oder Telemetrie');
+  if(!/schaden|zeitverlust|position|ausfall|dnf/i.test(source)) missing.push('unmittelbare Auswirkung auf die Beteiligten');
+  const details=style==='concise'?'':style==='formal'?`\n\nAKTENNOTIZ\n${evidence} ${rule}`:`\n\nBEWEISLAGE\n${evidence} ${rule}`;
+  const missingSection=style==='concise'?'':`\n\nNOCH ZU PRÜFEN\n${missing.length?missing.map(item=>`• ${item}`).join('\n'):'• Angaben und Beweismittel mit der Akte abgleichen.'}`;
+  const disclaimer=style==='concise'?'':'\n\nDie Formulierung ordnet ausschließlich die erfassten Stichworte und Falldaten. Sie ergänzt keine nicht belegten Tatsachen und trifft keine Feststellung zu Schuld oder Sanktion.';
+  return `SACHVERHALT · ENTWURF\n${opener} ${who}\n\n${factText}${remaining?` ${remaining}`:''}${details}${missingSection}${disclaimer}`;
 }
 function jarvesResult(title,content){
   const result=document.getElementById('jarves_result');
@@ -1735,11 +1765,46 @@ function jarvesResult(title,content){
 function jarvesOpen(){
   const launcher=document.getElementById('jarves_launcher'), panel=document.getElementById('jarves_panel'), welcome=document.getElementById('jarves_welcome');
   if(!launcher||!panel) return;
-  launcher.classList.add('is-hidden'); panel.classList.remove('is-closed');
-  if(welcome){ welcome.classList.remove('is-playing'); void welcome.offsetWidth; welcome.classList.add('is-playing'); }
+  if(panel.classList.contains('is-booting')) return;
+  launcher.classList.add('is-hidden'); panel.classList.remove('is-closed'); panel.classList.add('is-booting');
+  let boot=panel.querySelector('.jarves-boot');
+  if(!boot){
+    boot=document.createElement('div');
+    boot.className='jarves-boot';
+    boot.setAttribute('role','status');
+    boot.setAttribute('aria-live','polite');
+    boot.innerHTML='<div class="jarves-boot-reactor" aria-hidden="true"><i></i><b></b><span></span></div><div class="jarves-boot-brand">JARVES <small>CASE INTELLIGENCE</small></div><strong class="jarves-boot-title">Sichere Sitzung wird vorbereitet</strong><span class="jarves-boot-message">Verbindung zur Akte wird geprüft …</span><div class="jarves-boot-steps"><span class="active">AUTH</span><span>CASE SYNC</span><span>READY</span></div><div class="jarves-boot-progress"><i></i></div><button class="btn small jarves-boot-close" onclick="jarvesClose()">Agent schließen</button>';
+    panel.appendChild(boot);
+  }
+  const bootMessage=boot.querySelector('.jarves-boot-message');
+  const bootSteps=boot.querySelectorAll('.jarves-boot-steps span');
+  const setBootStep=(index,message)=>{
+    if(!panel.isConnected||!panel.classList.contains('is-booting')) return;
+    if(bootMessage) bootMessage.textContent=message;
+    bootSteps.forEach((step,stepIndex)=>step.classList.toggle('active',stepIndex<=index));
+  };
+  window.clearTimeout(JARVES_BOOT_TIMERS[0]);
+  window.clearTimeout(JARVES_BOOT_TIMERS[1]);
+  window.clearTimeout(JARVES_BOOT_TIMERS[2]);
+  JARVES_BOOT_TIMERS=[
+    window.setTimeout(()=>setBootStep(1,'Falldaten und Kontext werden abgeglichen …'),1650),
+    window.setTimeout(()=>setBootStep(2,'Jarves ist bereit für deine Stichworte.'),3300),
+    window.setTimeout(()=>{
+      if(!panel.isConnected) return;
+      panel.classList.remove('is-booting');
+      boot.remove();
+      if(welcome){ welcome.classList.remove('is-playing'); void welcome.offsetWidth; welcome.classList.add('is-playing'); }
+      document.getElementById('jarves_prompt')?.focus({preventScroll:true});
+    },5000)
+  ];
 }
 function jarvesClose(){
-  document.getElementById('jarves_panel')?.classList.add('is-closed');
+  const panel=document.getElementById('jarves_panel');
+  JARVES_BOOT_TIMERS.forEach(timer=>window.clearTimeout(timer));
+  JARVES_BOOT_TIMERS=[];
+  panel?.classList.remove('is-booting');
+  panel?.querySelector('.jarves-boot')?.remove();
+  panel?.classList.add('is-closed');
   document.getElementById('jarves_launcher')?.classList.remove('is-hidden');
 }
 function jarvesTab(tab){
@@ -1750,10 +1815,25 @@ function jarvesRewrite(){
   const draft=jarvesCaseDraft(DB.cases.find(item=>item.id===ROUTE.id)||{});
   const input=document.getElementById('jarves_prompt')?.value.trim()||draft.description;
   if(!input){ jarvesResult('Jarves wartet auf Text','<p>Bitte zuerst eine kurze Beschreibung eingeben.</p>'); return; }
-  const professional=jarvesProfessionalText(input,draft);
+  const professional=jarvesProfessionalText(input,draft,document.getElementById('jarves_style')?.value||'detailed');
   const output=document.getElementById('jarves_output');
   if(output) output.value=professional;
-  jarvesResult('Sachverhalt erstellt','<p>Die ausführliche Fassung ist bereit. Prüfe sie und kopiere sie anschließend manuell in das Beschreibungsfeld der Akte.</p>');
+  jarvesResult('Entwurf aus Stichworten erstellt','<p>Falldaten aus der Akte wurden übernommen. Jarves ergänzt keine unbekannten Tatsachen. Prüfe den Entwurf und übernimm ihn bei Bedarf direkt in die Akte.</p>');
+}
+function jarvesUseDraft(){
+  const output=document.getElementById('jarves_output'), description=document.getElementById('f_description');
+  if(!output?.value||!description){ jarvesResult('Kein Entwurf zum Übernehmen','<p>Erstelle zuerst einen Textentwurf.</p>'); return; }
+  description.value=output.value;
+  description.dispatchEvent(new Event('input',{bubbles:true}));
+  jarvesResult('Entwurf übernommen','<p>Der Text wurde in die Aktenbeschreibung eingesetzt. Bitte prüfe ihn vor dem Speichern.</p>');
+  description.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function jarvesAddHint(keyword){
+  const input=document.getElementById('jarves_prompt');
+  if(!input) return;
+  const existing=input.value.trim();
+  input.value=existing?`${existing}${existing.endsWith(',')?'':', '}${keyword}`:keyword;
+  input.focus();
 }
 async function jarvesCopyText(){
   const output=document.getElementById('jarves_output');
@@ -1785,7 +1865,13 @@ function jarvesAnalyzeAll(){
   jarvesResult('Fahrerakte analysiert',`<p><b>${esc(driverName(driverById(driverId)))}</b> erscheint in ${related.length} Akte(n), davon ${decided.length} entschieden oder archiviert.</p><p>Gesammelte Strafpunkte aus entschiedenen Akten: <b>${points}</b>.</p>${decided.length?`<ul>${decided.slice(0,6).map(item=>`<li>${esc(item.stw||'Akte')} · ${esc(item.category||'ohne Kategorie')} · ${esc(item.decision||'ohne Entscheidung')}</li>`).join('')}</ul>`:'<p>Noch keine abgeschlossenen Fälle zur Wiederholungsprüfung vorhanden.</p>'}<p class="jarves-note">Diese Übersicht unterstützt die Prüfung und ersetzt keine Steward-Entscheidung.</p>`);
 }
 function jarvesCasePanel(caseData){
-  return `<div id="jarves_launcher" class="jarves-launcher"><button class="jarves-launch-button" aria-label="Jarves öffnen" onclick="jarvesOpen()"></button><div class="jarves-launch-copy"><strong>Jarves öffnen</strong><span>Dein Assistent für Sachverhalt und Fallanalyse</span></div></div><section id="jarves_panel" class="jarves-panel is-closed"><div class="jarves-head"><div class="jarves-identity"><div class="jarves-avatar">J</div><div><strong>Jarves</strong><small>Fallanalyse-Agent · lokal verfügbar</small></div></div><div><span class="jarves-status">Bereit für Analyse</span><button class="btn small" onclick="jarvesClose()" style="display:block;margin-top:7px;margin-left:auto;">Schließen</button></div></div><div class="jarves-body"><div id="jarves_welcome" class="jarves-welcome">Willkommen bei Jarves · dein Assistent</div><div class="jarves-tabs"><button class="jarves-tab active" data-tab="writer" onclick="jarvesTab('writer')">Sachverhalt erstellen</button><button class="jarves-tab" data-tab="analysis" onclick="jarvesTab('analysis')">Akte analysieren</button></div><div class="jarves-view active" data-view="writer"><p>Gib nur eine kurze, stichwortartige Zusammenfassung des Vorfalls ein. Jarves erstellt daraus eine ausführliche sachliche Fassung.</p><div class="jarves-input"><textarea id="jarves_prompt" placeholder="z. B. Fahrer drängte Gegner in Kurve 4 von der Strecke und behielt die Position"></textarea><button class="btn primary" onclick="jarvesRewrite()">Text erstellen</button></div><textarea id="jarves_output" class="jarves-output" readonly placeholder="Die ausführliche Fassung erscheint hier. Sie wird nicht automatisch in die Akte übernommen."></textarea><div class="jarves-copy-row"><span class="jarves-note">Manuell prüfen und anschließend in die Beschreibung kopieren.</span><button class="btn gold" onclick="jarvesCopyText()">Text kopieren</button></div></div><div class="jarves-view" data-view="analysis"><p>Hier kannst du die aktuelle Akte und passende Regelstellen prüfen.</p><div class="jarves-actions"><button class="btn" onclick="jarvesApplyRules()">Regelwerk zuordnen</button><button class="btn" onclick="jarvesAnalyzeCurrent()">Diesen Fall analysieren</button><button class="btn" onclick="jarvesAnalyzeAll()">Alle Fälle des Fahrers</button></div><div id="jarves_result" class="jarves-result" aria-live="polite"></div><div id="jarves_analysis_hints" class="jarves-analysis-hints" aria-live="polite"></div></div></div></section>`;
+  return `<div id="jarves_launcher" class="jarves-launcher"><button class="jarves-launch-button" aria-label="Jarves öffnen" onclick="jarvesOpen()"><span>J</span></button><div class="jarves-launch-copy"><span class="jarves-launch-kicker">STEWARD INTELLIGENCE</span><strong>Jarves Case Agent</strong><span>Stichworte rein. Klarer Aktenentwurf raus.</span></div><button class="btn primary jarves-launch-cta" onclick="jarvesOpen()">Agent starten <span>→</span></button></div>
+  <section id="jarves_panel" class="jarves-panel is-closed"><div class="jarves-head"><div class="jarves-identity"><div class="jarves-avatar"><i>J</i><b></b></div><div><strong>Jarves <span class="jarves-online-dot"></span></strong><small>CASE INTELLIGENCE · STEWARD SUPPORT</small></div></div><div class="jarves-head-actions"><span class="jarves-status">SYSTEM BEREIT</span><button class="btn small" onclick="jarvesClose()">Schließen ×</button></div></div>
+  <div class="jarves-agent-banner"><div><span class="jarves-banner-label">DEIN RACE CONTROL COPILOT</span><h2>Aus Stichworten wird ein <b>klarer Sachverhalt.</b></h2><p>Jarves ordnet deine Angaben und nutzt die Aktenfelder als Kontext. Keine erfundenen Fakten, keine automatische Entscheidung.</p></div><div class="jarves-banner-orb" aria-hidden="true"><i></i><b></b><span></span></div></div>
+  <div class="jarves-body"><div id="jarves_welcome" class="jarves-welcome">JARVES ONLINE <span>· Dein Arbeitsbereich ist bereit</span></div><div class="jarves-tabs"><button class="jarves-tab active" data-tab="writer" onclick="jarvesTab('writer')"><span>01</span> Textwerkstatt</button><button class="jarves-tab" data-tab="analysis" onclick="jarvesTab('analysis')"><span>02</span> Fallanalyse</button></div>
+  <div class="jarves-view active" data-view="writer"><div class="jarves-writer-layout"><div class="jarves-writer-input"><div class="jarves-section-heading"><div><span class="jarves-section-no">EINGABE · FREI FORMULIERT</span><h3>Was ist passiert?</h3></div><span class="jarves-input-hint">Stichworte genügen</span></div><p>Ein paar Worte reichen. Event, Session, Runde und Beteiligte ergänzt Jarves aus der Akte.</p><textarea id="jarves_prompt" rows="4" placeholder="z. B. T4 · Kontakt · Gegner neben Strecke · Position behalten"></textarea><div class="jarves-keyword-label">SCHNELLE STICHWORTE <span>zum Ergänzen anklicken</span></div><div class="jarves-keyword-chips"><button type="button" onclick="jarvesAddHint('Kontakt')">+ Kontakt</button><button type="button" onclick="jarvesAddHint('Kurve ')">+ Kurve</button><button type="button" onclick="jarvesAddHint('von der Strecke')">+ Streckenfolge</button><button type="button" onclick="jarvesAddHint('Position behalten')">+ Position</button><button type="button" onclick="jarvesAddHint('Replay vorhanden')">+ Beleg</button></div><div class="field jarves-style-field"><label for="jarves_style">Textstil</label><select id="jarves_style"><option value="detailed">Sachverhalt + Prüfpunkte</option><option value="formal">Formelle Aktennotiz</option><option value="concise">Kurzprotokoll</option></select></div><button class="btn primary jarves-generate" onclick="jarvesRewrite()"><span>✦</span> Sachverhalt formulieren</button><small class="jarves-privacy">Lokal im Browser verarbeitet · keine externe KI-Übertragung</small></div>
+  <div class="jarves-writer-output"><div class="jarves-section-heading"><div><span class="jarves-section-no">ERGEBNIS · ZUM PRÜFEN</span><h3>Dein Aktenentwurf</h3></div><span class="jarves-draft-badge">ENTWURF</span></div><textarea id="jarves_output" class="jarves-output" readonly placeholder="Dein strukturierter Entwurf erscheint hier — inklusive fehlender Angaben zur Nachprüfung."></textarea><div class="jarves-copy-row"><span class="jarves-note">Vor Übernahme bitte sachlich prüfen.</span><div><button class="btn gold" onclick="jarvesCopyText()">Kopieren</button> <button class="btn primary" onclick="jarvesUseDraft()">In Akte übernehmen</button></div></div></div></div><div id="jarves_result" class="jarves-result" aria-live="polite"></div></div>
+  <div class="jarves-view" data-view="analysis"><p>Jarves vergleicht den aktuellen Aktenstand mit dem Regelwerk und bereits entschiedenen Fällen. Hinweise sind keine Entscheidung.</p><div class="jarves-actions"><button class="btn" onclick="jarvesApplyRules()">✦ Regelwerk zuordnen</button><button class="btn" onclick="jarvesAnalyzeCurrent()">Diesen Fall analysieren</button><button class="btn" onclick="jarvesAnalyzeAll()">Fahrerhistorie prüfen</button></div><div id="jarves_analysis_hints" class="jarves-analysis-hints" aria-live="polite"></div></div></div></section>`;
 }
 
 /* ============================= CASE FORM (AKTE) ============================= */
