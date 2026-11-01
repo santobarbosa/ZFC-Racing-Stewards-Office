@@ -100,7 +100,7 @@ test('HR data schema is tier-3-only and supports realtime synchronization',()=>{
   assert.match(schema,/create trigger zfc_stamp_hr_review/);
 });
 
-test('Jarves turns short incident keywords into grounded case drafts in selectable styles',()=>{
+test('Jarves expands short keywords into grounded long drafts with document and style options',()=>{
   const context=createAppContext();
   const draft={
     event:'Monaco GP',sessionType:'Rennen',incidentLap:'Runde 12',category:'Kollision',
@@ -117,11 +117,25 @@ test('Jarves turns short incident keywords into grounded case drafts in selectab
   assert.match(detailed,/Kurve 4/);
   assert.match(detailed,/Kontakt/);
   assert.match(detailed,/Replay 00:31/);
-  assert.match(detailed,/NOCH ZU PRÜFEN/);
+  assert.match(detailed,/NOCH ZU ERGÄNZEN/);
+  assert.ok(detailed.length>=1800,`comprehensive draft should be substantial; got ${detailed.length} characters`);
   assert.match(formal,/AKTENNOTIZ/);
-  assert.doesNotMatch(concise,/NOCH ZU PRÜFEN/);
+  assert.match(formal,/SACHVERHALTSBERICHT/);
+  assert.match(formal,/Als Eingangsschilderung/);
+  assert.doesNotMatch(concise,/NOCH ZU ERGÄNZEN/);
+  const hearing=vm.runInContext(`jarvesProfessionalText('T4 · Kontakt',${JSON.stringify({...draft,hearingHeld:true})},{documentType:'hearing',length:'standard',style:'plain'})`,context);
+  const evidence=vm.runInContext(`jarvesProfessionalText('T4 · Kontakt',${JSON.stringify(draft)},{documentType:'evidence',length:'standard'})`,context);
+  const handover=vm.runInContext(`jarvesProfessionalText('T4 · Kontakt',${JSON.stringify(draft)},{documentType:'handover',length:'standard'})`,context);
+  assert.match(hearing,/GESPRÄCHSVERMERK/);
+  assert.match(hearing,/Anhörung als durchgeführt/);
+  assert.match(hearing,/Gemeldet wurde:/);
+  assert.match(evidence,/BEWEISMITTELVERMERK/);
+  assert.match(handover,/ÜBERGABEAUFTRAG/);
   assert.match(appSource,/setTimeout\(\(\)=>setBootStep\(1,[\s\S]*?\),1650\)/);
   assert.match(appSource,/setTimeout\(\(\)=>setBootStep\(2,[\s\S]*?\),3300\)/);
   assert.match(appSource,/},5000\)/);
   assert.match(appSource,/function jarvesUseDraft\(\)/);
+  for(const optionId of ['jarves_document_type','jarves_length','jarves_style','jarves_perspective']) {
+    assert.match(appSource,new RegExp(`id="${optionId}"`));
+  }
 });

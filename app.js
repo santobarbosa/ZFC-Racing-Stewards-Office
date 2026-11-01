@@ -1663,6 +1663,7 @@ function jarvesWords(value){
 function jarvesCaseDraft(caseData){
   const value=id=>document.getElementById(id)?.value?.trim()||'';
   const driverId=document.getElementById('f_driverInvolved')?.value||caseData.driverInvolved||'';
+  const affectedDriverId=document.getElementById('f_driverAffected')?.value||caseData.driverAffected||'';
   return {
     ...caseData,
     event:value('f_event')||caseData.event||'',
@@ -1670,10 +1671,16 @@ function jarvesCaseDraft(caseData){
     category:value('f_category')||caseData.category||'',
     incidentLap:value('f_incidentLap')||caseData.incidentLap||'',
     driverInvolved:driverId,
+    driverAffected:affectedDriverId,
     description:value('f_description')||caseData.description||'',
     evidenceLink:value('f_evidenceLink')||caseData.evidenceLink||'',
     investigationNotes:value('f_investigationNotes')||caseData.investigationNotes||'',
-    regulationBreach:value('f_regulationBreach')||caseData.regulationBreach||''
+    regulationBreach:value('f_regulationBreach')||caseData.regulationBreach||'',
+    precedent:value('f_precedent')||caseData.precedent||'',
+    decision:value('f_decision')||caseData.decision||'',
+    decisionDetail:value('f_decisionDetail')||caseData.decisionDetail||'',
+    reportedBy:value('f_reportedBy')||caseData.reportedBy||'',
+    hearingHeld:document.getElementById('f_hearingHeld')?.checked??caseData.hearingHeld??false
   };
 }
 function jarvesMatchingRules(draft){
@@ -1708,7 +1715,7 @@ function jarvesRepeatAnalysis(draft){
   }).filter(item=>item.score>0).sort((a,b)=>b.score-a.score);
   return {cases:previous,score:previous[0]?.score||0};
 }
-function jarvesProfessionalText(input,draft,style='detailed'){
+function jarvesProfessionalTextLegacy(input,draft,style='detailed'){
   const clean=String(input||'').trim().replace(/[•▪●]/g,'\n').replace(/\r/g,'\n');
   if(!clean) return '';
   const rawSegments=clean.split(/[\n;]+|,\s*(?=[^,]{1,34}(?:,|$))/).map(item=>item.trim()).filter(Boolean);
@@ -1755,6 +1762,105 @@ function jarvesProfessionalText(input,draft,style='detailed'){
   const missingSection=style==='concise'?'':`\n\nNOCH ZU PRÜFEN\n${missing.length?missing.map(item=>`• ${item}`).join('\n'):'• Angaben und Beweismittel mit der Akte abgleichen.'}`;
   const disclaimer=style==='concise'?'':'\n\nDie Formulierung ordnet ausschließlich die erfassten Stichworte und Falldaten. Sie ergänzt keine nicht belegten Tatsachen und trifft keine Feststellung zu Schuld oder Sanktion.';
   return `SACHVERHALT · ENTWURF\n${opener} ${who}\n\n${factText}${remaining?` ${remaining}`:''}${details}${missingSection}${disclaimer}`;
+}
+function jarvesProfessionalText(input,draft,options='detailed'){
+  if(typeof options==='string') options={style:options,length:options==='concise'?'concise':'comprehensive'};
+  const {style='neutral',length='comprehensive',documentType='incident',perspective='chronological'}=options||{};
+  const clean=String(input||'').trim().replace(/[•▪●]/g,'\n').replace(/\r/g,'\n');
+  if(!clean) return '';
+  const entries=clean.split(/[\n;]+|,\s*(?=[^,]{1,48}(?:,|$))/).map(item=>item.trim()).filter(Boolean);
+  const source=jarvesText(clean);
+  const context=[
+    draft.event&&`Event ${draft.event}`,draft.sessionType&&`Session ${draft.sessionType}`,
+    draft.incidentLap&&`Zeitpunkt ${draft.incidentLap}`,draft.category&&`Kategorie ${draft.category}`
+  ].filter(Boolean);
+  const parties=[
+    draft.driverInvolved&&driverName(driverById(draft.driverInvolved)),
+    draft.driverAffected&&driverName(driverById(draft.driverAffected))
+  ].filter(Boolean);
+  const turnMatch=clean.match(/(?:kurve|turn|corner|t)\s*#?\s*(\d{1,2})/i)||clean.match(/\bT\s*(\d{1,2})\b/i);
+  const place=turnMatch?`Kurve ${turnMatch[1]}`:'';
+  const observations=[];
+  if(place) observations.push(`Als Ortsangabe wird ${place} genannt.`);
+  if(/kontakt|kollision|crash|ber[uü]hr|zusammensto[sß]/i.test(source)) observations.push('Die Kurzmeldung enthält einen Hinweis auf Kontakt oder eine Kollision. Daraus allein lässt sich weder Ursache noch Verantwortlichkeit ableiten.');
+  if(/[üu]berhol|vorbei|position gewonnen/i.test(source)) observations.push('Die Angaben deuten auf einen Überholvorgang oder eine Positionsveränderung hin.');
+  if(/verteidig|blockier|spurwechsel|abwehr/i.test(source)) observations.push('Die Stichworte betreffen eine Verteidigung der Position oder einen Spurwechsel.');
+  if(/abgedr[aä]ng|von der strecke|strecke gedr[aä]ng|au[sß]erhalb der strecke|off track/i.test(source)) observations.push('Als möglicher Streckenverlauf wird ein Abdrängen oder Verlassen der Strecke genannt.');
+  if(/position behalten|position gehalten|position nicht abgegeben/i.test(source)) observations.push('Laut Kurzangabe wurde die bisherige Position beibehalten.');
+  if(/position verloren|position abgegeben|platz verloren/i.test(source)) observations.push('Laut Kurzangabe ging eine Position verloren oder wurde abgegeben.');
+  if(/bremst|bremsman[oö]ver|sp[aä]t gebremst|brake check/i.test(source)) observations.push('Die Stichworte enthalten einen Hinweis auf ein Bremsmanöver.');
+  if(/zeitverlust|schaden|fl[uü]gel|reifenschaden|ausfall|dnf/i.test(source)) observations.push('Ein möglicher Schaden, Zeitverlust oder Ausfall wird erwähnt und muss anhand der Quellen bestätigt werden.');
+  if(/funk|team radio|radio|meldung/i.test(source)) observations.push('Die Eingabe enthält einen Hinweis auf eine Funk- oder Kommunikationsmeldung.');
+  const evidence=draft.evidenceLink
+    ?`In der Akte ist der Beweisverweis „${draft.evidenceLink}“ eingetragen. Zu prüfen sind sein Bezug zur Session, der Zeitbereich und die Vollständigkeit des Materials.`
+    :'In der Akte ist derzeit kein Beweisverweis hinterlegt. Sofern verfügbar, sollten Replay, Onboard-Aufnahmen und Telemetrie mit Zeitmarken gesichert und gemeinsam abgeglichen werden.';
+  const investigation=draft.investigationNotes
+    ?`Als Untersuchungsnotiz ist erfasst: „${draft.investigationNotes}“. Sie sollte von der Eingangsmeldung getrennt und einer Quelle oder einem Bearbeitungsschritt zugeordnet werden.`
+    :'Eine gesonderte Untersuchungsnotiz ist noch nicht hinterlegt. Beobachtungen der Stewards, Aussagen der Beteiligten und technische Auswertung sollten getrennt dokumentiert werden.';
+  const rule=draft.regulationBreach
+    ?`Als mögliche Regelgrundlage ist „${draft.regulationBreach}“ eingetragen. Die Zuordnung ist vorläufig und muss anhand des anwendbaren Regelwortlauts geprüft werden.`
+    :'Eine konkrete Regelstelle ist noch nicht zugeordnet. Die Regelprüfung sollte nach Feststellung des tatsächlichen Ablaufs erfolgen.';
+  const missing=[];
+  if(!draft.incidentLap&&!/\brunde\s*\d+|\bminute\s*\d+/i.test(clean)) missing.push('Zeitpunkt, Runde oder Zeitmarke des Vorfalls');
+  if(!place&&!/kurve|turn|corner|gerade|boxengasse/i.test(source)) missing.push('genauer Ort und Streckenabschnitt');
+  if(!parties.length) missing.push('Namen und Rollen der beteiligten Fahrer');
+  if(!draft.evidenceLink) missing.push('Replay-/Onboard-Beleg oder Telemetrie mit Zeitmarke');
+  if(!/schaden|zeitverlust|position|ausfall|dnf|folgen/i.test(source)) missing.push('Auswirkungen auf Position, Fahrzeug oder Rennergebnis');
+  if(!draft.investigationNotes&&!/zeuge|funk|aussage|bestätig|bestatigt|widerspruch/i.test(source)) missing.push('Aussagen der Beteiligten und mögliche abweichende Darstellungen');
+  const intro=perspective==='analysis'
+    ?'Diese Arbeitsfassung ordnet die eingegangenen Angaben und stellt die noch erforderlichen Prüfschritte in den Vordergrund.'
+    :perspective==='decision'
+      ?'Diese Arbeitsfassung unterstützt eine nachvollziehbare Entscheidungsvorbereitung; sie ersetzt weder die Beweiswürdigung noch eine erforderliche Freigabe.'
+      :'Diese Arbeitsfassung hält den aktuellen Aktenstand fest und trennt die Eingangsmeldung von noch zu verifizierenden Umständen.';
+  const setting=context.length?`Der Vorgang ist dem ${context.join(', ')} zugeordnet.`:'Event, Session, Zeitpunkt und Kategorie sind noch nicht vollständig in der Akte hinterlegt.';
+  const participants=parties.length?`Als beteiligte Personen sind ${parties.join(' und ')} erfasst.`:'Die beteiligten Personen sind in den Falddaten noch nicht vollständig zugeordnet.';
+  const reportLead=style==='plain'
+    ?'Gemeldet wurde:'
+    :style==='formal'
+      ?'Als Eingangsschilderung wurden folgende Stichworte dokumentiert:'
+      :'Die übermittelte Kurzmeldung lautet:';
+  const types={
+    incident:['SACHVERHALTSBERICHT','Meldung und Aktenkontext'],
+    investigation:['UNTERSUCHUNGSVERMERK','Prüfauftrag und Untersuchungsstand'],
+    hearing:['GESPRÄCHSVERMERK','Anlass und Gesprächsstand'],
+    evidence:['BEWEISMITTELVERMERK','Quellen und Beweissicherung'],
+    handover:['ÜBERGABEBERICHT','Übergabekontext und Arbeitsstand']
+  };
+  const [title,firstHeading]=types[documentType]||types.incident;
+  const sections=[
+    [firstHeading,`${intro} ${setting} ${participants} Gegenstand ist die sachliche Dokumentation eines gemeldeten Vorgangs.`],
+    ['EINGANGSMELDUNG UND BEOBACHTUNGEN',`${reportLead} „${clean.replace(/\s+/g,' ').replace(/[;,\s]+$/,'')}“. ${observations.length?observations.join(' '):'Die Stichworte enthalten noch keinen eindeutigen Hinweis auf Manöver, Zeitpunkt oder Folgen und bleiben deshalb als Ausgangsangabe erhalten.'} Die Angaben sind zunächst als Meldung und nicht ohne Quellenabgleich als festgestellter Ablauf zu behandeln.`]
+  ];
+  if(documentType==='hearing'){
+    sections.push(['ANHÖRUNG UND DARSTELLUNGEN',draft.hearingHeld
+      ?'Die Akte markiert eine Anhörung als durchgeführt. Individuelle Aussagen, Rückfragen und Antworten sind in den verfügbaren Feldern jedoch nicht vollständig strukturiert erfasst. Sie sind getrennt nach Person und möglichst nah am Wortlaut zu ergänzen.'
+      :'In der Akte ist bislang keine durchgeführte Anhörung markiert. Zu dokumentieren sind Zeitpunkt, anwesende Personen, jeweilige Darstellung sowie Rückfragen und Antworten.']);
+  }else if(documentType==='evidence'){
+    sections.push(['BEWEISMITTEL UND QUELLEN',`${evidence} Bei Video sind Perspektive, Sichtlücken und der Kontext vor sowie nach dem relevanten Moment festzuhalten. Bei Telemetrie sind Zeitbasis und betroffene Fahrzeuge abzugleichen.`]);
+  }else if(documentType==='handover'){
+    sections.push(['BISHERIGER BEARBEITUNGSSTAND',investigation]);
+    sections.push(['ÜBERGABEAUFTRAG','Die nächste Prüfstufe sollte den Ablauf anhand der Quellen verifizieren, die Sichtweisen der Beteiligten getrennt erfassen und offene Tatsachenfragen beantworten. Fehlende Unterlagen, Rückfragen, Zuständigkeiten und der nächste Arbeitsschritt sind festzuhalten.']);
+  }else{
+    sections.push(['UNTERSUCHUNG UND QUELLEN',`${investigation} ${evidence}`]);
+  }
+  if(documentType!=='evidence'&&documentType!=='handover'){
+    sections.push(['REGEL- UND VERGLEICHSPRÜFUNG',`${rule}${draft.precedent?` Als Vergleichsfall ist „${draft.precedent}“ notiert. Vor einer Heranziehung sind Regelversion und entscheidende Tatsachen auf Vergleichbarkeit zu prüfen.`:' Ein Vergleichsfall ist nicht angegeben; er darf die Prüfung der konkreten Umstände nicht ersetzen.'}`]);
+  }
+  if(length==='comprehensive'){
+    sections.push(['PRÜFPLAN – TATSACHEN UND BEWEISE',`Zunächst sind die Positionen und Abstände der Fahrzeuge unmittelbar vor dem Ereignis zu rekonstruieren. Danach sollten erkennbare Lenk-, Brems- und Beschleunigungsvorgänge sowie die zeitliche Abfolge mit mehreren Quellen abgeglichen werden. Zu jeder wesentlichen Aussage ist festzuhalten, ob sie durch Replay, Onboard, Telemetrie, Funk oder eine unabhängige Beobachtung gestützt wird. ${missing.length?`Aktuell offen sind insbesondere: ${missing.join('; ')}.`:'Auch bei vollständig wirkenden Angaben ist zu dokumentieren, welche Quellen ausgewertet wurden und ob sie übereinstimmen.'} Widersprüche und nicht sichtbare Details bleiben ausdrücklich offen und werden nicht durch Annahmen ersetzt.`]);
+    sections.push(['PRÜFPLAN – SPORTLICHE WÜRDIGUNG',`Erst nach dem Abgleich der Tatsachen sollte geprüft werden, welche Regel in der konkreten Situation gilt. Zu berücksichtigen sind die Handlungsmöglichkeiten und Sichtweisen aller Beteiligten, die Vermeidbarkeit des Vorgangs sowie belegte Folgen für Position, Fahrzeug und weitere Fahrer. Belastende und entlastende Informationen sind gleich sorgfältig einzubeziehen. Die in der Akte genannte Regelstelle ist ein Prüfhinweis, kein bereits festgestellter Verstoß.`]);
+    sections.push(['VERFAHREN UND ENTSCHEIDUNGSVORBEREITUNG',`Den Beteiligten sollte der konkrete Prüfgegenstand verständlich mitgeteilt und Gelegenheit zur Stellungnahme gegeben werden. Neue entscheidungserhebliche Belege sollten mit Quelle und Zeitmarke dokumentiert werden. Eine spätere Entscheidung sollte Tatsachenfeststellung, Regelbezug, Begründung und gegebenenfalls Maßnahme nachvollziehbar trennen. ${draft.decisionDetail||draft.decision?`In der Akte ist folgende Entscheidungsangabe vorhanden: „${draft.decisionDetail||draft.decision}“. Vor Übernahme als Ergebnis sind Tatsachengrundlage, Zuständigkeit und erforderliche Freigabe zu prüfen.`:'In den verfügbaren Falldaten ist noch keine abschließende Entscheidung dokumentiert.'}`]);
+  }else if(length==='standard'){
+    sections.push(['NÄCHSTE SCHRITTE','Beweise sichern, Zeit und Ort verifizieren, Beteiligte anhören, Abweichungen zwischen Quellen dokumentieren und erst danach den Regelbezug sowie eine mögliche Entscheidung begründen.']);
+  }
+  if(entries.length>1) sections.push(['STICHWORTPROTOKOLL',entries.map(entry=>`• ${entry}`).join('\n')]);
+  if(length!=='concise'){
+    sections.push(['NOCH ZU ERGÄNZEN',missing.length?missing.map(item=>`• ${item}`).join('\n'):'• Quellen und Falldaten vor Abschluss nochmals auf Vollständigkeit und Übereinstimmung prüfen.']);
+    sections.push(['STATUS DES TEXTES',style==='plain'
+      ?'Einfach formulierter Arbeitsentwurf. Die Angaben sind noch zu prüfen; der Text ist keine Entscheidung.'
+      :'Arbeitsentwurf zur redaktionellen Unterstützung. Er ergänzt keine nicht belegten Tatsachen und trifft keine Feststellung zu Schuld oder Sanktion. Vor Übernahme sind Inhalt, Quellen, Zuständigkeit und Freigabe zu prüfen.']);
+  }
+  return `${style==='formal'?'AKTENNOTIZ · ':''}${title} · ENTWURF\n\n${sections.map(([heading,text])=>`${heading}\n${text}`).join('\n\n')}`;
 }
 function jarvesResult(title,content){
   const result=document.getElementById('jarves_result');
@@ -1815,7 +1921,12 @@ function jarvesRewrite(){
   const draft=jarvesCaseDraft(DB.cases.find(item=>item.id===ROUTE.id)||{});
   const input=document.getElementById('jarves_prompt')?.value.trim()||draft.description;
   if(!input){ jarvesResult('Jarves wartet auf Text','<p>Bitte zuerst eine kurze Beschreibung eingeben.</p>'); return; }
-  const professional=jarvesProfessionalText(input,draft,document.getElementById('jarves_style')?.value||'detailed');
+  const professional=jarvesProfessionalText(input,draft,{
+    style:document.getElementById('jarves_style')?.value||'neutral',
+    length:document.getElementById('jarves_length')?.value||'comprehensive',
+    documentType:document.getElementById('jarves_document_type')?.value||'incident',
+    perspective:document.getElementById('jarves_perspective')?.value||'chronological'
+  });
   const output=document.getElementById('jarves_output');
   if(output) output.value=professional;
   jarvesResult('Entwurf aus Stichworten erstellt','<p>Falldaten aus der Akte wurden übernommen. Jarves ergänzt keine unbekannten Tatsachen. Prüfe den Entwurf und übernimm ihn bei Bedarf direkt in die Akte.</p>');
@@ -1869,7 +1980,7 @@ function jarvesCasePanel(caseData){
   <section id="jarves_panel" class="jarves-panel is-closed"><div class="jarves-head"><div class="jarves-identity"><div class="jarves-avatar"><i>J</i><b></b></div><div><strong>Jarves <span class="jarves-online-dot"></span></strong><small>CASE INTELLIGENCE · STEWARD SUPPORT</small></div></div><div class="jarves-head-actions"><span class="jarves-status">SYSTEM BEREIT</span><button class="btn small" onclick="jarvesClose()">Schließen ×</button></div></div>
   <div class="jarves-agent-banner"><div><span class="jarves-banner-label">DEIN RACE CONTROL COPILOT</span><h2>Aus Stichworten wird ein <b>klarer Sachverhalt.</b></h2><p>Jarves ordnet deine Angaben und nutzt die Aktenfelder als Kontext. Keine erfundenen Fakten, keine automatische Entscheidung.</p></div><div class="jarves-banner-orb" aria-hidden="true"><i></i><b></b><span></span></div></div>
   <div class="jarves-body"><div id="jarves_welcome" class="jarves-welcome">JARVES ONLINE <span>· Dein Arbeitsbereich ist bereit</span></div><div class="jarves-tabs"><button class="jarves-tab active" data-tab="writer" onclick="jarvesTab('writer')"><span>01</span> Textwerkstatt</button><button class="jarves-tab" data-tab="analysis" onclick="jarvesTab('analysis')"><span>02</span> Fallanalyse</button></div>
-  <div class="jarves-view active" data-view="writer"><div class="jarves-writer-layout"><div class="jarves-writer-input"><div class="jarves-section-heading"><div><span class="jarves-section-no">EINGABE · FREI FORMULIERT</span><h3>Was ist passiert?</h3></div><span class="jarves-input-hint">Stichworte genügen</span></div><p>Ein paar Worte reichen. Event, Session, Runde und Beteiligte ergänzt Jarves aus der Akte.</p><textarea id="jarves_prompt" rows="4" placeholder="z. B. T4 · Kontakt · Gegner neben Strecke · Position behalten"></textarea><div class="jarves-keyword-label">SCHNELLE STICHWORTE <span>zum Ergänzen anklicken</span></div><div class="jarves-keyword-chips"><button type="button" onclick="jarvesAddHint('Kontakt')">+ Kontakt</button><button type="button" onclick="jarvesAddHint('Kurve ')">+ Kurve</button><button type="button" onclick="jarvesAddHint('von der Strecke')">+ Streckenfolge</button><button type="button" onclick="jarvesAddHint('Position behalten')">+ Position</button><button type="button" onclick="jarvesAddHint('Replay vorhanden')">+ Beleg</button></div><div class="field jarves-style-field"><label for="jarves_style">Textstil</label><select id="jarves_style"><option value="detailed">Sachverhalt + Prüfpunkte</option><option value="formal">Formelle Aktennotiz</option><option value="concise">Kurzprotokoll</option></select></div><button class="btn primary jarves-generate" onclick="jarvesRewrite()"><span>✦</span> Sachverhalt formulieren</button><small class="jarves-privacy">Lokal im Browser verarbeitet · keine externe KI-Übertragung</small></div>
+  <div class="jarves-view active" data-view="writer"><div class="jarves-writer-layout"><div class="jarves-writer-input"><div class="jarves-section-heading"><div><span class="jarves-section-no">EINGABE · FREI FORMULIERT</span><h3>Was ist passiert?</h3></div><span class="jarves-input-hint">Stichworte genügen</span></div><p>Ein paar Worte reichen. Event, Session, Runde und Beteiligte ergänzt Jarves aus der Akte.</p><textarea id="jarves_prompt" rows="4" placeholder="z. B. T4 · Kontakt · Gegner neben Strecke · Position behalten"></textarea><div class="jarves-keyword-label">SCHNELLE STICHWORTE <span>zum Ergänzen anklicken</span></div><div class="jarves-keyword-chips"><button type="button" onclick="jarvesAddHint('Kontakt')">+ Kontakt</button><button type="button" onclick="jarvesAddHint('Kurve ')">+ Kurve</button><button type="button" onclick="jarvesAddHint('von der Strecke')">+ Streckenfolge</button><button type="button" onclick="jarvesAddHint('Position behalten')">+ Position</button><button type="button" onclick="jarvesAddHint('Replay vorhanden')">+ Beleg</button></div><div class="grid cols-2 jarves-options"><div class="field jarves-style-field"><label for="jarves_document_type">Dokumenttyp</label><select id="jarves_document_type"><option value="incident">Sachverhaltsbericht</option><option value="investigation">Untersuchungsvermerk</option><option value="hearing">Gesprächsvermerk</option><option value="evidence">Beweismittelvermerk</option><option value="handover">Übergabebericht</option></select></div><div class="field jarves-style-field"><label for="jarves_length">Umfang</label><select id="jarves_length"><option value="comprehensive">Ausführlich · mit Prüfplan</option><option value="standard">Standard · nächste Schritte</option><option value="concise">Kurzprotokoll</option></select></div><div class="field jarves-style-field"><label for="jarves_style">Sprachstil</label><select id="jarves_style"><option value="neutral">Neutral und sachlich</option><option value="formal">Formelle Aktennotiz</option><option value="plain">Einfach verständlich</option></select></div><div class="field jarves-style-field"><label for="jarves_perspective">Schwerpunkt</label><select id="jarves_perspective"><option value="chronological">Chronologischer Aktenstand</option><option value="analysis">Prüfung und offene Fragen</option><option value="decision">Entscheidungsvorbereitung</option></select></div></div><button class="btn primary jarves-generate" onclick="jarvesRewrite()"><span>✦</span> Entwurf erstellen</button><small class="jarves-privacy">Lokal im Browser verarbeitet · keine externe KI-Übertragung. Längere Entwürfe basieren auf Vorlagen und Aktenfeldern.</small></div>
   <div class="jarves-writer-output"><div class="jarves-section-heading"><div><span class="jarves-section-no">ERGEBNIS · ZUM PRÜFEN</span><h3>Dein Aktenentwurf</h3></div><span class="jarves-draft-badge">ENTWURF</span></div><textarea id="jarves_output" class="jarves-output" readonly placeholder="Dein strukturierter Entwurf erscheint hier — inklusive fehlender Angaben zur Nachprüfung."></textarea><div class="jarves-copy-row"><span class="jarves-note">Vor Übernahme bitte sachlich prüfen.</span><div><button class="btn gold" onclick="jarvesCopyText()">Kopieren</button> <button class="btn primary" onclick="jarvesUseDraft()">In Akte übernehmen</button></div></div></div></div><div id="jarves_result" class="jarves-result" aria-live="polite"></div></div>
   <div class="jarves-view" data-view="analysis"><p>Jarves vergleicht den aktuellen Aktenstand mit dem Regelwerk und bereits entschiedenen Fällen. Hinweise sind keine Entscheidung.</p><div class="jarves-actions"><button class="btn" onclick="jarvesApplyRules()">✦ Regelwerk zuordnen</button><button class="btn" onclick="jarvesAnalyzeCurrent()">Diesen Fall analysieren</button><button class="btn" onclick="jarvesAnalyzeAll()">Fahrerhistorie prüfen</button></div><div id="jarves_analysis_hints" class="jarves-analysis-hints" aria-live="polite"></div></div></div></section>`;
 }
