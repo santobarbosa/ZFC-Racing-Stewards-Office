@@ -154,6 +154,12 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 /* ---------- driver classification ---------- */
 .classification-config-panel,.classification-form,.classification-table-panel,.classification-preview{margin-bottom:16px;padding:22px;}
 .classification-config-panel>p,.classification-form>p,.classification-preview>p{color:var(--grey);font-size:13px;line-height:1.55;}
+.classification-form-intro{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px;}
+.classification-form-intro h2{margin:4px 0 5px;}
+.classification-form-intro p{margin:0;color:var(--grey);font-size:13px;}
+.classification-registry-count,.case-financial-lock{padding:7px 10px;border:1px solid rgba(230,198,92,.28);background:rgba(230,198,92,.07);color:var(--gold-2);font:700 10px var(--mono);letter-spacing:.5px;white-space:nowrap;}
+.classification-registry-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;padding:15px;margin-bottom:16px;border:1px solid rgba(230,198,92,.2);background:linear-gradient(120deg,rgba(230,198,92,.055),rgba(255,255,255,.015));}
+.classification-registry-grid label,.case-financial-grid label{display:grid;gap:7px;color:#d4d1d3;font-size:12px;}
 .classification-track-list,.classification-division-list{display:grid;gap:8px;margin:14px 0;}
 .classification-track-row,.classification-division-row{display:grid;grid-template-columns:minmax(130px,1fr) minmax(180px,1fr) auto;align-items:center;gap:12px;padding:10px;background:rgba(255,255,255,.025);border:1px solid var(--line);}
 .classification-track-row label,.classification-division-row label,.classification-weight-grid label,.classification-form-grid label,.classification-form>label{display:grid;gap:6px;color:#d4d1d3;font-size:12px;}
@@ -191,8 +197,17 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 .classification-history article p{margin:7px 0 0;color:#d4d1d3;font-size:12px;}
 .classification-report-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line);}
 .classification-error{margin:0 0 16px;padding:12px 14px;border:1px solid rgba(222,47,67,.5);background:rgba(117,17,29,.22);color:#ffd4d9;font-size:13px;}
+.case-financial-assessment{margin:24px 0;padding:20px;border-color:rgba(230,198,92,.25);background:linear-gradient(140deg,rgba(230,198,92,.045),rgba(15,15,16,.9));}
+.case-financial-heading,.case-financial-footer{display:flex;align-items:center;justify-content:space-between;gap:14px;}
+.case-financial-heading h2{margin:4px 0 0;}
+.case-financial-assessment>p{max-width:760px;margin:10px 0 16px;color:var(--grey);font-size:12px;line-height:1.55;}
+.case-financial-grid{display:grid;grid-template-columns:minmax(220px,.7fr) minmax(0,1.7fr);gap:14px;}
+.case-financial-amount{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:8px;}
+.case-financial-grid textarea{width:100%;min-height:84px;}
+.case-financial-footer{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);}
+.case-financial-footer small{color:var(--grey);font-size:11px;}
 @media(max-width:900px){.classification-weight-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.classification-form-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
-@media(max-width:640px){.classification-config-panel,.classification-form,.classification-preview{padding:15px;}.classification-track-row,.classification-division-row{grid-template-columns:1fr;gap:8px;}.classification-division-row label{grid-template-columns:1fr 110px;}.classification-form-grid,.classification-deviation-list,.classification-weight-grid{grid-template-columns:1fr;}.classification-inline-add{flex-direction:column;}.classification-report-row{align-items:flex-start;flex-direction:column;}}
+@media(max-width:640px){.classification-config-panel,.classification-form,.classification-preview{padding:15px;}.classification-track-row,.classification-division-row{grid-template-columns:1fr;gap:8px;}.classification-division-row label{grid-template-columns:1fr 110px;}.classification-form-grid,.classification-deviation-list,.classification-weight-grid,.classification-registry-grid,.case-financial-grid{grid-template-columns:1fr;}.classification-inline-add{flex-direction:column;}.classification-report-row{align-items:flex-start;flex-direction:column;}.classification-form-intro,.case-financial-heading,.case-financial-footer{align-items:flex-start;flex-direction:column;}}
 
 /* ---------- dashboard home ---------- */
 .dashboard-home{max-width:1180px;margin:0 auto;}

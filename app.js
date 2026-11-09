@@ -12,6 +12,7 @@ let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht 
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
 let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
 const CASE_DOCUMENTS = { loading:new Set(), loaded:new Set(), errorByCase:new Map(), saving:false };
+const CASE_FINANCIAL = { loading:new Set(), loaded:new Set(), records:new Map(), errors:new Map() };
 const HR = { profiles:[], staffRecords:[], reviews:[], training:[], activity:[], loading:false, loaded:false, refreshQueued:false, error:'', editingReviewId:null, editingTrainingId:null };
 const CLASSIFICATION = { loading:false, error:'' };
 let JARVES_BOOT_TIMERS=[];
@@ -393,6 +394,7 @@ async function initSupabase(){
       if(event==='SIGNED_OUT'){
         AUTH.session=null; AUTH.profile=null; AUTH.loginIntroRequested=false;
         TIER_CHAT={messages:[],loading:false,sending:false,error:'',connected:false};
+        CASE_FINANCIAL.loading.clear(); CASE_FINANCIAL.loaded.clear(); CASE_FINANCIAL.records.clear(); CASE_FINANCIAL.errors.clear();
         Object.assign(HR,{profiles:[],staffRecords:[],reviews:[],training:[],activity:[],loaded:false,loading:false,refreshQueued:false,error:'',editingReviewId:null,editingTrainingId:null});
         showPublicHome();
       }
@@ -1279,6 +1281,7 @@ function pageClassificationApplicant(applicant){
   const locked=['Approved','Rejected'].includes(item.status);
   const driver=item.driver_data||{}, tests=item.test_data||{};
   const tracks=classificationConfig().tracks||[];
+  const registeredDriverId=driver.registeredDriverId||'';
   const trials=tracks.map((track,index)=>`<label>${esc(track.name)} ${index<3?'*':''}<input type="number" min="1" step="0.001" id="classification_trial_${esc(track.id)}" value="${escAttr(tests.timeTrials?.[track.id]??'')}" placeholder="Sekunden"></label>`).join('');
   const calculation=applicant?calculateClassification(driver,tests,classificationConfig()):null;
   const events=DB.classificationEvents.filter(event=>event.application_id===item.id).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
@@ -1288,7 +1291,18 @@ function pageClassificationApplicant(applicant){
     <button class="btn danger" onclick="decideClassification('${item.id}','Rejected')">Ablehnen</button>`;
   return `<div class="pagehead"><div><div class="eyebrow">Driver Classification · ${esc(item.application_no||'Neue Bewerbung')}</div><h1>${applicant?'Bewerber bearbeiten':'Fahrer hinzufügen'}</h1><p>Bewertungen werden aus den gespeicherten Referenzzeiten und Gewichtungen berechnet.</p></div><div class="actions"><button class="btn" onclick="go('driver-classification')">← Übersicht</button></div></div>
     ${CLASSIFICATION.error?`<div class="classification-error">${esc(CLASSIFICATION.error)}</div>`:''}
-    <section class="panel classification-form"><h2>Fahrerstammdaten</h2><div class="classification-form-grid">
+    <section class="panel classification-form"><div class="classification-form-intro"><div><div class="eyebrow">Fahrerprofil verknüpfen</div><h2>Fahrerstammdaten</h2><p>Vorhandene Fahrer aus der Fahrerübersicht übernehmen oder anhand der Lizenznummer finden.</p></div><span class="classification-registry-count">${DB.drivers.length} registriert</span></div>
+    <div class="classification-registry-grid">
+      <label>Registrierten Fahrer auswählen
+        <select id="classification_registered_driver" onchange="chooseRegisteredClassificationDriver(this.value)">
+          <option value="">Manuell erfassen / kein registrierter Fahrer</option>${registeredClassificationDriverOptions(registeredDriverId)}
+        </select>
+      </label>
+      <label>Nach Lizenznummer suchen
+        <input id="classification_license_search" value="${escAttr(driver.licenseNo||'')}" oninput="searchRegisteredClassificationDriver()" placeholder="Lizenznummer eingeben" autocomplete="off">
+      </label>
+    </div>
+    <div class="classification-form-grid">
       <label>Fahrername *<input id="classification_name" value="${escAttr(driver.name||'')}" autocomplete="name"></label>
       <label>EA-ID<input id="classification_ea_id" value="${escAttr(driver.eaId||'')}"></label>
       <label>Discord-ID<input id="classification_discord_id" value="${escAttr(driver.discordId||'')}"></label>
@@ -1349,9 +1363,40 @@ function classificationFormData(){
   const timeTrials={};
   classificationConfig().tracks.forEach(track=>{ const input=document.getElementById(`classification_trial_${track.id}`); if(input&&input.value!=='') timeTrials[track.id]=Number(input.value); });
   return {
-    driver:{name:value('classification_name'),eaId:value('classification_ea_id'),discordId:value('classification_discord_id'),email:value('classification_email'),platform:value('classification_platform'),extra:value('classification_extra')},
+    driver:{name:value('classification_name'),eaId:value('classification_ea_id'),discordId:value('classification_discord_id'),email:value('classification_email'),platform:value('classification_platform'),extra:value('classification_extra'),registeredDriverId:value('classification_registered_driver'),licenseNo:value('classification_license_search')},
     tests:{timeTrials,racePace:value('classification_race_pace')===''?null:Number(value('classification_race_pace')),consistency:value('classification_consistency')===''?null:Number(value('classification_consistency')),safetyRating:value('classification_safety')===''?null:Number(value('classification_safety')),notes:value('classification_test_notes')}
   };
+}
+function registeredClassificationDriverOptions(selectedId){
+  return [...DB.drivers].sort((a,b)=>driverName(a).localeCompare(driverName(b))).map(driver=>{
+    const team=teamById(driver.teamId)?.name||'Ohne Team';
+    const license=driver.licenseNo||'Keine Lizenznummer';
+    return `<option value="${escAttr(driver.id)}" ${driver.id===selectedId?'selected':''}>${esc(driverName(driver))} · ${esc(license)} · ${esc(team)}</option>`;
+  }).join('');
+}
+function chooseRegisteredClassificationDriver(driverId){
+  const driver=driverById(driverId);
+  if(!driver) return;
+  const value=(id,text)=>{ const input=document.getElementById(id); if(input) input.value=text||''; };
+  value('classification_name',driverName(driver));
+  value('classification_ea_id',driver.simId||'');
+  value('classification_discord_id',driver.discord||'');
+  value('classification_email',driver.email||'');
+  value('classification_platform',driver.platform||'');
+  value('classification_license_search',driver.licenseNo||'');
+  value('classification_extra',[
+    driver.teamId?`Team: ${teamById(driver.teamId)?.name||'Unbekannt'}`:'',
+    driver.division?`Division: ${driver.division}`:''
+  ].filter(Boolean).join(' · '));
+}
+function searchRegisteredClassificationDriver(){
+  const search=document.getElementById('classification_license_search');
+  const select=document.getElementById('classification_registered_driver');
+  const query=String(search?.value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!query||!select) return;
+  const driver=DB.drivers.find(item=>String(item.licenseNo||'').toUpperCase().replace(/[^A-Z0-9]/g,'')===query);
+  select.value=driver?.id||'';
+  if(driver) chooseRegisteredClassificationDriver(driver.id);
 }
 async function loadDriverClassificationData(){
   if(!SUPABASE.client||currentTier()<3) return;
@@ -1371,7 +1416,10 @@ async function loadDriverClassificationData(){
     DB.classificationReports=reportsResult.data||[];
     DB.classificationConfigHistory=configHistoryResult.data||[];
   }catch(error){
-    CLASSIFICATION.error=`Driver Classification konnte nicht geladen werden: ${error.message||error}`;
+    const detail=String(error.message||error);
+    CLASSIFICATION.error=/zfc_driver_classification_config|schema cache|PGRST205/i.test(`${error.code||''} ${detail}`)
+      ?`Driver Classification konnte nicht geladen werden: Die Supabase-Tabelle „zfc_driver_classification_config“ fehlt oder ist noch nicht im Schema-Cache. Bitte die Migration „supabase/migrations/20261109000000_driver_classification_and_case_financial_assessments.sql“ im Supabase SQL Editor ausführen und danach die Seite neu laden.`
+      :`Driver Classification konnte nicht geladen werden: ${detail}`;
     console.error(CLASSIFICATION.error,error);
   }finally{ CLASSIFICATION.loading=false; }
 }
@@ -1551,7 +1599,59 @@ function go(page, id){
   ROUTE={page,id:id||null};
   location.hash='#'+page+(id?'/'+id:'');
   render();
+  if(page==='caseform'&&id&&currentTier()>=2) loadCaseFinancialAssessment(id);
   window.scrollTo(0,0);
+}
+async function loadCaseFinancialAssessment(caseId){
+  if(!SUPABASE.client||currentTier()<2||CASE_FINANCIAL.loaded.has(caseId)||CASE_FINANCIAL.loading.has(caseId)) return;
+  const requesterId=AUTH.profile?.id||AUTH.session?.user?.id;
+  CASE_FINANCIAL.loading.add(caseId);
+  CASE_FINANCIAL.errors.delete(caseId);
+  render();
+  try{
+    const result=await SUPABASE.client.from('zfc_case_financial_assessments')
+      .select('case_id,estimated_amount,currency,assessment_notes,updated_by_name,updated_by_tier,updated_at')
+      .eq('case_id',caseId).maybeSingle();
+    if(result.error) throw result.error;
+    if(requesterId&&(AUTH.profile?.id||AUTH.session?.user?.id)===requesterId){
+      if(result.data) CASE_FINANCIAL.records.set(caseId,result.data);
+      else CASE_FINANCIAL.records.delete(caseId);
+      CASE_FINANCIAL.loaded.add(caseId);
+    }
+  }catch(error){
+    if(requesterId&&(AUTH.profile?.id||AUTH.session?.user?.id)===requesterId){
+      CASE_FINANCIAL.errors.set(caseId,`Finanzielle Einschätzung konnte nicht geladen werden: ${error.message||error}`);
+      console.error(`Case financial assessment load failed for ${caseId}`,error);
+    }
+  }finally{
+    CASE_FINANCIAL.loading.delete(caseId);
+    if(ROUTE.page==='caseform'&&ROUTE.id===caseId) render();
+  }
+}
+async function saveCaseFinancialAssessment(caseId){
+  if(currentTier()<2) return showAccessNotice('Finanzielle Einschätzungen dürfen nur von Tier 2 und Tier 3 gespeichert werden.');
+  if(!SUPABASE.client) return showAccessNotice('Zum Speichern ist eine sichere Supabase-Verbindung erforderlich.');
+  const rawAmount=document.getElementById('case_financial_amount')?.value??'';
+  const amount=Number(rawAmount);
+  const currency=document.getElementById('case_financial_currency')?.value||'EUR';
+  const notes=document.getElementById('case_financial_notes')?.value.trim()||'';
+  if(rawAmount===''||!Number.isFinite(amount)||amount<0||!notes){
+    return showAccessNotice('Bitte einen gültigen Betrag (ab 0) und eine kurze Begründung eintragen.');
+  }
+  const result=await SUPABASE.client.from('zfc_case_financial_assessments').upsert({
+    case_id:caseId,estimated_amount:amount,currency,assessment_notes:notes
+  },{onConflict:'case_id'}).select('case_id,estimated_amount,currency,assessment_notes,updated_by_name,updated_by_tier,updated_at').single();
+  if(result.error){
+    CASE_FINANCIAL.errors.set(caseId,`Finanzielle Einschätzung konnte nicht gespeichert werden: ${result.error.message}`);
+    console.error(`Case financial assessment save failed for ${caseId}`,result.error);
+    render();
+    return;
+  }
+  CASE_FINANCIAL.records.set(caseId,result.data);
+  CASE_FINANCIAL.loaded.add(caseId);
+  CASE_FINANCIAL.errors.delete(caseId);
+  showAccessNotice('Finanzielle Einschätzung wurde sicher gespeichert.');
+  render();
 }
 function openIntegrations(){ MANAGE_TAB='integrations'; go('manage'); }
 function portalAccessCard(){
@@ -2273,6 +2373,27 @@ function jarvesCasePanel(caseData){
 }
 
 /* ============================= CASE FORM (AKTE) ============================= */
+function caseFinancialAssessmentPanel(caseData){
+  const record=CASE_FINANCIAL.records.get(caseData.id);
+  const loading=CASE_FINANCIAL.loading.has(caseData.id);
+  const error=CASE_FINANCIAL.errors.get(caseData.id);
+  return `<section class="panel case-financial-assessment">
+    <div class="case-financial-heading"><div><div class="eyebrow">Vertraulich · Tier 2 &amp; Tier 3</div><h2>Finanzielle Einschätzung</h2></div><span class="case-financial-lock">Rollenbeschränkter Aktenvermerk</span></div>
+    <p>Separate, zugriffsgeschützte Einschätzung zu möglichen finanziellen Folgen dieser Akte. Sie ist nicht Teil des allgemein sichtbaren Aktenstatus.</p>
+    ${error?`<div class="classification-error" role="alert">${esc(error)}</div>`:''}
+    ${loading?'<p role="status">Einschätzung wird geladen …</p>':''}
+    <div class="case-financial-grid">
+      <label>Geschätzter Betrag
+        <div class="case-financial-amount"><input type="number" min="0" step="0.01" id="case_financial_amount" value="${escAttr(record?.estimated_amount??'')}" ${loading?'disabled':''}><select id="case_financial_currency" aria-label="Währung" ${loading?'disabled':''}>${selectOptions(['EUR','CHF','USD','GBP'],record?.currency||'EUR')}</select></div>
+      </label>
+      <label>Begründung / Annahmen<textarea id="case_financial_notes" rows="3" placeholder="Grundlage, Annahmen und mögliche finanzielle Auswirkungen …" ${loading?'disabled':''}>${esc(record?.assessment_notes||'')}</textarea></label>
+    </div>
+    <div class="case-financial-footer">
+      <small>${record?`Zuletzt gespeichert: ${fmtDateTime(record.updated_at)} · ${esc(record.updated_by_name||'Tier '+record.updated_by_tier)} · Tier ${esc(record.updated_by_tier||'—')}`:'Noch keine Einschätzung gespeichert.'}</small>
+      <button class="btn primary" type="button" onclick="saveCaseFinancialAssessment('${escAttr(caseData.id)}')" ${loading?'disabled':''}>Einschätzung speichern</button>
+    </div>
+  </section>`;
+}
 function pageCaseForm(existing){
   const c = existing || {
     id:null, stw:null, season:'2026', status:'Neu', createdAt:null,
@@ -2351,6 +2472,7 @@ function pageCaseForm(existing){
         <div class="field"><label>Vergleichbare frühere Fälle (Präzedenzfall)</label><input id="f_precedent" type="text" value="${esc(c.precedent)}" placeholder="z. B. STW-378945"></div>
       </div>
 
+      ${!isNew&&currentTier()>=2?caseFinancialAssessmentPanel(c):''}
       ${isNew ? '<div class="panel" style="margin-top:26px;margin-bottom:0;"><h2>Akte zuerst <b>anlegen</b></h2><p style="margin:0;color:var(--grey);">Trage die Grunddaten und eine objektive Fallbeschreibung ein. Nach dem Anlegen wird die Akte mit Status „Neu“ gespeichert und kann anschließend vollständig ausgewertet werden.</p></div>' : c.processCode?'<div class="note">Entscheidungen und Freigaben bei Prozessakten werden ausschließlich über den Zuständigkeits- und Freigabebereich oben dokumentiert.</div>':currentTier()<2?'<div class="note">Tier 1 kann Sachverhalt und Belege ergänzen. Entscheidungen, Statusänderungen und Sanktionen sind der unabhängigen Tier-2-Prüfung vorbehalten.</div>':'<div class="sectiontitle">Entscheidung</div>'}
       ${isNew||c.processCode||!canEditDecision ? '' : `
       <div class="grid cols-2">

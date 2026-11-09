@@ -135,6 +135,39 @@ test('Driver classification is tier-3-only with append-only decisions and frozen
   assert.match(classificationPdfFunction,/createSignedUrl/);
 });
 
+test('Driver classification can link an applicant to the registered driver by dropdown or license number',()=>{
+  const context=createAppContext();
+  vm.runInContext(`DB.teams=[{id:'team-1',name:'Test Racing'}];DB.drivers=[{id:'driver-1',firstName:'Alex',lastName:'Racer',licenseNo:'ZFC-1234',teamId:'team-1',simId:'EA-1',discord:'alex#1',email:'alex@example.test',platform:'PC',division:'D2'}];`,context);
+  const page=vm.runInContext('pageClassificationApplicant(null)',context);
+  assert.match(page,/id="classification_registered_driver"/);
+  assert.match(page,/Alex Racer · ZFC-1234 · Test Racing/);
+  assert.match(page,/id="classification_license_search"/);
+
+  vm.runInContext(`
+    const fields={};
+    document.getElementById=id=>fields[id]||(fields[id]={value:''});
+    chooseRegisteredClassificationDriver('driver-1');
+  `,context);
+  assert.equal(vm.runInContext(`document.getElementById('classification_name').value`,context),'Alex Racer');
+  assert.equal(vm.runInContext(`document.getElementById('classification_license_search').value`,context),'ZFC-1234');
+  vm.runInContext(`document.getElementById('classification_license_search').value='zfc 1234';searchRegisteredClassificationDriver();`,context);
+  assert.equal(vm.runInContext(`document.getElementById('classification_registered_driver').value`,context),'driver-1');
+});
+
+test('Case financial assessments are isolated and restricted to Tier 2 and Tier 3',()=>{
+  const migration=fs.readFileSync(require.resolve('../supabase/migrations/20261109000000_driver_classification_and_case_financial_assessments.sql'),'utf8');
+  assert.match(schema,/create table if not exists public\.zfc_case_financial_assessments/);
+  assert.match(schema,/create policy zfc_case_financial_assessments_tier2_all[\s\S]*?public\.zfc_current_tier\(\) >= 2/);
+  assert.match(schema,/grant select, insert, update on public\.zfc_case_financial_assessments to authenticated/);
+  assert.match(migration,/create table if not exists public\.zfc_driver_classification_config/);
+  assert.match(migration,/notify pgrst, 'reload schema'/);
+
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'tier-1',access_tier:1};let accessMessage='';showAccessNotice=message=>{accessMessage=message;};`,context);
+  vm.runInContext(`saveCaseFinancialAssessment('case-1')`,context);
+  assert.match(vm.runInContext('accessMessage',context),/nur von Tier 2 und Tier 3/);
+});
+
 test('Jarves expands short keywords into grounded long drafts with document and style options',()=>{
   const context=createAppContext();
   const draft={

@@ -1,6 +1,6 @@
 # Driver Classification deployment
 
-1. Apply the complete `supabase_schema.sql` in the Supabase SQL Editor. The new tables, Tier-3 policies, decision RPCs, and private PDF bucket are safe to apply repeatedly.
+1. Apply the complete `supabase_schema.sql` in the Supabase SQL Editor. It creates the classification tables and the private, Tier-2/3 case financial-assessment table, then asks PostgREST to reload its schema cache. If only the missing configuration table and financial-assessment feature need to be applied, run `supabase/migrations/20261109000000_driver_classification_and_case_financial_assessments.sql` instead. Both scripts are safe to reapply.
 2. Deploy the PDF Edge Function from the repository root after linking the existing Supabase project:
 
    ```sh
@@ -10,6 +10,8 @@
 
    Supabase provides `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` to Edge Functions. Do not put the service-role key in the browser app.
 3. Sign in with a Tier-3 account and open **Driver Classification**. Enter the official reference times for Australia, Bahrain, Belgium, and any additional tracks before evaluating applicants.
+
+On a new classification, an existing driver can be selected from the driver registry or found by license number. Case financial assessments are stored separately from the shared case data and are protected by database policies: only Tier 2 and Tier 3 can read or save them.
 
 The initial track references are intentionally empty: no authoritative lap-time values were present in the existing application. The scoring defaults are editable and are stored in the database. Time-trial score is `max(0, 1000 - max(0, deviationPercent) × penaltyPerPercent)`, capped at 1,000. Category scores are combined as a weighted mean; division thresholds and minimum safety ratings determine the suggested division.
 
