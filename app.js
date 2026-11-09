@@ -259,6 +259,27 @@ function publicShareUrl(){
 function appState(){ return {teams:DB.teams,drivers:DB.drivers,cases:DB.cases,transfers:DB.transfers,esportSetups:DB.esportSetups,marketRequests:DB.marketRequests,caseActivityLog:DB.caseActivityLog,deletedCaseLog:DB.deletedCaseLog}; }
 function cloneState(state){ return state ? JSON.parse(JSON.stringify(state)) : null; }
 function sameState(left,right){ return JSON.stringify(left)===JSON.stringify(right); }
+function protectSubmittedArchiveCases(state,remoteState){
+  if(!state||!Array.isArray(state.cases)||!Array.isArray(remoteState?.cases)) return state;
+  const protectedCases=new Map(remoteState.cases
+    .filter(item=>['submitted','archived'].includes(item?.archiveWorkflow?.status))
+    .map(item=>[item.id,item]));
+  const seen=new Set();
+  const cases=state.cases.map(item=>{
+    const committed=protectedCases.get(item?.id);
+    if(!committed) return item;
+    seen.add(item.id);
+    if(committed.archiveWorkflow.status==='archived') return cloneState(committed);
+    const merged=cloneState(committed);
+    for(const key of ['archiveWorkflow','activeProcessCodes','activeProcessHistory','updatedAt']){
+      if(Object.hasOwn(item,key)) merged[key]=cloneState(item[key]);
+      else delete merged[key];
+    }
+    return merged;
+  });
+  protectedCases.forEach((item,id)=>{ if(!seen.has(id)) cases.push(cloneState(item)); });
+  return {...state,cases};
+}
 function mergeState(base,local,remote){
   const mergeValue=(baseValue,localValue,remoteValue)=>{
     if(sameState(localValue,baseValue)) return cloneState(remoteValue);
@@ -318,7 +339,9 @@ async function syncAppState(){
     const latest=await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
     if(latest.error) throw latest.error;
     const localState=appState();
-    const nextState=latest.data?.state ? mergeState(SUPABASE.baseState,localState,latest.data.state) : localState;
+    const nextState=latest.data?.state
+      ? protectSubmittedArchiveCases(mergeState(SUPABASE.baseState,localState,latest.data.state),latest.data.state)
+      : localState;
     SUPABASE.applyingRemote=true;
     applyRemoteState(nextState);
     SUPABASE.applyingRemote=false;
@@ -427,7 +450,7 @@ async function initSupabase(){
     SUPABASE.channel = SUPABASE.client.channel('zfc-racing-realtime')
       .on('postgres_changes',{event:'*',schema:'public',table:'zfc_app_state'}, payload=>{
         if(!payload.new?.state) return;
-        const merged=mergeState(SUPABASE.baseState,appState(),payload.new.state);
+        const merged=protectSubmittedArchiveCases(mergeState(SUPABASE.baseState,appState(),payload.new.state),payload.new.state);
         SUPABASE.applyingRemote=true; applyRemoteState(merged); SUPABASE.applyingRemote=false;
         SUPABASE.baseState=cloneState(merged);
         render();
@@ -3823,6 +3846,27 @@ async function persistCaseMutation(caseRecord,previous,errorLabel){
 }
 async function closeCaseAndSendToArchive(caseId){
   if(currentTier()<2){ showAccessNotice('Akten können nur von Tier 2 oder Tier 3 zur Archivierung eingereicht werden.'); return; }
+  if(SUPABASE.client){
+    let latest;
+    try{
+      latest=await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
+    }catch(error){
+      showAccessNotice(`Der aktuelle Aktenstatus konnte vor der Einreichung nicht geprüft werden. ${error?.message||'Bitte Verbindung prüfen und erneut versuchen.'}`);
+      return;
+    }
+    if(latest.error){
+      showAccessNotice(`Der aktuelle Aktenstatus konnte vor der Einreichung nicht geprüft werden. ${latest.error.message||'Bitte Verbindung prüfen und erneut versuchen.'}`);
+      return;
+    }
+    const remoteCase=latest.data?.state?.cases?.find(item=>item.id===caseId);
+    if(!remoteCase){ showAccessNotice('Die Akte wurde in der gemeinsamen Datenbank nicht gefunden. Bitte die Aktenliste aktualisieren.'); return; }
+    if(caseIsInArchive(remoteCase)){
+      applyRemoteState(latest.data.state);
+      SUPABASE.baseState=cloneState(latest.data.state);
+      go('archive',caseId);
+      return;
+    }
+  }
   const c=DB.cases.find(item=>item.id===caseId);
   if(c&&caseIsInArchive(c)){ go('archive',c.id); return; }
   if(!c){ showAccessNotice('Diese Akte ist nicht mehr für eine Einreichung verfügbar.'); return; }

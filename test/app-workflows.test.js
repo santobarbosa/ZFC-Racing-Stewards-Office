@@ -200,6 +200,47 @@ test('Closing a case sends it to the archive, hides it from active cases, and ro
   assert.match(schema,/Endgültig archivierte Akten sind unveränderlich/);
 });
 
+test('Archive submission refreshes the server status and does not resubmit an already submitted case',async()=>{
+  const context=createAppContext();
+  const submitted={id:'case-archive-2',description:'Committed case',archiveWorkflow:{status:'submitted',history:[]}};
+  vm.runInContext(`
+    window.localStorage={setItem(){}};
+    AUTH.profile={id:'tier-2',access_tier:2};
+    DB.cases=[{id:'case-archive-2',description:'Stale local case'}];
+    let archiveRoute=null;
+    go=(page,id)=>{archiveRoute={page,id};};
+    SUPABASE.client={
+      from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{state:{cases:${JSON.stringify([submitted])}}},error:null})})})})
+    };
+  `,context);
+  await vm.runInContext(`closeCaseAndSendToArchive('case-archive-2')`,context);
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('archiveRoute',context))),{page:'archive',id:'case-archive-2'});
+  assert.equal(vm.runInContext('DB.cases[0].archiveWorkflow.status',context),'submitted');
+});
+
+test('App-state synchronization preserves submitted case fields while allowing A1 workflow updates',()=>{
+  const context=createAppContext();
+  const remote={cases:[{
+    id:'case-archive-3',
+    description:'Committed details',
+    archiveWorkflow:{status:'submitted',history:[]},
+    activeProcessCodes:[]
+  }]};
+  const proposed={cases:[{
+    id:'case-archive-3',
+    description:'Stale client edit',
+    archiveWorkflow:{status:'submitted',a1Status:'active',history:[{action:'a1_assigned'}]},
+    activeProcessCodes:['A1'],
+    activeProcessHistory:[{processCode:'A1'}]
+  }]};
+  const result=JSON.parse(JSON.stringify(vm.runInContext(
+    `protectSubmittedArchiveCases(${JSON.stringify(proposed)},${JSON.stringify(remote)})`,context
+  )));
+  assert.equal(result.cases[0].description,'Committed details');
+  assert.equal(result.cases[0].archiveWorkflow.a1Status,'active');
+  assert.deepEqual(result.cases[0].activeProcessCodes,['A1']);
+});
+
 test('Jarves expands short keywords into grounded long drafts with document and style options',()=>{
   const context=createAppContext();
   const draft={
