@@ -24,7 +24,6 @@ const DOCUMENT_PROCESS_MATRIX = {
   V4: ['Wechselantrag', 'Voraussetzungenprüfung', 'Bestätigungs- und Auswirkungsübersicht', 'Wechselentscheidung', 'Änderung und Mitteilungsnachweis'],
   F1: ['Finanzantrag', 'Beleg- und Empfängerprüfung', 'Budget- und Befugnisprüfung', 'Finanzentscheidung', 'Zahlungs- oder Buchungsnachweis und Abschluss'],
   F2: ['Buchungsauftrag', 'Grundlagenprüfung', 'Buchungs- oder Korrekturbeleg', 'Salden- und Kontrollbericht', 'Freigabe und Abschluss'],
-  A1: ['Abschlussantrag', 'Vollständigkeitscheckliste', 'Aufgaben- und Maßnahmenabschlussübersicht', 'Abschlussfreigabe', 'Archivierungsvermerk und Dokumentenverzeichnis'],
   A2: ['Veröffentlichungsauftrag', 'Inhalts- und Vertraulichkeitsprüfung', 'Öffentliche Entscheidungsfassung', 'Veröffentlichungsfreigabe', 'Veröffentlichungs- und Abschlussnachweis'],
   E1: ['Bewerbungsformular', 'Voraussetzungen und Testplan', 'Leistungsbewertung', 'Auswahlgesprächsvermerk', 'Aufnahmeentscheidung und nächste Schritte'],
   E2: ['Trainingsauftrag und Zielsetzung', 'Trainingsplan', 'Anmelde- und Anwesenheitsliste', 'Trainings- und Beobachtungsprotokoll', 'Nachbereitung und Aufgabenbericht'],

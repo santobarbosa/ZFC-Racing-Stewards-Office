@@ -6,7 +6,6 @@ const { webcrypto } = require('node:crypto');
 
 const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
 const schema = fs.readFileSync(require.resolve('../supabase_schema.sql'), 'utf8');
-const classificationPdfFunction = fs.readFileSync(require.resolve('../supabase/functions/driver-classification-pdf/index.ts'), 'utf8');
 
 function createAppContext(){
   const context=vm.createContext({
@@ -103,57 +102,16 @@ test('HR data schema is tier-3-only and supports realtime synchronization',()=>{
   assert.match(schema,/create trigger zfc_stamp_hr_review/);
 });
 
-test('Driver classification calculates weighted scores and time deviations transparently',()=>{
-  const context=createAppContext();
-  const result=JSON.parse(JSON.stringify(vm.runInContext(`calculateClassification(
-    {name:'Test Driver'},
-    {timeTrials:{australia:101,bahrain:100,belgium:99},racePace:800,consistency:80,safetyRating:90},
-    {...defaultClassificationConfig(),tracks:[
-      {id:'australia',name:'Australien',referenceSeconds:100},
-      {id:'bahrain',name:'Bahrain',referenceSeconds:100},
-      {id:'belgium',name:'Belgien',referenceSeconds:100}
-    ]}
-  )`,context)));
-  assert.equal(result.tracks[0].deviation,1);
-  assert.equal(result.tracks[2].deviation,-1);
-  assert.equal(result.categoryScores.timeTrial,967);
-  assert.equal(result.rating,882);
-  assert.equal(result.suggestedDivision,'D1');
-});
-
-test('Driver classification is tier-3-only with append-only decisions and frozen report snapshots',()=>{
-  const context=createAppContext();
-  vm.runInContext(`AUTH.profile={id:'tier-2',access_tier:2};`,context);
-  assert.equal(vm.runInContext(`canAccessPage('driver-classification')`,context),false);
-  assert.doesNotMatch(vm.runInContext('pageDashboard()',context),/Driver Classification/);
-  vm.runInContext(`AUTH.profile={id:'tier-3',access_tier:3};`,context);
-  assert.equal(vm.runInContext(`canAccessPage('driver-classification')`,context),true);
-  assert.match(vm.runInContext('pageDashboard()',context),/Driver Classification/);
-  assert.match(schema,/create policy zfc_driver_classifications_tier3_select[\s\S]*?public\.zfc_current_tier\(\) >= 3/);
-  assert.match(schema,/create or replace function public\.zfc_decide_driver_classification[\s\S]*?insert into public\.zfc_driver_classification_reports/);
-  assert.match(schema,/grant select on public\.zfc_driver_classifications,[\s\S]*?public\.zfc_driver_classification_events,[\s\S]*?public\.zfc_driver_classification_reports to authenticated/);
-  assert.match(classificationPdfFunction,/SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(classificationPdfFunction,/PDFDocument\.create/);
-  assert.match(classificationPdfFunction,/createSignedUrl/);
-});
-
-test('Driver classification can link an applicant to the registered driver by dropdown or license number',()=>{
-  const context=createAppContext();
-  vm.runInContext(`DB.teams=[{id:'team-1',name:'Test Racing'}];DB.drivers=[{id:'driver-1',firstName:'Alex',lastName:'Racer',licenseNo:'ZFC-1234',teamId:'team-1',simId:'EA-1',discord:'alex#1',email:'alex@example.test',platform:'PC',division:'D2'}];`,context);
-  const page=vm.runInContext('pageClassificationApplicant(null)',context);
-  assert.match(page,/id="classification_registered_driver"/);
-  assert.match(page,/Alex Racer · ZFC-1234 · Test Racing/);
-  assert.match(page,/id="classification_license_search"/);
-
-  vm.runInContext(`
-    const fields={};
-    document.getElementById=id=>fields[id]||(fields[id]={value:''});
-    chooseRegisteredClassificationDriver('driver-1');
-  `,context);
-  assert.equal(vm.runInContext(`document.getElementById('classification_name').value`,context),'Alex Racer');
-  assert.equal(vm.runInContext(`document.getElementById('classification_license_search').value`,context),'ZFC-1234');
-  vm.runInContext(`document.getElementById('classification_license_search').value='zfc 1234';searchRegisteredClassificationDriver();`,context);
-  assert.equal(vm.runInContext(`document.getElementById('classification_registered_driver').value`,context),'driver-1');
+test('Driver classification has been removed from application code and navigation',()=>{
+  const index=fs.readFileSync(require.resolve('../index.html'),'utf8');
+  const styles=fs.readFileSync(require.resolve('../styles.css'),'utf8');
+  assert.doesNotMatch(appSource,/classification|driver-classification/i);
+  assert.doesNotMatch(index,/classification|driver-classification/i);
+  assert.doesNotMatch(styles,/classification|driver-classification/i);
+  assert.doesNotMatch(schema,/classification|driver-classification/i);
+  const retirementMigration=fs.readFileSync(require.resolve('../supabase/migrations/20261109030000_disable_driver_classification.sql'),'utf8');
+  assert.match(retirementMigration,/revoke all on public\.zfc_driver_classifications/);
+  assert.match(retirementMigration,/preserving its historical data/);
 });
 
 test('Case financial assessments are isolated and restricted to Tier 2 and Tier 3',()=>{
@@ -161,8 +119,7 @@ test('Case financial assessments are isolated and restricted to Tier 2 and Tier 
   assert.match(schema,/create table if not exists public\.zfc_case_financial_assessments/);
   assert.match(schema,/create policy zfc_case_financial_assessments_tier2_all[\s\S]*?public\.zfc_current_tier\(\) >= 2/);
   assert.match(schema,/grant select, insert, update on public\.zfc_case_financial_assessments to authenticated/);
-  assert.match(migration,/create table if not exists public\.zfc_driver_classification_config/);
-  assert.match(migration,/notify pgrst, 'reload schema'/);
+  assert.match(migration,/create table if not exists public\.zfc_case_financial_assessments/);
 
   const context=createAppContext();
   vm.runInContext(`AUTH.profile={id:'tier-1',access_tier:1};let accessMessage='';showAccessNotice=message=>{accessMessage=message;};`,context);
@@ -170,7 +127,7 @@ test('Case financial assessments are isolated and restricted to Tier 2 and Tier 
   assert.match(vm.runInContext('accessMessage',context),/nur von Tier 2 und Tier 3/);
 });
 
-test('Closing a case sends it to the archive, hides it from active cases, and routes A1 by tier',()=>{
+test('Archive submission is direct and final archive or deletion is Tier-3-only',async()=>{
   const context=createAppContext();
   const caseData={id:'case-archive-1',stw:'STW-1',event:'GP Test',category:'Kontakt',status:'Entschieden',archiveWorkflow:{status:'submitted',history:[]}};
   vm.runInContext(`DB.cases=[${JSON.stringify(caseData)}];DB.caseActivityLog=[];DB.deletedCaseLog=[];AUTH.profile={id:'tier-2',display_name:'Tier 2',access_tier:2};`,context);
@@ -178,25 +135,33 @@ test('Closing a case sends it to the archive, hides it from active cases, and ro
   assert.match(archiveHtml,/STW-1/);
   assert.match(archiveHtml,/Zur Archivierung eingereicht/);
 
-  vm.runInContext(`const table={};document.getElementById=id=>table[id]||(table[id]={value:'',innerHTML:''});renderCaseTable();`,context);
+  vm.runInContext(`const table={};document.getElementById=id=>id==='saveToast'||id==='saveToastMessage'?null:table[id]||(table[id]={value:'',innerHTML:''});renderCaseTable();`,context);
   assert.match(vm.runInContext(`document.getElementById('caseTableWrap').innerHTML`,context),/Keine Akten gefunden/);
 
-  const tier2Panel=vm.runInContext(`archiveA1Panel(DB.cases[0])`,context);
-  assert.match(tier2Panel,/A1-Prozess zuordnen/);
-  assert.doesNotMatch(tier2Panel,/A1-Anfrage bestätigen/);
-  assert.match(vm.runInContext(`pageArchive()`,context),/Tier 2 oder Tier 3 ordnet A1 hier direkt zu/);
+  const tier2Panel=vm.runInContext(`archiveActionPanel(DB.cases[0])`,context);
+  assert.match(tier2Panel,/Endgültiger Abschluss durch Tier 3/);
+  assert.doesNotMatch(tier2Panel,/Endgültig archivieren/);
+  vm.runInContext(`window.prompt=()=> 'Abschluss geprüft';let accessMessage='';showAccessNotice=message=>{accessMessage=message;};persistCaseMutation=async()=>true;addCaseActivity=()=>{};go=()=>{};`,context);
+  await vm.runInContext(`finalizeCaseArchive('case-archive-1')`,context);
+  assert.match(vm.runInContext('accessMessage',context),/Nur Tier 3 darf/);
+
   vm.runInContext(`AUTH.profile={id:'tier-3',display_name:'Tier 3',access_tier:3};`,context);
-  vm.runInContext(`DB.cases[0].archiveWorkflow.a1Status='pending';`,context);
-  assert.match(vm.runInContext(`archiveA1Panel(DB.cases[0])`,context),/A1-Anfrage bestätigen/);
-  assert.match(vm.runInContext(`pageCaseForm(DB.cases[0])`,context),/A1 · Aktenabschluss/);
+  assert.match(vm.runInContext(`archiveActionPanel(DB.cases[0])`,context),/Endgültig archivieren/);
+  await vm.runInContext(`finalizeCaseArchive('case-archive-1')`,context);
+  assert.equal(vm.runInContext(`DB.cases[0].archiveWorkflow.status`,context),'archived');
+  assert.equal(vm.runInContext(`DB.cases[0].archiveWorkflow.archivedByTier`,context),3);
+  assert.match(vm.runInContext(`archiveActionPanel(DB.cases[0])`,context),/Akte endgültig löschen/);
+  vm.runInContext(`AUTH.profile={id:'tier-2',display_name:'Tier 2',access_tier:2};`,context);
+  assert.doesNotMatch(vm.runInContext(`archiveActionPanel(DB.cases[0])`,context),/onclick="deleteCase/);
+  assert.match(vm.runInContext(`pageCaseForm(DB.cases[0])`,context),/Direkter Archivabschluss/);
 
   const caseForm=vm.runInContext(`pageCaseForm({id:'active',status:'Offen',history:[]})`,context);
   assert.match(caseForm,/Akte schliessen &amp; zum Archiv einsenden/);
-  assert.match(schema,/create or replace function public\.zfc_validate_case_archive_workflow/);
-  assert.match(schema,/Akten können nur von Tier 2 oder Tier 3 geschlossen und archiviert werden/);
-  assert.match(schema,/A1-Abschluss gesperrt: Pflichtunterlage/);
-  assert.match(schema,/old_archive->>'a1Status' is null and actor_tier<2/);
-  assert.match(schema,/Eingereichte oder archivierte Akten dürfen nicht gelöscht werden/);
+  const archiveMigration=fs.readFileSync(require.resolve('../supabase/migrations/20261109020000_direct_case_archive_tier3.sql'),'utf8');
+  assert.match(archiveMigration,/Eine Akte kann nur einmalig durch Tier 2 oder Tier 3 eingereicht werden/);
+  assert.match(archiveMigration,/Die endgültige Archivierung ist ausschließlich Tier 3 vorbehalten/);
+  assert.match(archiveMigration,/archivierte Akten darf nur Tier 3 endgültig löschen/);
+  assert.match(schema,/zfc_reject_retired_a1_process/);
   assert.match(schema,/Endgültig archivierte Akten sind unveränderlich/);
 });
 
@@ -218,7 +183,7 @@ test('Archive submission refreshes the server status and does not resubmit an al
   assert.equal(vm.runInContext('DB.cases[0].archiveWorkflow.status',context),'submitted');
 });
 
-test('App-state synchronization preserves submitted case fields while allowing A1 workflow updates',()=>{
+test('App-state synchronization preserves submitted case fields while allowing archive workflow updates',()=>{
   const context=createAppContext();
   const remote={cases:[{
     id:'case-archive-3',

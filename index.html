@@ -15,15 +15,21 @@
 <div id="shell" style="display:none;">
   <div id="sidebar">
     <div id="brand">
-      <div class="mark">ZFC<span>RACING</span></div>
-      <div class="sub">Stewards Office</div>
+      <a class="brand-lockup" href="#dashboard" onclick="go('dashboard');return false;" aria-label="ZFC Racing Dashboard">
+        <svg class="brand-emblem" viewBox="0 0 48 48" role="img" aria-label="ZFC">
+          <path d="M5 8h38L30 19H17l-3 3h12l-6 7H8l-3 5h19l-7 7h-8l-5-7 6-7-5-6 6-7z" fill="currentColor"/>
+          <path d="M25 29h14l-6 7H19z" fill="currentColor" opacity=".58"/>
+        </svg>
+        <span><span class="mark">ZFC<span>RACING</span></span><span class="sub">Stewards Office</span></span>
+      </a>
     </div>
-    <nav class="mainnav" id="mainnav"></nav>
+    <nav class="mainnav" id="mainnav" aria-label="Hauptnavigation"></nav>
     <div id="sidebar-foot"><div id="accountBadge"></div></div>
   </div>
   <div id="main"></div>
 </div>
 <div id="loadingScreen" class="loading">ZFC RACING — LADE SYSTEM …</div>
+<div id="saveToast" class="save-toast" role="status" aria-live="polite" hidden><span class="save-toast-mark" aria-hidden="true">✓</span><span id="saveToastMessage"></span></div>
 <main id="publicHome" class="public-home" hidden>
   <header class="public-header">
     <a class="public-brand" href="#home" aria-label="ZFC Racing Startseite"><strong>ZFC<span>RACING</span></strong><small>STEWARD OFFICE</small></a>

@@ -325,7 +325,7 @@ begin
 					end) then
 					raise exception 'Die neue Prozessakte muss mit dem vorgeschriebenen Prüfstatus beginnen.';
 				end if;
-				if actor_tier = 1 and case_code not in ('D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','A1','07b') then
+				if actor_tier = 1 and case_code not in ('D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','07b') then
 					raise exception 'Dieser Prozess darf nicht durch Tier 1 eröffnet werden.';
 				end if;
 				if case_code in ('D4','D8','D9') and actor_tier < 3 then
@@ -365,7 +365,7 @@ begin
 			request_item := new_requests->(history_length - 1);
 			if nullif(btrim(request_item->>'id'),'') is null
 				or nullif(btrim(request_item->>'processCode'),'') is null
-				or request_item->>'processCode' not in ('D1','D2','D3','D4','D5','D6','D7','D8','D9','07b','R1','R2','R3','R4','R5','R6','R7','R8','V1','V2','V3','V4','F1','F2','A1')
+				or request_item->>'processCode' not in ('D1','D2','D3','D4','D5','D6','D7','D8','D9','07b','R1','R2','R3','R4','R5','R6','R7','R8','V1','V2','V3','V4','F1','F2')
 				or request_item->>'requestedById' is distinct from auth.uid()::text
 				or (request_item->>'requestedTier')::smallint is distinct from 2
 				or request_item->>'status' is distinct from 'Tier-3-Prüfung ausstehend'
@@ -410,7 +410,7 @@ begin
 				or (last_event->>'actorTier')::smallint is distinct from actor_tier then
 				raise exception 'Prozessverknüpfung, handelndes Konto und Auditverlauf stimmen nicht überein.';
 			end if;
-			if actor_tier = 1 and linked_code not in ('D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','A1','07b')
+			if actor_tier = 1 and linked_code not in ('D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','07b')
 				or linked_code in ('D4','D8','D9') and actor_tier < 3 then
 				raise exception 'Dieser Prozess darf von der angemeldeten Tier-Stufe nicht mit der Akte verknüpft werden.';
 			end if;
@@ -671,6 +671,7 @@ create trigger zfc_validate_app_state_tier_workflow
 	for each row execute function public.zfc_validate_app_state_tier_workflow();
 revoke all on function public.zfc_validate_app_state_tier_workflow() from public, anon, authenticated;
 
+-- Archive submissions can be finalized directly by Tier 3 without an A1 process.
 create or replace function public.zfc_validate_case_archive_workflow()
 returns trigger
 language plpgsql
@@ -686,10 +687,6 @@ declare
 	new_archive jsonb;
 	last_event jsonb;
 	history_length integer;
-	completed_pdf_count integer;
-	process_list jsonb;
-	required_process text;
-	requirement_number integer;
 begin
 	if auth.uid() is null or actor_tier < 1 then
 		raise exception 'Anmeldung und gültiges Tier-Profil sind für den Aktenabschluss erforderlich.';
@@ -704,7 +701,9 @@ begin
 					from jsonb_array_elements(coalesce(new.state->'cases','[]'::jsonb)) as new_cases(value)
 					where value->>'id'=old_case->>'id'
 				) then
-				raise exception 'Eingereichte oder archivierte Akten dürfen nicht gelöscht werden.';
+				if old_case->'archiveWorkflow'->>'status'<>'archived' or actor_tier<>3 then
+					raise exception 'Eingereichte Akten dürfen nicht gelöscht werden; archivierte Akten darf nur Tier 3 endgültig löschen.';
+				end if;
 			end if;
 		end loop;
 	end if;
@@ -719,143 +718,56 @@ begin
 		limit 1;
 		new_archive := coalesce(case_item->'archiveWorkflow','{}'::jsonb);
 		old_archive := coalesce(old_case->'archiveWorkflow','{}'::jsonb);
+
 		if old_archive->>'status'='archived' and case_item is distinct from old_case then
 			raise exception 'Endgültig archivierte Akten sind unveränderlich.';
 		end if;
 		if old_archive->>'status'='submitted'
-			and (case_item - array['archiveWorkflow','activeProcessCodes','activeProcessHistory','updatedAt'])
-				is distinct from (old_case - array['archiveWorkflow','activeProcessCodes','activeProcessHistory','updatedAt']) then
-			raise exception 'Eingereichte Akten sind bis zum Abschluss von A1 gesperrt.';
-		end if;
-		if (case_item->'activeProcessCodes' is distinct from old_case->'activeProcessCodes'
-				or case_item->'activeProcessHistory' is distinct from old_case->'activeProcessHistory')
-			and not (new_archive->>'status'='submitted'
-				and new_archive->>'a1Status'='active'
-				and old_archive->>'a1Status' is distinct from 'active') then
-			raise exception 'Während des A1-Abschlusses dürfen keine anderen Prozessdaten geändert werden.';
+			and (case_item - array['archiveWorkflow','updatedAt'])
+				is distinct from (old_case - array['archiveWorkflow','updatedAt']) then
+			raise exception 'Eingereichte Akten sind bis zum endgültigen Abschluss durch Tier 3 gesperrt.';
 		end if;
 		if old_archive is not distinct from new_archive then continue; end if;
-		if actor_tier < 2 then
-			raise exception 'Akten können nur von Tier 2 oder Tier 3 geschlossen und archiviert werden.';
-		end if;
-		if old_case is null or new_archive->>'status' not in ('submitted','archived') then
-			raise exception 'Ungültiger A1-Aktenabschluss.';
+		if old_case is null or new_archive->>'status' is null or new_archive->>'status' not in ('submitted','archived') then
+			raise exception 'Ungültiger Archivierungsstatus.';
 		end if;
 		if old_archive->>'status'='archived' then
-			raise exception 'Endgültig archivierte Akten und ihr A1-Abschlussprotokoll sind unveränderlich.';
+			raise exception 'Endgültig archivierte Akten und ihr Protokoll sind unveränderlich.';
 		end if;
 		if jsonb_typeof(coalesce(new_archive->'history','[]'::jsonb))<>'array'
 			or jsonb_typeof(coalesce(old_archive->'history','[]'::jsonb))<>'array' then
-			raise exception 'Der A1-Abschluss benötigt ein unveränderliches Verlaufsprotokoll.';
+			raise exception 'Die Archivierung benötigt ein unveränderliches Verlaufsprotokoll.';
 		end if;
 		history_length:=jsonb_array_length(coalesce(new_archive->'history','[]'::jsonb));
 		if history_length<>jsonb_array_length(coalesce(old_archive->'history','[]'::jsonb))+1
 			or (new_archive->'history' #- array[(history_length-1)::text]) is distinct from coalesce(old_archive->'history','[]'::jsonb) then
-			raise exception 'Jeder A1-Abschlussschritt muss genau einen neuen Protokolleintrag enthalten.';
+			raise exception 'Jeder Archivierungsschritt muss genau einen neuen Protokolleintrag enthalten.';
 		end if;
 		last_event:=new_archive->'history'->(history_length-1);
 		if last_event->>'actorId' is distinct from auth.uid()::text
 			or (last_event->>'actorTier')::smallint is distinct from actor_tier
 			or nullif(btrim(last_event->>'reason'),'') is null then
-			raise exception 'A1-Protokoll, handelnde Person und Abschlussvermerk müssen übereinstimmen.';
+			raise exception 'Archivprotokoll, handelnde Person und Abschlussvermerk müssen übereinstimmen.';
 		end if;
 
 		if new_archive->>'status'='submitted' then
-			if old_archive='{}'::jsonb then
-				if last_event->>'action' is distinct from 'submitted'
-					or (new_archive->>'submittedById') is distinct from auth.uid()::text
-					or (new_archive->>'submittedByTier')::smallint is distinct from actor_tier then
-					raise exception 'Die Akte kann nur einmalig und durch Tier 2 oder Tier 3 zur Archivierung eingereicht werden.';
-				end if;
-			elsif old_archive->>'status'='submitted'
-				and new_archive->>'a1Status' is distinct from old_archive->>'a1Status' then
-				if new_archive->>'a1Status'='pending' then
-					if actor_tier<>2 or old_archive->>'a1Status' is not null
-						or last_event->>'action' is distinct from 'a1_requested'
-						or (new_archive->>'a1RequestedById') is distinct from auth.uid()::text
-						or (new_archive->>'a1RequestedByTier')::smallint is distinct from actor_tier then
-						raise exception 'Eine A1-Anfrage darf nur einmalig durch Tier 2 eingereicht werden.';
-					end if;
-				elsif new_archive->>'a1Status'='active' then
-					if (old_archive->>'a1Status'='pending' and actor_tier<>3)
-						or (old_archive->>'a1Status' is null and actor_tier<2)
-						or (old_archive->>'a1Status' is not null and old_archive->>'a1Status'<>'pending')
-						or (old_archive->>'a1Status'='pending'
-							and last_event->>'action' is distinct from 'a1_approved')
-						or (old_archive->>'a1Status' is null
-							and last_event->>'action' is distinct from 'a1_assigned')
-						or (coalesce(old_case->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb
-							and case_item->'activeProcessCodes' is distinct from old_case->'activeProcessCodes')
-						or (not coalesce(old_case->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb
-							and jsonb_array_length(coalesce(case_item->'activeProcessCodes','[]'::jsonb)) <> jsonb_array_length(coalesce(old_case->'activeProcessCodes','[]'::jsonb))+1)
-						or not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb
-						or not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> coalesce(old_case->'activeProcessCodes','[]'::jsonb)
-						or jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb)) <> jsonb_array_length(coalesce(old_case->'activeProcessHistory','[]'::jsonb))+1
-						or (case_item->'activeProcessHistory' #- array[(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)::text]) is distinct from coalesce(old_case->'activeProcessHistory','[]'::jsonb)
-						or case_item->'activeProcessHistory'->(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)->>'processCode' is distinct from 'A1'
-						or case_item->'activeProcessHistory'->(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)->>'action' is distinct from 'linked'
-						or case_item->'activeProcessHistory'->(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)->>'actorId' is distinct from auth.uid()::text
-						or (case_item->'activeProcessHistory'->(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)->>'actorTier')::smallint is distinct from actor_tier then
-						raise exception 'A1 kann durch Tier 2 oder Tier 3 zugeordnet werden; offene Anfragen bestätigt Tier 3.';
-					end if;
-				else
-					raise exception 'Ungültiger A1-Status.';
-				end if;
-			else
-				raise exception 'Der A1-Abschlussstatus ist nicht zulässig.';
+			if old_archive<>'{}'::jsonb or actor_tier<2
+				or last_event->>'action' is distinct from 'submitted'
+				or new_archive->>'submittedById' is distinct from auth.uid()::text
+				or (new_archive->>'submittedByTier')::smallint is distinct from actor_tier then
+				raise exception 'Eine Akte kann nur einmalig durch Tier 2 oder Tier 3 eingereicht werden.';
 			end if;
 		elsif new_archive->>'status'='archived' then
 			if old_archive->>'status' is distinct from 'submitted'
+				or actor_tier<>3
 				or last_event->>'action' is distinct from 'archived'
-				or (new_archive->>'archivedById') is distinct from auth.uid()::text
-				or (new_archive->>'archivedByTier')::smallint is distinct from actor_tier
-				or new_archive->>'a1Status' is distinct from 'active'
-				or not coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb
-				or exists (
-					select 1 from jsonb_array_elements(coalesce(case_item->'processLinkRequests','[]'::jsonb)) request
-					where request->>'processCode'='A1' and request->>'status'='Tier-3-Prüfung ausstehend'
-				) then
-				raise exception 'Die endgültige Ablage erfordert einen aktiven und bestätigten Prozess A1.';
+				or new_archive->>'archivedById' is distinct from auth.uid()::text
+				or (new_archive->>'archivedByTier')::smallint is distinct from 3
+				or new_archive->>'submittedById' is distinct from old_archive->>'submittedById'
+				or new_archive->>'submittedByTier' is distinct from old_archive->>'submittedByTier'
+				or new_archive->>'submittedAt' is distinct from old_archive->>'submittedAt' then
+				raise exception 'Die endgültige Archivierung ist ausschließlich Tier 3 vorbehalten.';
 			end if;
-
-			select count(distinct doc.document_type||':'||encode(digest(doc.content::text,'sha256'),'hex'))
-			into completed_pdf_count
-			from public.zfc_case_documents doc
-			join storage.objects object_row on object_row.bucket_id='case-documents' and object_row.name=doc.pdf_path
-			where doc.case_id=case_item->>'id'
-				and doc.status in ('Freigegeben','Finalisiert')
-				and doc.pdf_path is not null
-				and jsonb_typeof(doc.content)='object'
-				and exists(select 1 from jsonb_each_text(doc.content) fields where length(btrim(fields.value))>0);
-			if coalesce(completed_pdf_count,0)<5 then
-				raise exception 'A1-Abschluss gesperrt: mindestens fünf unterschiedliche, vollständige PDF-Dokumente sind erforderlich.';
-			end if;
-
-			if case_item->>'documentClosureRoute'='early' then
-				process_list:=jsonb_build_array('EARLY','A1');
-			else
-				process_list:=coalesce(case_item->'activeProcessCodes','[]'::jsonb);
-				if case_item->>'processCode' is not null and not process_list @> to_jsonb(case_item->>'processCode') then
-					process_list:=process_list||jsonb_build_array(case_item->>'processCode');
-				end if;
-				if not process_list @> '["A1"]'::jsonb then process_list:=process_list||'["A1"]'::jsonb; end if;
-			end if;
-			for required_process in select jsonb_array_elements_text(process_list)
-			loop
-				for requirement_number in 1..5
-				loop
-					if not exists (
-						select 1 from public.zfc_case_documents doc
-						join storage.objects object_row on object_row.bucket_id='case-documents' and object_row.name=doc.pdf_path
-						where doc.case_id=case_item->>'id'
-							and doc.status in ('Freigegeben','Finalisiert')
-							and doc.pdf_path is not null
-							and doc.required_for @> jsonb_build_array(jsonb_build_object('processCode',required_process,'index',requirement_number))
-					) then
-						raise exception 'A1-Abschluss gesperrt: Pflichtunterlage % von Prozess % fehlt.',requirement_number,required_process;
-					end if;
-				end loop;
-			end loop;
 		end if;
 	end loop;
 	return new;
@@ -1266,7 +1178,6 @@ with process_matrix(process_code, document_titles) as (
 		('V4', array['Wechselantrag','Voraussetzungenprüfung','Bestätigungs- und Auswirkungsübersicht','Wechselentscheidung','Änderung und Mitteilungsnachweis']::text[]),
 		('F1', array['Finanzantrag','Beleg- und Empfängerprüfung','Budget- und Befugnisprüfung','Finanzentscheidung','Zahlungs- oder Buchungsnachweis und Abschluss']::text[]),
 		('F2', array['Buchungsauftrag','Grundlagenprüfung','Buchungs- oder Korrekturbeleg','Salden- und Kontrollbericht','Freigabe und Abschluss']::text[]),
-		('A1', array['Abschlussantrag','Vollständigkeitscheckliste','Aufgaben- und Maßnahmenabschlussübersicht','Abschlussfreigabe','Archivierungsvermerk und Dokumentenverzeichnis']::text[]),
 		('A2', array['Veröffentlichungsauftrag','Inhalts- und Vertraulichkeitsprüfung','Öffentliche Entscheidungsfassung','Veröffentlichungsfreigabe','Veröffentlichungs- und Abschlussnachweis']::text[]),
 		('E1', array['Bewerbungsformular','Voraussetzungen und Testplan','Leistungsbewertung','Auswahlgesprächsvermerk','Aufnahmeentscheidung und nächste Schritte']::text[]),
 		('E2', array['Trainingsauftrag und Zielsetzung','Trainingsplan','Anmelde- und Anwesenheitsliste','Trainings- und Beobachtungsprotokoll','Nachbereitung und Aufgabenbericht']::text[]),
@@ -1591,7 +1502,7 @@ begin
 				raise exception 'Die Prozessakte ist einer anderen Bearbeitungsstufe oder bereits einer Freigabe zugeordnet.';
 			end if;
 		elsif new.process_code <> '' then
-			if actor_tier = 1 and new.process_code not in ('D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','A1','07b')
+			if actor_tier = 1 and new.process_code not in ('D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','07b')
 				or actor_tier < public.zfc_document_process_review_tier(new.process_code)
 					and actor_tier <> 1 then
 				raise exception 'Die Tier-Stufe darf diesen verknüpften Prozess nicht bearbeiten.';
@@ -1946,330 +1857,6 @@ create policy zfc_hr_training_tier3_all on public.zfc_hr_training
 	using (public.zfc_current_tier() >= 3)
 	with check (public.zfc_current_tier() >= 3);
 
--- Driver Classification: separately stored to keep immutable decisions outside the shared app state.
-create sequence if not exists public.zfc_driver_classification_number_seq;
-
-create table if not exists public.zfc_driver_classification_config (
-	id integer primary key check (id = 1),
-	config jsonb not null,
-	updated_by uuid,
-	updated_at timestamptz not null default now()
-);
-
-create table if not exists public.zfc_driver_classification_config_history (
-	id uuid primary key default gen_random_uuid(),
-	config jsonb not null,
-	actor_id uuid,
-	actor_name text not null,
-	created_at timestamptz not null default now()
-);
-
-insert into public.zfc_driver_classification_config (id, config)
-values (
-	1,
-	'{
-		"tracks":[
-			{"id":"australia","name":"Australien","referenceSeconds":null},
-			{"id":"bahrain","name":"Bahrain","referenceSeconds":null},
-			{"id":"belgium","name":"Belgien","referenceSeconds":null}
-		],
-		"weights":{"timeTrial":40,"racePace":25,"consistency":20,"safety":15},
-		"divisions":[
-			{"name":"D1","minRating":800,"minSafety":80},
-			{"name":"D2","minRating":600,"minSafety":60},
-			{"name":"D3","minRating":0,"minSafety":0}
-		],
-		"timePenaltyPerPercent":100
-	}'::jsonb
-)
-on conflict (id) do nothing;
-
-create table if not exists public.zfc_driver_classifications (
-	id uuid primary key,
-	application_no text not null unique default (
-		'ZFC-DC-' || to_char(now(), 'YYYY') || '-' ||
-		lpad(nextval('public.zfc_driver_classification_number_seq')::text, 5, '0')
-	),
-	driver_data jsonb not null default '{}'::jsonb,
-	test_data jsonb not null default '{}'::jsonb,
-	performance_rating integer not null default 0 check (performance_rating between 0 and 1000),
-	suggested_division text not null default '',
-	approved_division text,
-	status text not null default 'Pending'
-		check (status in ('Pending', 'Under Review', 'Approved', 'Rejected')),
-	decision_reason text,
-	created_by uuid,
-	created_at timestamptz not null default now(),
-	updated_at timestamptz not null default now(),
-	reviewed_by uuid,
-	reviewed_at timestamptz
-);
-
-create table if not exists public.zfc_driver_classification_events (
-	id uuid primary key default gen_random_uuid(),
-	application_id uuid not null references public.zfc_driver_classifications(id),
-	action text not null,
-	actor_id uuid not null,
-	actor_name text not null,
-	reason text not null default '',
-	event_data jsonb not null default '{}'::jsonb,
-	created_at timestamptz not null default now()
-);
-
-create table if not exists public.zfc_driver_classification_reports (
-	id uuid primary key default gen_random_uuid(),
-	application_id uuid not null references public.zfc_driver_classifications(id),
-	document_number text not null unique,
-	snapshot jsonb not null,
-	created_by uuid not null,
-	created_at timestamptz not null default now()
-);
-
-create table if not exists public.zfc_driver_classification_report_files (
-	report_id uuid primary key references public.zfc_driver_classification_reports(id),
-	pdf_path text not null,
-	generated_at timestamptz not null default now()
-);
-
-create index if not exists zfc_driver_classifications_status_idx
-	on public.zfc_driver_classifications(status, updated_at desc);
-create index if not exists zfc_driver_classification_events_application_idx
-	on public.zfc_driver_classification_events(application_id, created_at desc);
-create index if not exists zfc_driver_classification_reports_application_idx
-	on public.zfc_driver_classification_reports(application_id, created_at desc);
-
-alter table public.zfc_driver_classification_config enable row level security;
-alter table public.zfc_driver_classification_config_history enable row level security;
-alter table public.zfc_driver_classifications enable row level security;
-alter table public.zfc_driver_classification_events enable row level security;
-alter table public.zfc_driver_classification_reports enable row level security;
-alter table public.zfc_driver_classification_report_files enable row level security;
-
-drop policy if exists zfc_driver_classification_config_tier3_all on public.zfc_driver_classification_config;
-create policy zfc_driver_classification_config_tier3_all
-	on public.zfc_driver_classification_config for all to authenticated
-	using (public.zfc_current_tier() >= 3)
-	with check (public.zfc_current_tier() >= 3);
-drop policy if exists zfc_driver_classification_config_history_tier3_select on public.zfc_driver_classification_config_history;
-create policy zfc_driver_classification_config_history_tier3_select
-	on public.zfc_driver_classification_config_history for select to authenticated
-	using (public.zfc_current_tier() >= 3);
-drop policy if exists zfc_driver_classifications_tier3_select on public.zfc_driver_classifications;
-create policy zfc_driver_classifications_tier3_select
-	on public.zfc_driver_classifications for select to authenticated
-	using (public.zfc_current_tier() >= 3);
-drop policy if exists zfc_driver_classification_events_tier3_select on public.zfc_driver_classification_events;
-create policy zfc_driver_classification_events_tier3_select
-	on public.zfc_driver_classification_events for select to authenticated
-	using (public.zfc_current_tier() >= 3);
-drop policy if exists zfc_driver_classification_reports_tier3_select on public.zfc_driver_classification_reports;
-create policy zfc_driver_classification_reports_tier3_select
-	on public.zfc_driver_classification_reports for select to authenticated
-	using (public.zfc_current_tier() >= 3);
-
-revoke all on public.zfc_driver_classification_config,
-public.zfc_driver_classification_config_history,
-public.zfc_driver_classifications,
-	public.zfc_driver_classification_events,
-	public.zfc_driver_classification_reports,
-	public.zfc_driver_classification_report_files
-	from anon, authenticated;
-grant select, insert, update, delete on public.zfc_driver_classification_config to authenticated;
-grant select on public.zfc_driver_classification_config_history to authenticated;
-grant select on public.zfc_driver_classifications,
-	public.zfc_driver_classification_events,
-	public.zfc_driver_classification_reports to authenticated;
-
-create or replace function public.zfc_record_driver_classification_config()
-returns trigger
-language plpgsql
-security definer
-set search_path = public, pg_temp
-as $$
-declare
-	actor uuid := coalesce(auth.uid(), new.updated_by);
-	actor_label text;
-begin
-	select coalesce(nullif(display_name,''), email) into actor_label
-	from public.zfc_user_profiles where id = actor;
-	insert into public.zfc_driver_classification_config_history (config, actor_id, actor_name)
-	values (new.config, actor, coalesce(actor_label, 'System'));
-	return new;
-end;
-$$;
-
-drop trigger if exists zfc_record_driver_classification_config on public.zfc_driver_classification_config;
-create trigger zfc_record_driver_classification_config
-	after insert or update on public.zfc_driver_classification_config
-	for each row execute function public.zfc_record_driver_classification_config();
-
-create or replace function public.zfc_save_driver_classification(
-	p_application_id uuid,
-	p_driver_data jsonb,
-	p_test_data jsonb,
-	p_performance_rating integer,
-	p_suggested_division text,
-	p_status text
-)
-returns uuid
-language plpgsql
-security definer
-set search_path = public, pg_temp
-as $$
-declare
-	actor_name text;
-	existing_status text;
-	action_name text;
-begin
-	if public.zfc_current_tier() < 3 or auth.uid() is null then
-		raise exception 'Driver Classification darf ausschließlich von Tier 3 bearbeitet werden.';
-	end if;
-	if p_application_id is null or p_status not in ('Pending', 'Under Review')
-		or p_performance_rating < 0 or p_performance_rating > 1000
-		or coalesce(p_driver_data->>'name', '') = '' then
-		raise exception 'Ungültige Bewerbungsdaten.';
-	end if;
-	select status into existing_status
-	from public.zfc_driver_classifications
-	where id = p_application_id
-	for update;
-	if existing_status in ('Approved', 'Rejected') then
-		raise exception 'Abgeschlossene Bewerbungen sind unveränderlich.';
-	end if;
-	select coalesce(display_name, email) into actor_name
-	from public.zfc_user_profiles where id = auth.uid();
-	action_name := case
-		when existing_status is null then 'Bewerbung erstellt'
-		when existing_status is distinct from p_status then 'Status geändert'
-		else 'Bewerbung aktualisiert'
-	end;
-	insert into public.zfc_driver_classifications (
-		id, driver_data, test_data, performance_rating, suggested_division, status, created_by, updated_at
-	) values (
-		p_application_id, p_driver_data, p_test_data, p_performance_rating,
-		coalesce(p_suggested_division, ''), p_status, auth.uid(), now()
-	)
-	on conflict (id) do update set
-		driver_data = excluded.driver_data,
-		test_data = excluded.test_data,
-		performance_rating = excluded.performance_rating,
-		suggested_division = excluded.suggested_division,
-		status = excluded.status,
-		updated_at = now();
-	insert into public.zfc_driver_classification_events (
-		application_id, action, actor_id, actor_name, reason, event_data
-	) values (
-		p_application_id, action_name, auth.uid(), coalesce(actor_name, 'Tier 3'), '',
-		jsonb_build_object('driver_data', p_driver_data, 'test_data', p_test_data,
-			'performance_rating', p_performance_rating, 'suggested_division', p_suggested_division,
-			'status', p_status)
-	);
-	return p_application_id;
-end;
-$$;
-
-create or replace function public.zfc_decide_driver_classification(
-	p_application_id uuid,
-	p_status text,
-	p_approved_division text,
-	p_reason text,
-	p_snapshot jsonb
-)
-returns uuid
-language plpgsql
-security definer
-set search_path = public, pg_temp
-as $$
-declare
-	application_row public.zfc_driver_classifications%rowtype;
-	actor_name text;
-	report_id uuid;
-	snapshot_data jsonb;
-	decision_time timestamptz := clock_timestamp();
-	document_number_value text;
-begin
-	if public.zfc_current_tier() < 3 or auth.uid() is null then
-		raise exception 'Nur Tier 3 darf eine Einstufung freigeben oder ablehnen.';
-	end if;
-	if p_status not in ('Approved', 'Rejected') or length(trim(coalesce(p_reason, ''))) = 0 then
-		raise exception 'Entscheidungsstatus und Begründung sind erforderlich.';
-	end if;
-	select * into application_row
-	from public.zfc_driver_classifications
-	where id = p_application_id
-	for update;
-	if not found then raise exception 'Bewerbung nicht gefunden.'; end if;
-	if application_row.status in ('Approved', 'Rejected') then
-		raise exception 'Für diese Bewerbung wurde bereits endgültig entschieden.';
-	end if;
-	if p_status = 'Approved' and (
-		length(trim(coalesce(p_approved_division, ''))) = 0
-		or p_snapshot is null
-		or p_snapshot->>'applicationId' is distinct from p_application_id::text
-		or p_snapshot->>'applicationNumber' is distinct from application_row.application_no
-		or p_snapshot->>'approvedDivision' is distinct from p_approved_division
-		or p_snapshot->>'decisionReason' is distinct from p_reason
-	) then
-		raise exception 'Der unveränderliche Freigabe-Snapshot ist unvollständig oder ungültig.';
-	end if;
-	select coalesce(display_name, email) into actor_name
-	from public.zfc_user_profiles where id = auth.uid();
-	if p_status = 'Approved' then
-		document_number_value := 'ZFC-CLASS-' ||
-			to_char(decision_time at time zone 'UTC', 'YYYY') || '-' ||
-			upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8));
-		snapshot_data := p_snapshot || jsonb_build_object(
-			'documentNumber', document_number_value,
-			'applicationNumber', application_row.application_no,
-			'applicationId', p_application_id::text,
-			'driver', application_row.driver_data,
-			'tests', application_row.test_data,
-			'suggestedDivision', application_row.suggested_division,
-			'approvedDivision', p_approved_division,
-			'decisionReason', p_reason,
-			'referenceConfig', (select config from public.zfc_driver_classification_config where id = 1),
-			'reviewer', jsonb_build_object('id', auth.uid()::text, 'name', coalesce(actor_name, 'Tier 3')),
-			'decidedAt', to_char(decision_time at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-			'status', p_status
-		);
-	end if;
-	update public.zfc_driver_classifications set
-		status = p_status,
-		approved_division = case when p_status = 'Approved' then p_approved_division else null end,
-		decision_reason = p_reason,
-		reviewed_by = auth.uid(),
-		reviewed_at = decision_time,
-		updated_at = decision_time
-	where id = p_application_id;
-	if p_status = 'Approved' then
-		insert into public.zfc_driver_classification_reports (
-			application_id, document_number, snapshot, created_by
-		) values (
-			p_application_id, document_number_value, snapshot_data, auth.uid()
-		) returning id into report_id;
-	end if;
-	insert into public.zfc_driver_classification_events (
-		application_id, action, actor_id, actor_name, reason, event_data
-	) values (
-		p_application_id, p_status, auth.uid(), coalesce(actor_name, 'Tier 3'), p_reason,
-		jsonb_build_object('approved_division', p_approved_division,
-			'performance_rating', application_row.performance_rating,
-			'suggested_division', application_row.suggested_division,
-			'report_id', report_id)
-	);
-	return report_id;
-end;
-$$;
-
-revoke all on function public.zfc_save_driver_classification(uuid, jsonb, jsonb, integer, text, text) from public, anon;
-revoke all on function public.zfc_decide_driver_classification(uuid, text, text, text, jsonb) from public, anon;
-grant execute on function public.zfc_save_driver_classification(uuid, jsonb, jsonb, integer, text, text) to authenticated;
-grant execute on function public.zfc_decide_driver_classification(uuid, text, text, text, jsonb) to authenticated;
-
-insert into storage.buckets(id, name, public, file_size_limit, allowed_mime_types)
-values ('zfc-driver-classification-reports', 'zfc-driver-classification-reports', false, 10485760, array['application/pdf'])
-on conflict (id) do update set public = false, file_size_limit = 10485760, allowed_mime_types = array['application/pdf'];
-
 revoke all on public.zfc_hr_staff_records, public.zfc_hr_reviews, public.zfc_hr_training from anon;
 grant select, insert, update, delete on public.zfc_hr_staff_records, public.zfc_hr_reviews, public.zfc_hr_training to authenticated;
 
@@ -2466,4 +2053,51 @@ create trigger zfc_stamp_case_financial_assessment
 	before insert or update on public.zfc_case_financial_assessments
 	for each row execute function public.zfc_stamp_case_financial_assessment();
 
+create or replace function public.zfc_reject_retired_a1_process()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+	old_state jsonb := '{}'::jsonb;
+	case_item jsonb;
+	old_case jsonb;
+	request_item jsonb;
+begin
+	if tg_op='UPDATE' then old_state:=coalesce(old.state,'{}'::jsonb); end if;
+	for case_item in select value from jsonb_array_elements(coalesce(new.state->'cases','[]'::jsonb))
+	loop
+		old_case:=null;
+		select value into old_case
+		from jsonb_array_elements(coalesce(old_state->'cases','[]'::jsonb)) as old_cases(value)
+		where value->>'id'=case_item->>'id'
+		limit 1;
+		if case_item->>'processCode'='A1' and old_case->>'processCode' is distinct from 'A1' then
+			raise exception 'Der Prozess A1 wurde entfernt und kann nicht mehr eröffnet werden.';
+		end if;
+		if coalesce(case_item->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb
+			and not coalesce(old_case->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb then
+			raise exception 'Der Prozess A1 wurde entfernt und kann nicht mehr verknüpft werden.';
+		end if;
+		for request_item in select value from jsonb_array_elements(coalesce(case_item->'processLinkRequests','[]'::jsonb))
+		loop
+			if request_item->>'processCode'='A1' and not exists (
+				select 1 from jsonb_array_elements(coalesce(old_case->'processLinkRequests','[]'::jsonb)) old_request
+				where old_request->>'id'=request_item->>'id'
+			) then
+				raise exception 'Der Prozess A1 wurde entfernt und kann nicht mehr angefragt werden.';
+			end if;
+		end loop;
+	end loop;
+	return new;
+end;
+$$;
+
+drop trigger if exists zfc_reject_retired_a1_process on public.zfc_app_state;
+create trigger zfc_reject_retired_a1_process
+	before insert or update of state on public.zfc_app_state
+	for each row execute function public.zfc_reject_retired_a1_process();
+revoke all on function public.zfc_reject_retired_a1_process() from public, anon, authenticated;
+delete from public.zfc_process_document_requirements where process_code='A1';
 notify pgrst, 'reload schema';

@@ -15,7 +15,7 @@ const schema = fs.readFileSync(require.resolve('../supabase_schema.sql'), 'utf8'
 const app = fs.readFileSync(require.resolve('../app.js'), 'utf8');
 
 test('every listed process has exactly five required documents', () => {
-  assert.equal(Object.keys(DOCUMENT_PROCESS_MATRIX).length, 30);
+  assert.equal(Object.keys(DOCUMENT_PROCESS_MATRIX).length, 29);
   for (const [processCode, documents] of Object.entries(DOCUMENT_PROCESS_MATRIX)) {
     assert.equal(documents.length, 5, `${processCode} must define five documents`);
     for (const title of documents) {
@@ -39,7 +39,7 @@ test('catalog contains distinct guided forms for the required report types', () 
 
 test('all types have help text, fields, valid groups, and server-matching approval flags', () => {
   const approvalRule = /(entscheidung|freigabe|beschluss|unabhangig|unabhaengig|prufauftrag|pruefauftrag|freigegeben|freigegebene|abschlussfreigabe|offentliche-entscheidungsfassung|oeffentliche-entscheidungsfassung)/;
-  assert.equal(ALL_DOCUMENT_TYPES.length, 191);
+  assert.equal(ALL_DOCUMENT_TYPES.length, 186);
   for (const type of ALL_DOCUMENT_TYPES) {
     assert.ok(DOCUMENT_GROUPS.includes(type.group), `${type.key} has an unknown group`);
     assert.ok(type.description.trim(), `${type.key} has no purpose text`);

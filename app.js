@@ -6,7 +6,7 @@ const SUPABASE_CONFIG = {
   url: 'https://ktvcwyrsayoggjiapnln.supabase.co', // Project URL, z. B. https://xxxx.supabase.co
   anonKey: 'sb_publishable_EEM214FLVj0CA3hkPq4BCg_1dFAZmvr' // anon/public key
 };
-const DB = { teams: [], drivers: [], cases: [], caseDocuments: [], caseDocumentEvents: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [], classificationApplicants: [], classificationConfig: null, classificationEvents: [], classificationReports: [], classificationConfigHistory: [] };
+const DB = { teams: [], drivers: [], cases: [], caseDocuments: [], caseDocumentEvents: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
 let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null, lastSyncError:null };
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
@@ -14,7 +14,6 @@ let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected
 const CASE_DOCUMENTS = { loading:new Set(), loaded:new Set(), errorByCase:new Map(), saving:false };
 const CASE_FINANCIAL = { loading:new Set(), loaded:new Set(), records:new Map(), errors:new Map() };
 const HR = { profiles:[], staffRecords:[], reviews:[], training:[], activity:[], loading:false, loaded:false, refreshQueued:false, error:'', editingReviewId:null, editingTrainingId:null };
-const CLASSIFICATION = { loading:false, error:'' };
 let JARVES_BOOT_TIMERS=[];
 let syncQueue = Promise.resolve();
 
@@ -433,7 +432,6 @@ async function initSupabase(){
       await syncAppState();
       SUPABASE.baseState=cloneState(appState());
     }
-    if(Number(AUTH.profile.access_tier)>=3) await loadDriverClassificationData();
     const tierEscalations=await SUPABASE.client.from('zfc_tier_escalations').select('id,target_tier,data,updated_at').order('updated_at',{ascending:false});
     if(tierEscalations.error) throw tierEscalations.error;
     DB.escalations=tierEscalations.data.map(row=>({...row.data,targetTier:row.target_tier}));
@@ -764,7 +762,6 @@ const PROCESS_CATALOG = [
     ['V3','Regeln und Prozesse ändern','Änderung eines Regelwerks oder verbindlichen Prozesses.','Änderungsvorschlag, Auswirkung, fachliche Prüfung, CEO-Freigabe und Versionsverlauf.'],
     ['V4','Team- und Fahrerwechsel','Bearbeitung eines Teamwechsels oder einer Fahrerzuordnung.','Antrag, Regelkonformität, Freigabe und nachvollziehbare Historie.'],
     ['A2','Entscheidung veröffentlichen','Prüfung und Freigabe einer öffentlichen Entscheidungsfassung.','Vertraulichkeitsprüfung, bereinigte Fassung, Veröffentlichungsfreigabe und Nachweis.'],
-    ['A1','Archivierung','Abschluss und sichere Ablage einer Akte.','Vollständigkeit, offene Pflichtaufgaben, Freigabestatus und Aufbewahrung.']
   ]},
   {group:'finance',name:'Finanzen',processes:[
     ['F1','Rechnungsfreigabe','Prüfung und Freigabe einer Rechnung oder Zahlung.','Betrag, Zahlungsempfänger, Beleg, Budget und Freigabeentscheidung.'],
@@ -834,7 +831,7 @@ const PROCESS_REQUIRED_FIELDS={
   finance:['counterparty','amount'],
   esport:['team','goal']
 };
-const TIER1_PROCESS_CODES=new Set(['D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2','A1']);
+const TIER1_PROCESS_CODES=new Set(['D1','D2','D3','D5','D6','R1','R2','R3','R6','R7','R8','V1','V2','V4','F1','F2']);
 const TIER3_PROCESS_CODES=new Set(['D4','D8','D9']);
 function currentTier(){ return Number(AUTH.profile?.access_tier||0); }
 function isCeoProfile(){ return currentTier()===3&&String(AUTH.profile?.position||'').trim().toLowerCase()==='ceo'; }
@@ -848,6 +845,7 @@ function canStartProcess(code){
   return tier===1&&TIER1_PROCESS_CODES.has(code);
 }
 function showAccessNotice(message){
+  hideSaveToast();
   const notice=document.getElementById('accessNotice');
   if(!notice){ window.alert(message); return; }
   notice.textContent=message;
@@ -858,6 +856,41 @@ function showAccessNotice(message){
     notice.classList.remove('is-visible');
     notice.hidden=true;
   },6500);
+}
+function hideSaveToast(){
+  const toast=document.getElementById('saveToast');
+  if(!toast) return;
+  toast.classList.remove('is-visible','is-saving');
+  clearTimeout(showSaveToast.timer);
+  setTimeout(()=>{ if(!toast.classList.contains('is-visible')) toast.hidden=true; },220);
+}
+function showSavingToast(message){
+  const toast=document.getElementById('saveToast'), text=document.getElementById('saveToastMessage');
+  if(!toast||!text) return;
+  text.textContent=message;
+  const mark=toast.querySelector('.save-toast-mark');
+  if(mark) mark.textContent='';
+  toast.hidden=false;
+  toast.classList.add('is-saving');
+  toast.classList.remove('is-visible');
+  requestAnimationFrame(()=>toast.classList.add('is-visible'));
+  clearTimeout(showSaveToast.timer);
+}
+function showSaveToast(message){
+  const toast=document.getElementById('saveToast'), text=document.getElementById('saveToastMessage');
+  if(!toast||!text) return;
+  text.textContent=message;
+  const mark=toast.querySelector('.save-toast-mark');
+  if(mark) mark.textContent='✓';
+  toast.hidden=false;
+  toast.classList.remove('is-saving');
+  toast.classList.remove('is-visible');
+  requestAnimationFrame(()=>toast.classList.add('is-visible'));
+  clearTimeout(showSaveToast.timer);
+  showSaveToast.timer=setTimeout(()=>{
+    toast.classList.remove('is-visible');
+    setTimeout(()=>{ if(!toast.classList.contains('is-visible')) toast.hidden=true; },220);
+  },3200);
 }
 function workflowApprovalTier(code){
   if(TIER3_PROCESS_CODES.has(code)||code==='07b'||code==='V2'||code==='V3'||code==='F1'||code==='F2') return 3;
@@ -1234,332 +1267,6 @@ function pageEsportSetup(){
 function saveEsportSetup(track){ const values={}; SETUP_FIELDS.forEach((field,index)=>values['s'+index]=document.getElementById('s'+index)?.value||''); const current=DB.esportSetups.find(item=>item.track===track); const setup={id:current?.id||uid(),track,name:document.getElementById('setup_name')?.value||'Race Setup',values,updatedAt:new Date().toISOString()}; if(current) Object.assign(current,setup); else DB.esportSetups.push(setup); persist.esportSetups(); alert(`Setup für ${track} gespeichert.`); render(); }
 function deleteEsportSetup(track){ const setup=DB.esportSetups.find(item=>item.track===track); if(!setup) return; if(!confirm(`Setup für ${track} löschen?`)) return; DB.esportSetups=DB.esportSetups.filter(item=>item.track!==track); persist.esportSetups(); render(); }
 
-/* ======================= DRIVER CLASSIFICATION ======================= */
-function defaultClassificationConfig(){
-  return {
-    tracks:[
-      {id:'australia',name:'Australien',referenceSeconds:null},
-      {id:'bahrain',name:'Bahrain',referenceSeconds:null},
-      {id:'belgium',name:'Belgien',referenceSeconds:null}
-    ],
-    weights:{timeTrial:40,racePace:25,consistency:20,safety:15},
-    divisions:[
-      {name:'D1',minRating:800,minSafety:80},
-      {name:'D2',minRating:600,minSafety:60},
-      {name:'D3',minRating:0,minSafety:0}
-    ],
-    timePenaltyPerPercent:100
-  };
-}
-function classificationConfig(){
-  return DB.classificationConfig||defaultClassificationConfig();
-}
-function classificationTrackRows(config){
-  return config.tracks.map((track,index)=>`<div class="classification-track-row">
-    <label>${esc(track.name)}${index<3?' · Pflichtstrecke':' · Zusatzstrecke'}</label>
-    <input type="number" min="1" step="0.001" id="classification_ref_${esc(track.id)}" value="${track.referenceSeconds??''}" placeholder="Referenzzeit in Sekunden">
-    ${index>=3?`<button class="btn small danger" type="button" onclick="removeClassificationTrack('${esc(track.id)}')">Entfernen</button>`:''}
-  </div>`).join('');
-}
-function classificationDivisionRows(config){
-  return config.divisions.map((division,index)=>`<div class="classification-division-row">
-    <input aria-label="Divisionsname" id="classification_division_name_${index}" value="${escAttr(division.name)}">
-    <label>Mindestpunkte <input type="number" min="0" max="1000" id="classification_division_rating_${index}" value="${Number(division.minRating)||0}"></label>
-    <label>Safety min. <input type="number" min="0" max="100" id="classification_division_safety_${index}" value="${Number(division.minSafety)||0}"></label>
-    ${index>=config.divisions.length-1?`<button class="btn small danger" type="button" onclick="removeClassificationDivision(${index})">Entfernen</button>`:''}
-  </div>`).join('');
-}
-function readClassificationSettingsForm(){
-  const config=classificationConfig(), value=id=>document.getElementById(id)?.value;
-  return {
-    ...config,
-    tracks:config.tracks.map(track=>({...track,referenceSeconds:value(`classification_ref_${track.id}`)===''?null:Number(value(`classification_ref_${track.id}`))})),
-    weights:{
-      timeTrial:Number(value('classification_weight_timeTrial')??config.weights.timeTrial),
-      racePace:Number(value('classification_weight_racePace')??config.weights.racePace),
-      consistency:Number(value('classification_weight_consistency')??config.weights.consistency),
-      safety:Number(value('classification_weight_safety')??config.weights.safety)
-    },
-    divisions:config.divisions.map((division,index)=>({
-      name:value(`classification_division_name_${index}`)??division.name,
-      minRating:Number(value(`classification_division_rating_${index}`)??division.minRating),
-      minSafety:Number(value(`classification_division_safety_${index}`)??division.minSafety)
-    })),
-    timePenaltyPerPercent:Number(value('classification_time_penalty')??config.timePenaltyPerPercent)
-  };
-}
-function pageClassificationSettings(){
-  const config=classificationConfig();
-  const history=DB.classificationConfigHistory.slice(0,8);
-  return `<div class="pagehead"><div><div class="eyebrow">Tier 3 · Fahrerbewertung</div><h1>Referenzdaten &amp; Kriterien</h1><p>Bewertungsformeln: Zeit-Score = max(0, 1000 − positive Zeitabweichung in % × Strafpunkte je Prozent). Gesamtpunkte = gewichteter Mittelwert der Kategorie-Scores.</p></div><div class="actions"><button class="btn" onclick="go('driver-classification')">← Bewerber</button></div></div>
-    ${CLASSIFICATION.error?`<div class="classification-error">${esc(CLASSIFICATION.error)}</div>`:''}
-    <section class="panel classification-config-panel"><h2>Referenzzeiten <b>(Sekunden)</b></h2><p>Die drei Pflichtstrecken benötigen eine Referenzzeit, bevor Bewerbungen berechnet werden können. Weitere Strecken lassen sich ergänzen.</p><div class="classification-track-list">${classificationTrackRows(config)}</div>
-      <div class="classification-inline-add"><input id="classification_new_track" placeholder="Weitere Strecke"><button class="btn" onclick="addClassificationTrack()">Strecke hinzufügen</button></div>
-    </section>
-    <section class="panel classification-config-panel"><h2>Gewichtung <b>(Prozent)</b></h2><p>Die Gewichte werden bei der Berechnung auf ihre Summe normiert.</p><div class="classification-weight-grid">
-      <label>Time Trial<input type="number" min="0" max="100" id="classification_weight_timeTrial" value="${Number(config.weights.timeTrial)||0}"></label>
-      <label>Race Pace<input type="number" min="0" max="100" id="classification_weight_racePace" value="${Number(config.weights.racePace)||0}"></label>
-      <label>Konstanz<input type="number" min="0" max="100" id="classification_weight_consistency" value="${Number(config.weights.consistency)||0}"></label>
-      <label>Safety<input type="number" min="0" max="100" id="classification_weight_safety" value="${Number(config.weights.safety)||0}"></label>
-      <label>Strafpunkte je +1 % Abweichung<input type="number" min="1" max="1000" id="classification_time_penalty" value="${Number(config.timePenaltyPerPercent)||100}"></label>
-    </div></section>
-    <section class="panel classification-config-panel"><h2>Divisionsgrenzen</h2><div class="classification-division-list">${classificationDivisionRows(config)}</div><button class="btn" onclick="addClassificationDivision()">Division hinzufügen</button></section>
-    <div class="classification-actions"><button class="btn primary" onclick="saveClassificationConfig()">Referenzdaten speichern</button></div>
-    ${history.length?`<section class="panel classification-config-history"><h2>Änderungsverlauf <b>Referenzdaten</b></h2>${history.map(entry=>`<div><strong>${fmtDateTime(entry.created_at)}</strong><span>${esc(entry.actor_name||'Tier 3')}</span><small>${(entry.config?.tracks||[]).length} Strecken · ${(entry.config?.divisions||[]).length} Divisionen · Gewichtungen ${esc(JSON.stringify(entry.config?.weights||{}))}</small></div>`).join('')}</section>`:''}`;
-}
-function pageClassificationApplicant(applicant){
-  const item=applicant||{id:crypto.randomUUID(),application_no:'Wird beim Speichern vergeben',status:'Pending',driver_data:{},test_data:{}};
-  const locked=['Approved','Rejected'].includes(item.status);
-  const driver=item.driver_data||{}, tests=item.test_data||{};
-  const tracks=classificationConfig().tracks||[];
-  const registeredDriverId=driver.registeredDriverId||'';
-  const trials=tracks.map((track,index)=>`<label>${esc(track.name)} ${index<3?'*':''}<input type="number" min="1" step="0.001" id="classification_trial_${esc(track.id)}" value="${escAttr(tests.timeTrials?.[track.id]??'')}" placeholder="Sekunden"></label>`).join('');
-  const calculation=applicant?calculateClassification(driver,tests,classificationConfig()):null;
-  const events=DB.classificationEvents.filter(event=>event.application_id===item.id).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
-  const reports=DB.classificationReports.filter(report=>report.application_id===item.id);
-  const decisionActions=locked?'':`<button class="btn" onclick="setClassificationStatus('${item.id}','Under Review')">In Prüfung nehmen</button>
-    <button class="btn primary" onclick="decideClassification('${item.id}','Approved')">Freigeben</button>
-    <button class="btn danger" onclick="decideClassification('${item.id}','Rejected')">Ablehnen</button>`;
-  return `<div class="pagehead"><div><div class="eyebrow">Driver Classification · ${esc(item.application_no||'Neue Bewerbung')}</div><h1>${applicant?'Bewerber bearbeiten':'Fahrer hinzufügen'}</h1><p>Bewertungen werden aus den gespeicherten Referenzzeiten und Gewichtungen berechnet.</p></div><div class="actions"><button class="btn" onclick="go('driver-classification')">← Übersicht</button></div></div>
-    ${CLASSIFICATION.error?`<div class="classification-error">${esc(CLASSIFICATION.error)}</div>`:''}
-    <section class="panel classification-form"><div class="classification-form-intro"><div><div class="eyebrow">Fahrerprofil verknüpfen</div><h2>Fahrerstammdaten</h2><p>Vorhandene Fahrer aus der Fahrerübersicht übernehmen oder anhand der Lizenznummer finden.</p></div><span class="classification-registry-count">${DB.drivers.length} registriert</span></div>
-    <div class="classification-registry-grid">
-      <label>Registrierten Fahrer auswählen
-        <select id="classification_registered_driver" onchange="chooseRegisteredClassificationDriver(this.value)">
-          <option value="">Manuell erfassen / kein registrierter Fahrer</option>${registeredClassificationDriverOptions(registeredDriverId)}
-        </select>
-      </label>
-      <label>Nach Lizenznummer suchen
-        <input id="classification_license_search" value="${escAttr(driver.licenseNo||'')}" oninput="searchRegisteredClassificationDriver()" placeholder="Lizenznummer eingeben" autocomplete="off">
-      </label>
-    </div>
-    <div class="classification-form-grid">
-      <label>Fahrername *<input id="classification_name" value="${escAttr(driver.name||'')}" autocomplete="name"></label>
-      <label>EA-ID<input id="classification_ea_id" value="${escAttr(driver.eaId||'')}"></label>
-      <label>Discord-ID<input id="classification_discord_id" value="${escAttr(driver.discordId||'')}"></label>
-      <label>E-Mail<input type="email" id="classification_email" value="${escAttr(driver.email||'')}"></label>
-      <label>Plattform<input id="classification_platform" value="${escAttr(driver.platform||'')}"></label>
-      <label>Weitere Stammdaten<input id="classification_extra" value="${escAttr(driver.extra||'')}" placeholder="Team, Zeitzone, Notizen"></label>
-    </div><h2>Fahrertests</h2><div class="classification-form-grid">${trials}
-      <label>Race Pace (0–1.000)<input type="number" min="0" max="1000" id="classification_race_pace" value="${escAttr(tests.racePace??'')}"></label>
-      <label>Konstanz (0–100)<input type="number" min="0" max="100" id="classification_consistency" value="${escAttr(tests.consistency??'')}"></label>
-      <label>Safety Rating (0–100)<input type="number" min="0" max="100" id="classification_safety" value="${escAttr(tests.safetyRating??'')}"></label>
-    </div><label>Tester-Notizen<textarea id="classification_test_notes" rows="3">${esc(tests.notes||'')}</textarea></label>
-      <div class="classification-actions"><button class="btn" onclick="previewClassification()">Berechnungsvorschau</button>${locked?'':`<button class="btn primary" onclick="saveDriverClassification('${item.id}')">Bewerbung speichern</button>`}${applicant?decisionActions:''}</div>
-    </section>
-    <div id="classification_preview">${calculation?classificationCalculationPanel(calculation):''}</div>
-    ${item.status==='Approved'?`<section class="panel"><h2>Freigegebener Bericht</h2>${reports.map(report=>`<div class="classification-report-row"><span>${esc(report.document_number||report.id)} · ${fmtDate(String(report.created_at||'').slice(0,10))}</span><button class="btn small primary" onclick="downloadClassificationReport('${report.id}')">PDF öffnen / herunterladen</button></div>`).join('')||'<p>Für diese Freigabe wurde noch kein Bericht registriert.</p>'}</section>`:''}
-    ${events.length?`<section class="panel"><h2>Änderungs- &amp; Entscheidungsverlauf</h2><div class="classification-history">${events.map(event=>`<article><strong>${esc(event.action)}</strong><span>${fmtDateTime(event.created_at)} · ${esc(event.actor_name||'Tier 3')}</span><p>${esc(event.reason||'Änderung gespeichert')}</p></article>`).join('')}</div></section>`:''}`;
-}
-function pageDriverClassification(){
-  if(ROUTE.id==='settings') return pageClassificationSettings();
-  if(ROUTE.id==='new') return pageClassificationApplicant(null);
-  if(ROUTE.id){ const applicant=DB.classificationApplicants.find(item=>item.id===ROUTE.id); if(applicant) return pageClassificationApplicant(applicant); }
-  const applicants=[...DB.classificationApplicants].sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
-  const rows=applicants.map(item=>`<tr><td><button class="classification-link" onclick="go('driver-classification','${item.id}')">${esc(item.application_no||'—')}</button><small>${esc(item.driver_data?.name||'Unbenannt')}</small></td><td><span class="classification-status status-${String(item.status||'Pending').toLowerCase().replace(/\s+/g,'-')}">${esc(item.status||'Pending')}</span></td><td>${Number(item.performance_rating||0)} / 1.000</td><td>${esc(item.suggested_division||'—')}</td><td>${esc(item.approved_division||'—')}</td><td>${fmtDateTime(item.updated_at)}</td><td><button class="btn small" onclick="go('driver-classification','${item.id}')">Öffnen</button></td></tr>`).join('');
-  return `<div class="pagehead"><div><div class="eyebrow">Tier 3 · Bewerberverwaltung</div><h1>Driver Classification</h1><p>Fahrertests erfassen, automatische Einstufung prüfen und Entscheidungen revisionssicher dokumentieren.</p></div><div class="actions"><button class="btn" onclick="go('driver-classification','settings')">Referenzdaten &amp; Kriterien</button><button class="btn primary" onclick="go('driver-classification','new')">+ Fahrer hinzufügen</button></div></div>
-    ${CLASSIFICATION.error?`<div class="classification-error">${esc(CLASSIFICATION.error)}</div>`:''}
-    <div class="grid cols-4 classification-stats"><div class="stat"><div class="n">${applicants.length}</div><div class="l">Bewerbungen</div></div><div class="stat amber"><div class="n">${applicants.filter(item=>['Pending','Under Review'].includes(item.status)).length}</div><div class="l">Offen</div></div><div class="stat green"><div class="n">${applicants.filter(item=>item.status==='Approved').length}</div><div class="l">Freigegeben</div></div><div class="stat red"><div class="n">${applicants.filter(item=>item.status==='Rejected').length}</div><div class="l">Abgelehnt</div></div></div>
-    <section class="panel classification-table-panel"><div class="classification-table-wrap"><table><thead><tr><th>Bewerbung / Fahrer</th><th>Status</th><th>Rating</th><th>Vorschlag</th><th>Freigegeben</th><th>Zuletzt geändert</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7">Noch keine Bewerbungen vorhanden.</td></tr>'}</tbody></table></div></section>`;
-}
-function classificationCalculationPanel(result){
-  return `<section class="panel classification-preview"><h2>Berechnungsergebnis</h2><div class="classification-result-score"><strong>${result.rating}</strong><span>/ 1.000 · Vorschlag: <b>${esc(result.suggestedDivision||'Keine Division')}</b></span></div>
-    <div class="classification-deviation-list">${result.tracks.map(track=>`<div><span>${esc(track.name)}</span><strong>${track.deviation===null?'Keine Daten':`${track.deviation>=0?'+':''}${track.deviation.toFixed(3)} %`}</strong><small>Fahrer: ${track.driverSeconds??'—'} s · Referenz: ${track.referenceSeconds??'—'} s · Score: ${track.score??'—'}</small></div>`).join('')}</div>
-    <p>Time Trial ${result.categoryScores.timeTrial} · Race Pace ${result.categoryScores.racePace} · Konstanz ${result.categoryScores.consistency} · Safety ${result.categoryScores.safety} · Gewichtete Formel.</p></section>`;
-}
-function calculateClassification(driver,tests,config){
-  const tracks=config.tracks.map((track,index)=>{
-    const ref=Number(track.referenceSeconds), seconds=Number(tests.timeTrials?.[track.id]);
-    const valid=Number.isFinite(ref)&&ref>0&&Number.isFinite(seconds)&&seconds>0;
-    const deviation=valid?((seconds-ref)/ref)*100:null;
-    const score=valid?Math.max(0,Math.min(1000,Math.round(1000-Math.max(0,deviation)*Number(config.timePenaltyPerPercent||100)))):null;
-    return {id:track.id,name:track.name,referenceSeconds:valid?ref:null,driverSeconds:valid?seconds:null,deviation,score,required:index<3};
-  });
-  const validTracks=tracks.filter(track=>track.score!==null);
-  const bounded=(value,max)=>Math.max(0,Math.min(max,Number(value)||0));
-  const categoryScores={
-    timeTrial:validTracks.length?Math.round(validTracks.reduce((sum,track)=>sum+track.score,0)/validTracks.length):0,
-    racePace:Math.round(bounded(tests.racePace,1000)),
-    consistency:Math.round(bounded(tests.consistency,100)*10),
-    safety:Math.round(bounded(tests.safetyRating,100)*10)
-  };
-  const weights=config.weights||{};
-  const weightTotal=Object.values(weights).reduce((sum,value)=>sum+Math.max(0,Number(value)||0),0);
-  const rating=weightTotal?Math.round(Object.entries(categoryScores).reduce((sum,[key,score])=>sum+score*Math.max(0,Number(weights[key])||0),0)/weightTotal):0;
-  const suggestedDivision=[...(config.divisions||[])].sort((a,b)=>Number(b.minRating)-Number(a.minRating)).find(division=>rating>=Number(division.minRating||0)&&Number(tests.safetyRating||0)>=Number(division.minSafety||0))?.name||'';
-  return {rating,categoryScores,tracks,suggestedDivision,weightTotal};
-}
-function classificationFormData(){
-  const value=id=>document.getElementById(id)?.value?.trim()||'';
-  const timeTrials={};
-  classificationConfig().tracks.forEach(track=>{ const input=document.getElementById(`classification_trial_${track.id}`); if(input&&input.value!=='') timeTrials[track.id]=Number(input.value); });
-  return {
-    driver:{name:value('classification_name'),eaId:value('classification_ea_id'),discordId:value('classification_discord_id'),email:value('classification_email'),platform:value('classification_platform'),extra:value('classification_extra'),registeredDriverId:value('classification_registered_driver'),licenseNo:value('classification_license_search')},
-    tests:{timeTrials,racePace:value('classification_race_pace')===''?null:Number(value('classification_race_pace')),consistency:value('classification_consistency')===''?null:Number(value('classification_consistency')),safetyRating:value('classification_safety')===''?null:Number(value('classification_safety')),notes:value('classification_test_notes')}
-  };
-}
-function registeredClassificationDriverOptions(selectedId){
-  return [...DB.drivers].sort((a,b)=>driverName(a).localeCompare(driverName(b))).map(driver=>{
-    const team=teamById(driver.teamId)?.name||'Ohne Team';
-    const license=driver.licenseNo||'Keine Lizenznummer';
-    return `<option value="${escAttr(driver.id)}" ${driver.id===selectedId?'selected':''}>${esc(driverName(driver))} · ${esc(license)} · ${esc(team)}</option>`;
-  }).join('');
-}
-function chooseRegisteredClassificationDriver(driverId){
-  const driver=driverById(driverId);
-  if(!driver) return;
-  const value=(id,text)=>{ const input=document.getElementById(id); if(input) input.value=text||''; };
-  value('classification_name',driverName(driver));
-  value('classification_ea_id',driver.simId||'');
-  value('classification_discord_id',driver.discord||'');
-  value('classification_email',driver.email||'');
-  value('classification_platform',driver.platform||'');
-  value('classification_license_search',driver.licenseNo||'');
-  value('classification_extra',[
-    driver.teamId?`Team: ${teamById(driver.teamId)?.name||'Unbekannt'}`:'',
-    driver.division?`Division: ${driver.division}`:''
-  ].filter(Boolean).join(' · '));
-}
-function searchRegisteredClassificationDriver(){
-  const search=document.getElementById('classification_license_search');
-  const select=document.getElementById('classification_registered_driver');
-  const query=String(search?.value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(!query||!select) return;
-  const driver=DB.drivers.find(item=>String(item.licenseNo||'').toUpperCase().replace(/[^A-Z0-9]/g,'')===query);
-  select.value=driver?.id||'';
-  if(driver) chooseRegisteredClassificationDriver(driver.id);
-}
-async function loadDriverClassificationData(){
-  if(!SUPABASE.client||currentTier()<3) return;
-  CLASSIFICATION.loading=true; CLASSIFICATION.error='';
-  try{
-    const [configResult,applicantsResult,eventsResult,reportsResult,configHistoryResult]=await Promise.all([
-      SUPABASE.client.from('zfc_driver_classification_config').select('config').eq('id',1).maybeSingle(),
-      SUPABASE.client.from('zfc_driver_classifications').select('*').order('updated_at',{ascending:false}),
-      SUPABASE.client.from('zfc_driver_classification_events').select('*').order('created_at',{ascending:false}).limit(500),
-      SUPABASE.client.from('zfc_driver_classification_reports').select('id,application_id,document_number,created_at').order('created_at',{ascending:false}),
-      SUPABASE.client.from('zfc_driver_classification_config_history').select('config,actor_name,created_at').order('created_at',{ascending:false}).limit(20)
-    ]);
-    for(const result of [configResult,applicantsResult,eventsResult,reportsResult,configHistoryResult]) if(result.error) throw result.error;
-    DB.classificationConfig=configResult.data?.config||defaultClassificationConfig();
-    DB.classificationApplicants=applicantsResult.data||[];
-    DB.classificationEvents=eventsResult.data||[];
-    DB.classificationReports=reportsResult.data||[];
-    DB.classificationConfigHistory=configHistoryResult.data||[];
-  }catch(error){
-    const detail=String(error.message||error);
-    CLASSIFICATION.error=/zfc_driver_classification_config|schema cache|PGRST205/i.test(`${error.code||''} ${detail}`)
-      ?`Driver Classification konnte nicht geladen werden: Die Supabase-Tabelle „zfc_driver_classification_config“ fehlt oder ist noch nicht im Schema-Cache. Bitte die Migration „supabase/migrations/20261109000000_driver_classification_and_case_financial_assessments.sql“ im Supabase SQL Editor ausführen und danach die Seite neu laden.`
-      :`Driver Classification konnte nicht geladen werden: ${detail}`;
-    console.error(CLASSIFICATION.error,error);
-  }finally{ CLASSIFICATION.loading=false; }
-}
-async function saveClassificationConfig(){
-  if(currentTier()<3) return showAccessNotice('Nur Tier 3 darf Referenzdaten bearbeiten.');
-  const old=classificationConfig(), value=id=>document.getElementById(id)?.value??'';
-  const tracks=old.tracks.map(track=>({...track,referenceSeconds:value(`classification_ref_${track.id}`)===''?null:Number(value(`classification_ref_${track.id}`))}));
-  const divisions=old.divisions.map((division,index)=>({name:value(`classification_division_name_${index}`).trim(),minRating:Number(value(`classification_division_rating_${index}`)),minSafety:Number(value(`classification_division_safety_${index}`))}));
-  const weights={timeTrial:Number(value('classification_weight_timeTrial')),racePace:Number(value('classification_weight_racePace')),consistency:Number(value('classification_weight_consistency')),safety:Number(value('classification_weight_safety'))};
-  if(tracks.length<3||new Set(tracks.map(track=>track.id)).size!==tracks.length||new Set(tracks.map(track=>track.name.toLowerCase())).size!==tracks.length||tracks.some(track=>!track.name.trim()||(track.referenceSeconds!==null&&(!Number.isFinite(track.referenceSeconds)||track.referenceSeconds<=0)))||!tracks.slice(0,3).every(track=>Number.isFinite(track.referenceSeconds)&&track.referenceSeconds>0)||Object.values(weights).some(weight=>!Number.isFinite(weight)||weight<0)||!Object.values(weights).some(Boolean)||!divisions.length||new Set(divisions.map(division=>division.name)).size!==divisions.length||divisions.some(division=>!division.name||!Number.isFinite(division.minRating)||division.minRating<0||division.minRating>1000||!Number.isFinite(division.minSafety)||division.minSafety<0||division.minSafety>100)){
-    return showAccessNotice('Bitte gültige Pflicht-Referenzzeiten, nichtnegative Gewichte und gültige Divisionsgrenzen eintragen.');
-  }
-  const config={...old,tracks,weights,divisions,timePenaltyPerPercent:Number(value('classification_time_penalty'))};
-  if(!Number.isFinite(config.timePenaltyPerPercent)||config.timePenaltyPerPercent<=0) return showAccessNotice('Der Strafwert je Zeitabweichung muss größer als 0 sein.');
-  const result=await SUPABASE.client.from('zfc_driver_classification_config').upsert({id:1,config,updated_by:AUTH.profile.id,updated_at:new Date().toISOString()});
-  if(result.error){ CLASSIFICATION.error=`Referenzdaten konnten nicht gespeichert werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
-  DB.classificationConfig=config;
-  const openApplicants=DB.classificationApplicants.filter(applicant=>['Pending','Under Review'].includes(applicant.status));
-  const recalculations=await Promise.all(openApplicants.map(applicant=>{
-    const calculation=calculateClassification(applicant.driver_data,applicant.test_data,config);
-    return SUPABASE.client.rpc('zfc_save_driver_classification',{
-      p_application_id:applicant.id,p_driver_data:applicant.driver_data,p_test_data:applicant.test_data,
-      p_performance_rating:calculation.rating,p_suggested_division:calculation.suggestedDivision,p_status:applicant.status
-    });
-  }));
-  const recalculationError=recalculations.find(entry=>entry.error)?.error;
-  if(recalculationError){
-    CLASSIFICATION.error=`Referenzdaten wurden gespeichert, aber eine oder mehrere offenen Bewerbungen konnten nicht neu berechnet werden: ${recalculationError.message}`;
-    console.error(CLASSIFICATION.error,recalculationError);
-  }else CLASSIFICATION.error='';
-  await loadDriverClassificationData(); render();
-}
-function addClassificationTrack(){
-  const input=document.getElementById('classification_new_track'), name=input?.value.trim();
-  if(!name) return showAccessNotice('Bitte einen Streckennamen eingeben.');
-  const config=readClassificationSettingsForm();
-  if(config.tracks.some(track=>track.name.toLowerCase()===name.toLowerCase())) return showAccessNotice('Diese Strecke ist bereits vorhanden.');
-  DB.classificationConfig={...config,tracks:[...config.tracks,{id:`track-${crypto.randomUUID()}`,name,referenceSeconds:null}]}; render();
-}
-function removeClassificationTrack(id){
-  const config=readClassificationSettingsForm();
-  if(config.tracks.findIndex(track=>track.id===id)<3) return;
-  DB.classificationConfig={...config,tracks:config.tracks.filter(track=>track.id!==id)}; render();
-}
-function addClassificationDivision(){
-  const config=readClassificationSettingsForm();
-  DB.classificationConfig={...config,divisions:[...config.divisions,{name:`D${config.divisions.length+1}`,minRating:0,minSafety:0}]}; render();
-}
-function removeClassificationDivision(index){
-  const config=readClassificationSettingsForm();
-  if(config.divisions.length<=1) return showAccessNotice('Mindestens eine Division muss bestehen bleiben.');
-  DB.classificationConfig={...config,divisions:config.divisions.filter((_,divisionIndex)=>divisionIndex!==index)}; render();
-}
-function previewClassification(){
-  const data=classificationFormData(), result=calculateClassification(data.driver,data.tests,classificationConfig());
-  const target=document.getElementById('classification_preview');
-  if(target) target.innerHTML=classificationCalculationPanel(result);
-}
-async function saveDriverClassification(id){
-  if(currentTier()<3) return showAccessNotice('Nur Tier 3 darf Bewerbungen bearbeiten.');
-  const data=classificationFormData(), config=classificationConfig(), result=calculateClassification(data.driver,data.tests,config);
-  if(!data.driver.name) return showAccessNotice('Der Fahrername ist erforderlich.');
-  if(config.tracks.slice(0,3).some(track=>!Number.isFinite(Number(track.referenceSeconds))||Number(track.referenceSeconds)<=0||!Number.isFinite(Number(data.tests.timeTrials[track.id]))||Number(data.tests.timeTrials[track.id])<=0)||Object.values(data.tests.timeTrials).some(time=>!Number.isFinite(time)||time<=0)) return showAccessNotice('Für alle eingetragenen Time-Trial-Werte und die drei Pflichtstrecken sind gültige positive Zeiten erforderlich.');
-  if([data.tests.racePace,data.tests.consistency,data.tests.safetyRating].some(value=>!Number.isFinite(value))||data.tests.racePace<0||data.tests.racePace>1000||data.tests.consistency<0||data.tests.consistency>100||data.tests.safetyRating<0||data.tests.safetyRating>100||!result.weightTotal) return showAccessNotice('Race Pace (0–1.000), Konstanz und Safety Rating (jeweils 0–100) müssen gültig bewertet sein.');
-  const existing=DB.classificationApplicants.find(item=>item.id===id);
-  const rpc=await SUPABASE.client.rpc('zfc_save_driver_classification',{p_application_id:id,p_driver_data:data.driver,p_test_data:data.tests,p_performance_rating:result.rating,p_suggested_division:result.suggestedDivision,p_status:existing?.status==='Under Review'?'Under Review':'Pending'});
-  if(rpc.error){ CLASSIFICATION.error=`Bewerbung konnte nicht gespeichert werden: ${rpc.error.message}`; console.error(CLASSIFICATION.error,rpc.error); render(); return; }
-  await loadDriverClassificationData(); go('driver-classification',id);
-}
-async function setClassificationStatus(id,status){
-  if(currentTier()<3||status!=='Under Review') return showAccessNotice('Nur Tier 3 darf den Bearbeitungsstatus ändern.');
-  const applicant=DB.classificationApplicants.find(item=>item.id===id); if(!applicant) return;
-  const result=await SUPABASE.client.rpc('zfc_save_driver_classification',{p_application_id:id,p_driver_data:applicant.driver_data,p_test_data:applicant.test_data,p_performance_rating:applicant.performance_rating,p_suggested_division:applicant.suggested_division,p_status:status});
-  if(result.error){ CLASSIFICATION.error=`Status konnte nicht geändert werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
-  await loadDriverClassificationData(); go('driver-classification',id);
-}
-async function decideClassification(id,status){
-  if(currentTier()<3||!['Approved','Rejected'].includes(status)) return showAccessNotice('Nur Tier 3 darf Einstufungen freigeben oder ablehnen.');
-  const applicant=DB.classificationApplicants.find(item=>item.id===id); if(!applicant) return;
-  const reason=prompt(status==='Approved'?'Begründung der Freigabe:':'Begründung der Ablehnung:')?.trim();
-  if(!reason) return showAccessNotice('Für jede Entscheidung ist eine Begründung erforderlich.');
-  const config=classificationConfig(), calculated=calculateClassification(applicant.driver_data,applicant.test_data,config);
-  const selectedDivision=status==='Approved'?(prompt(`Tatsächlich freigegebene Division (Vorschlag: ${applicant.suggested_division||'—'}):`,applicant.suggested_division||'')||'').trim():'';
-  if(status==='Approved'&&!selectedDivision) return showAccessNotice('Für eine Freigabe muss eine Division angegeben werden.');
-  if(status==='Approved'&&!config.divisions.some(division=>division.name===selectedDivision)) return showAccessNotice('Die freigegebene Division muss in den Referenzdaten konfiguriert sein.');
-  const snapshot=status==='Approved'?{
-    documentNumber:`ZFC-CLASS-${new Date().getUTCFullYear()}-${crypto.randomUUID().slice(0,8).toUpperCase()}`,
-    applicationId:applicant.id,applicationNumber:applicant.application_no,driver:applicant.driver_data,tests:applicant.test_data,
-    referenceConfig:JSON.parse(JSON.stringify(config)),calculation:calculated,suggestedDivision:applicant.suggested_division,
-    approvedDivision:selectedDivision,decisionReason:reason,reviewer:{id:AUTH.profile.id,name:AUTH.profile.display_name||AUTH.profile.email},
-    decidedAt:new Date().toISOString(),status
-  }:null;
-  const result=await SUPABASE.client.rpc('zfc_decide_driver_classification',{p_application_id:id,p_status:status,p_approved_division:selectedDivision||null,p_reason:reason,p_snapshot:snapshot});
-  if(result.error){ CLASSIFICATION.error=`Entscheidung konnte nicht gespeichert werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
-  await loadDriverClassificationData();
-  if(status==='Approved'&&result.data){
-    const pdf=await SUPABASE.client.functions.invoke('driver-classification-pdf',{body:{action:'generate',reportId:result.data}});
-    if(pdf.error){ CLASSIFICATION.error=`Freigabe ist gespeichert. PDF-Erstellung fehlgeschlagen: ${pdf.error.message}`; console.error(CLASSIFICATION.error,pdf.error); }
-  }
-  go('driver-classification',id);
-}
-async function downloadClassificationReport(reportId){
-  const result=await SUPABASE.client.functions.invoke('driver-classification-pdf',{body:{action:'download',reportId}});
-  if(result.error){ CLASSIFICATION.error=`PDF konnte nicht geladen werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
-  const url=result.data?.signedUrl;
-  if(!url) return showAccessNotice('Der PDF-Dienst hat keinen Download-Link zurückgegeben.');
-  window.open(url,'_blank','noopener');
-}
-
 /* ============================= ROUTER / APP ============================= */
 const App = {};
 let ROUTE = {page:'dashboard', id:null};
@@ -1599,7 +1306,6 @@ const PAGE_TIERS={
   'esport-driverform':3,
   'esport-setup':3,
   'esport-presentation':3,
-  'driver-classification':3,
 };
 function canAccessPage(page){
   const tier=Number(AUTH.profile?.access_tier||0);
@@ -1796,7 +1502,6 @@ const NAV = [
   {id:'hr', label:'HR', ic:'16'},
   {id:'archive', label:'Archiv', ic:'14'},
   {id:'esport', label:'CFC Esport', ic:'15'},
-  {id:'driver-classification', label:'Driver Classification', ic:'D1'},
 ];
 
 function renderNav(){
@@ -1866,7 +1571,6 @@ function render(){
   else if(ROUTE.page==='esport-drivers') main.innerHTML = pageEsportDrivers();
   else if(ROUTE.page==='esport-driverform') main.innerHTML = pageEsportDriverForm(ROUTE.id?driverById(ROUTE.id):null);
   else if(ROUTE.page==='esport-setup') main.innerHTML = pageEsportSetup();
-  else if(ROUTE.page==='driver-classification') main.innerHTML = pageDriverClassification();
   else main.innerHTML = pageDashboard();
   if(ROUTE.page==='document-create'){
     const selector=document.getElementById('documentTypeSelect');
@@ -2042,7 +1746,6 @@ function pageDashboard(){
       <div class="dashboard-quicklink" onclick="go('cases')"><span class="quick-no">02</span><div><strong>Akten prüfen</strong><span>Status und Entscheidungen</span></div></div>
       <div class="dashboard-quicklink" onclick="go('drivers')"><span class="quick-no">03</span><div><strong>Fahrerregister</strong><span>Lizenzen und Profile</span></div></div>
       <div class="dashboard-quicklink" onclick="go('rulebook')"><span class="quick-no">04</span><div><strong>Regelwerk</strong><span>Sportliche Grundlage</span></div></div>
-      ${currentTier()>=3?`<div class="dashboard-quicklink" onclick="go('driver-classification')"><span class="quick-no">05</span><div><strong>Driver Classification</strong><span>Bewerber bewerten und Einstufungen freigeben</span></div></div>`:''}
     </div>
 
   <div class="grid cols-4" style="margin-bottom:22px;">
@@ -2411,7 +2114,7 @@ function caseFinancialAssessmentPanel(caseData){
   return `<section class="panel case-financial-assessment">
     <div class="case-financial-heading"><div><div class="eyebrow">Vertraulich · Tier 2 &amp; Tier 3</div><h2>Finanzielle Einschätzung</h2></div><span class="case-financial-lock">Rollenbeschränkter Aktenvermerk</span></div>
     <p>Separate, zugriffsgeschützte Einschätzung zu möglichen finanziellen Folgen dieser Akte. Sie ist nicht Teil des allgemein sichtbaren Aktenstatus.</p>
-    ${error?`<div class="classification-error" role="alert">${esc(error)}</div>`:''}
+    ${error?`<div class="case-financial-error" role="alert">${esc(error)}</div>`:''}
     ${loading?'<p role="status">Einschätzung wird geladen …</p>':''}
     <div class="case-financial-grid">
       <label>Geschätzter Betrag
@@ -2436,7 +2139,7 @@ function pageCaseForm(existing){
     stewardChairman:'', steward2:'', steward3:'', history:[]
   };
   const isNew = !existing;
-  if(existing?.archiveWorkflow?.status==='submitted') return pageCaseArchiveWork(existing);
+  if(existing?.archiveWorkflow?.status==='submitted') return pageArchiveCase(existing.id);
   if(existing&&caseIsInArchive(existing)) return pageArchiveCase(existing.id);
   const canEditDecision=currentTier()>=2&&!c.processCode;
   const stwDisplay = c.stw || nextStw() + ' (Vorschau)';
@@ -2548,24 +2251,12 @@ function pageCaseForm(existing){
   `;
 }
 
-function archiveA1Panel(c){
-  const workflow=c.archiveWorkflow||{};
-  const a1Active=workflow.a1Status==='active'&&documentCaseProcessCodes(c).includes('A1');
-  if(a1Active&&!CASE_DOCUMENTS.loaded.has(c.id)&&!CASE_DOCUMENTS.loading.has(c.id)) loadCaseDocuments(c.id);
-  const closure=CASE_DOCUMENTS.loaded.has(c.id)?caseDocumentClosureState(c):null;
-  const control=workflow.a1Status==='pending'
-    ?currentTier()>=3?`<button class="btn primary" onclick="assignArchiveA1('${escAttr(c.id)}',true)">A1-Anfrage bestätigen</button>`:'<span class="tag invest">Tier-3-Bestätigung ausstehend</span>'
-    :a1Active
-      ?`<button class="btn" onclick="go('caseform','${escAttr(c.id)}')">A1-Aufgaben bearbeiten</button><button class="btn primary" onclick="finalizeCaseArchive('${escAttr(c.id)}')" ${closure?.ready?'':'disabled'}>Schliessen und archivieren</button>`
-      :currentTier()>=2
-        ?`<button class="btn primary" onclick="assignArchiveA1('${escAttr(c.id)}')">A1-Prozess zuordnen</button>`
-        :'';
-  return `<div class="panel archive-action-panel"><div><span class="eyebrow">Abschlussprozess · A1 · Tier 2 &amp; Tier 3</span><strong>${a1Active?'A1 aktiv':workflow.a1Status==='pending'?'A1-Anfrage offen':'A1 noch nicht zugeordnet'}</strong><p>${a1Active?'Pflichtunterlagen vervollständigen und danach die finale Archivierung bestätigen.':workflow.a1Status==='pending'?'Eine Tier-2-Anfrage wartet auf Bestätigung durch Tier 3.':'Tier 2 oder Tier 3 ordnet A1 direkt zu.'}</p></div><div class="actions">${control}</div>${a1Active&&CASE_DOCUMENTS.loading.has(c.id)?'<small role="status">A1-Unterlagen werden geprüft …</small>':''}${a1Active&&CASE_DOCUMENTS.errorByCase.has(c.id)?`<small class="case-document-error">${esc(CASE_DOCUMENTS.errorByCase.get(c.id))}</small>`:''}${a1Active&&closure&&!closure.ready?`<small>Es fehlen ${Math.max(0,5-closure.count)} abgeschlossene PDF-Dokumente und ${closure.missing.length} Pflichtunterlage(n).</small>`:''}</div>`;
-}
-function pageCaseArchiveWork(c){
-  return `<div class="pagehead"><div><div class="eyebrow">A1 · Aktenabschluss</div><h1>${esc(c.stw||'Akte')} · Archivprüfung</h1><p>Die Akte wurde geschlossen und aus „Alle Akten“ entfernt. Hier können ausschließlich A1-Zuordnung und Abschlussunterlagen bearbeitet werden.</p></div><div class="actions"><button class="btn" onclick="go('archive','${escAttr(c.id)}')">← Archivstatus</button></div></div>
-    ${archiveA1Panel(c)}
-    ${documentCaseProcessCodes(c).includes('A1')?caseDocumentsPanel(c):'<div class="panel"><h2>Prozess A1 erforderlich</h2><p>Die Pflichtunterlagen und Abschlussfreigabe werden nach der Zuordnung von A1 angezeigt.</p></div>'}`;
+function archiveActionPanel(c){
+  const finalized=c.archiveWorkflow?.status==='archived'||c.status==='Archiviert';
+  const control=finalized
+    ?currentTier()>=3?`<button class="btn danger" onclick="deleteCase('${escAttr(c.id)}')">Akte endgültig löschen</button>`:'<span class="tag archived">Nur Tier 3 kann endgültig löschen</span>'
+    :currentTier()>=3?`<button class="btn primary" onclick="finalizeCaseArchive('${escAttr(c.id)}')">Endgültig archivieren</button>`:'<span class="tag invest">Endgültiger Abschluss durch Tier 3</span>';
+  return `<div class="panel archive-action-panel"><div><span class="eyebrow">Direkter Archivabschluss · Tier 3</span><strong>${finalized?'Archiviert':'Zur Archivierung eingereicht'}</strong><p>${finalized?'Die Akte ist schreibgeschützt abgelegt. Eine endgültige Löschung bleibt Tier 3 vorbehalten.':'Tier 3 prüft die Einreichung und schließt die Akte direkt ab; ein zusätzlicher Prozess ist nicht erforderlich.'}</p></div><div class="actions">${control}</div></div>`;
 }
 
 /* ============================= CASE DOCUMENTS ============================= */
@@ -3562,11 +3253,11 @@ async function saveCase(id, closeAfter){
   }
   const prevStatus = c.status, prevDecision = c.decision;
   if(!isNew&&c.archiveWorkflow?.status==='submitted'){
-    showAccessNotice('Diese Akte ist geschlossen. Änderungen sind nur noch im A1-Abschlussprozess möglich.');
+    showAccessNotice('Diese Akte ist geschlossen und wartet auf den endgültigen Abschluss durch Tier 3.');
     return;
   }
   if(!isNew&&v('f_status')==='Archiviert'){
-    showAccessNotice('Zum Schließen zuerst „Akte schliessen & zum Archiv einsenden“ verwenden. Die endgültige Archivierung erfolgt anschließend über Prozess A1.');
+    showAccessNotice('Zum Schließen zuerst „Akte schliessen & zum Archiv einsenden“ verwenden. Die endgültige Archivierung erfolgt durch Tier 3.');
     return;
   }
   const canEditLegacyDecision=currentTier()>=2&&!c.processCode;
@@ -3604,7 +3295,9 @@ async function saveCase(id, closeAfter){
     c.history.push({ts:now,text:changes.join(' · ')||'Akte bearbeitet.',actorId,actorTier});
   }
   addCaseActivity(c, isNew ? 'Akte angelegt.' : (prevStatus!==c.status ? `Status geändert: ${prevStatus} → ${c.status}` : prevDecision!==c.decision ? `Entscheidung aktualisiert: ${c.decision}` : 'Akte bearbeitet.'));
+  showSavingToast(isNew?'Neue Akte wird gespeichert …':'Änderungen werden gespeichert …');
   await persist.cases();
+  showSaveToast(isNew?'Akte angelegt und gespeichert.':'Akte gespeichert.');
   if(closeAfter) go('cases'); else go('caseform', c.id);
 }
 
@@ -3659,6 +3352,7 @@ async function deleteCase(id){
   if(currentTier()<3){ showAccessNotice('Das endgültige Löschen von Akten und Vorgängen ist Tier 3 vorbehalten.'); return; }
   const c=DB.cases.find(item=>item.id===id);
   if(!c) return;
+  if(c.archiveWorkflow?.status==='submitted'){ showAccessNotice('Eingereichte Akten müssen zuerst durch Tier 3 endgültig archiviert werden.'); return; }
   if(!confirm(`Akte ${c.stw||id}${c.processCode?` · Vorgang ${c.processCode}`:''} endgültig löschen? Zugehörige Dokumente, PDFs und Dokumentverläufe werden ebenfalls unwiderruflich entfernt.`)) return;
   if(!SUPABASE.client){ showAccessNotice('Endgültiges Löschen ist ohne sichere Supabase-Verbindung nicht möglich.'); return; }
   try{
@@ -3671,12 +3365,10 @@ async function deleteCase(id){
     CASE_DOCUMENTS.loaded.delete(id);
     CASE_DOCUMENTS.errorByCase.delete(id);
     DB.cases=DB.cases.filter(item=>item.id!==id);
-    DB.caseActivityLog=DB.caseActivityLog.filter(item=>item.caseId!==id);
-    DB.deletedCaseLog=DB.deletedCaseLog.filter(item=>item.caseId!==id);
+    DB.deletedCaseLog.push({caseId:id,stw:c.stw||'',event:c.event||'',deletedAt:Date.now(),deletedById:AUTH.profile?.id||AUTH.session?.user?.id||'',deletedByName:AUTH.profile?.display_name||AUTH.profile?.email||'Tier 3',deletedByTier:currentTier()});
     await persist.cases();
-    await persist.caseActivityLog();
     await persist.deletedCaseLog();
-    showAccessNotice('Akte/Vorgang, Dokumente, PDF-Dateien und Dokumentverläufe wurden endgültig gelöscht.');
+    showSaveToast('Akte und zugehörige Dokumente wurden endgültig gelöscht.');
     go('cases');
   }catch(error){
     showAccessNotice(`Akte/Vorgang konnte nicht vollständig gelöscht werden: ${error.message||error}`);
@@ -3736,7 +3428,7 @@ function pageCaseProcessManagement(caseId){
   const canCreate=!archiveSubmitted&&c.archiveWorkflow?.status!=='archived'&&!['Archiviert','Entschieden'].includes(c.status);
   return `<div class="pagehead"><div><div class="eyebrow">Aktenverwaltung · ${esc(c.stw)}</div><h1>Vorgänge verwalten</h1><p>${esc(c.event||'')} · Neue Vorgänge werden außerhalb der Akte erfasst und danach hier dokumentiert.</p></div><div class="actions"><button class="btn" onclick="go('caseform','${esc(c.id)}')">← Zur Akte</button>${currentTier()>=3?'<button class="btn gold" onclick="go(\'process-reviews\')">Prüfungsübersicht</button>':''}</div></div>
   <section class="panel case-process-management">
-    ${archiveSubmitted?'<div class="note">Diese Akte wurde zur Archivierung eingereicht. Für den Abschluss muss der Prozess A1 aktiv sein und vollständig dokumentiert werden.</div>':''}
+    ${archiveSubmitted?'<div class="note">Diese Akte wurde zur Archivierung eingereicht und wartet auf den endgültigen Abschluss durch Tier 3.</div>':''}
     <div class="case-process-section-title"><div><span class="eyebrow">Aktive Zuordnungen</span><h2>Vorgänge dieser Akte</h2></div><span class="tag">${active.length} aktiv</span></div>
     <div class="case-process-list">${activeRows}</div>
     ${canCreate?`<form class="case-process-create" onsubmit="requestCaseProcess(event,'${esc(c.id)}')"><div><span class="eyebrow">${currentTier()===3?'Tier 3 · Direktanlage':'Tier 2 · Prüfanfrage'}</span><h3>Vorgang hinzufügen</h3><p>${currentTier()===3?'Tier 3 kann den Vorgang direkt anlegen.':'Die Zuordnung wird erst nach Bestätigung durch Tier 3 aktiviert.'}</p></div><div class="field"><label for="caseProcessCode">Prozess auswählen</label><select id="caseProcessCode" required><option value="">Prozess auswählen …</option>${available.map(process=>`<option value="${esc(process.code)}">${esc(process.code)} · ${esc(process.title)}</option>`).join('')}</select></div><div class="field"><label for="caseProcessReason">Auftrag / Begründung</label><textarea id="caseProcessReason" required maxlength="2000" rows="3" placeholder="Warum ist dieser Vorgang für die Akte erforderlich?"></textarea></div><button class="btn primary" type="submit">${currentTier()===3?'Vorgang anlegen':'Zur Tier-3-Prüfung senden'}</button></form>`:'<p class="note">Diese Akte ist abgeschlossen; weitere Vorgänge können nicht hinzugefügt werden.</p>'}
@@ -3819,7 +3511,7 @@ async function persistCaseMutation(caseRecord,previous,errorLabel){
     return true;
   }catch(error){
     const caseId=caseRecord.id;
-    if(SUPABASE.client&&/Eingereichte Akten sind bis zum Abschluss von A1 gesperrt/.test(error?.message||'')){
+    if(SUPABASE.client&&/Eingereichte Akten sind bis zum Abschluss/.test(error?.message||'')){
       try{
         const latest=await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
         if(latest.error) throw latest.error;
@@ -3870,7 +3562,7 @@ async function closeCaseAndSendToArchive(caseId){
   const c=DB.cases.find(item=>item.id===caseId);
   if(c&&caseIsInArchive(c)){ go('archive',c.id); return; }
   if(!c){ showAccessNotice('Diese Akte ist nicht mehr für eine Einreichung verfügbar.'); return; }
-  const reason=window.prompt('Abschlussnotiz für die Archivierung:','Akte geschlossen und zur abschließenden A1-Prüfung eingereicht.');
+  const reason=window.prompt('Abschlussnotiz für die Archivierung:','Akte geschlossen und zur abschließenden Archivprüfung eingereicht.');
   if(reason===null) return;
   if(!reason.trim()){ showAccessNotice('Bitte eine kurze Abschlussnotiz eintragen.'); return; }
   const previous=JSON.parse(JSON.stringify(c));
@@ -3879,57 +3571,18 @@ async function closeCaseAndSendToArchive(caseId){
   c.archiveWorkflow={status:'submitted',submittedAt:now,submittedById:actorId,submittedByTier:currentTier(),history:[...(c.archiveWorkflow?.history||[]),event]};
   c.updatedAt=now;
   c.history=[...(c.history||[]),{ts:now,actorId,actorTier:currentTier(),text:'Akte geschlossen und zur Archivierung eingereicht.'}];
-  addCaseActivity(c,'Akte geschlossen und zur A1-Archivierung eingereicht.');
-  if(await persistCaseMutation(c,previous,'Akte konnte nicht zur Archivierung eingereicht werden.')) go('archive',c.id);
-}
-async function requestArchiveA1(caseId){
-  if(currentTier()!==2){ showAccessNotice('A1 kann nur durch Tier 2 oder Tier 3 zugeordnet werden.'); return; }
-  const c=DB.cases.find(item=>item.id===caseId);
-  if(!c||c.archiveWorkflow?.status!=='submitted'||c.archiveWorkflow.a1Status){ showAccessNotice('Für diese Akte kann keine neue A1-Anfrage erstellt werden.'); return; }
-  const reason=window.prompt('Begründung für die A1-Zuordnung:','Abschlussunterlagen prüfen und Akte vollständig archivieren.');
-  if(reason===null) return;
-  if(!reason.trim()){ showAccessNotice('Bitte die A1-Anfrage begründen.'); return; }
-  const previous=JSON.parse(JSON.stringify(c));
-  const now=Date.now(),actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
-  const history=[...(c.archiveWorkflow.history||[]),{id:uid(),action:'a1_requested',actorId,actorTier:2,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()}];
-  c.archiveWorkflow={...c.archiveWorkflow,a1Status:'pending',a1RequestedAt:now,a1RequestedById:actorId,a1RequestedByTier:2,a1Reason:reason.trim(),history};
-  c.updatedAt=now;
-  addCaseActivity(c,'Prozess A1 zur Tier-3-Bestätigung angefordert.');
-  await persistCaseMutation(c,previous,'A1-Anfrage konnte nicht gespeichert werden.');
-}
-async function assignArchiveA1(caseId,approveRequest=false){
-  if(currentTier()<2||(approveRequest&&currentTier()<3)){ showAccessNotice('A1 kann nur durch Tier 2 oder Tier 3 zugeordnet werden. Offene Anfragen bestätigt Tier 3.'); return; }
-  const c=DB.cases.find(item=>item.id===caseId), workflow=c?.archiveWorkflow||{};
-  if(!c||workflow.status!=='submitted'||(approveRequest?workflow.a1Status!=='pending':Boolean(workflow.a1Status))){ showAccessNotice('Der A1-Status hat sich geändert. Bitte die Archivansicht neu laden.'); return; }
-  const reason=window.prompt(approveRequest?'Prüfvermerk zur A1-Bestätigung:':'Begründung für die direkte A1-Zuordnung:',approveRequest?'A1-Zuordnung geprüft und bestätigt.':'A1 zur abschließenden Dokumentation zugeordnet.');
-  if(reason===null) return;
-  if(!reason.trim()){ showAccessNotice('Bitte einen A1-Prüfvermerk eintragen.'); return; }
-  const previous=JSON.parse(JSON.stringify(c));
-  const now=Date.now(),actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
-  const action=approveRequest?'a1_approved':'a1_assigned';
-  const actorTier=currentTier();
-  c.activeProcessCodes=[...new Set([...(c.activeProcessCodes||[]),...(c.processCode?[c.processCode]:[]),'A1'])];
-  c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode:'A1',actorId,actorTier,actorName:AUTH.profile?.display_name||'',ts:now,action:'linked'}];
-  c.archiveWorkflow={...workflow,a1Status:'active',a1AssignedAt:now,a1AssignedById:actorId,a1AssignedByTier:actorTier,a1ReviewReason:reason.trim(),history:[...(workflow.history||[]),{id:uid(),action,actorId,actorTier,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()}]};
-  c.updatedAt=now;
-  addCaseActivity(c,`Prozess A1 durch Tier ${actorTier} ${approveRequest?'bestätigt':'zugeordnet'}.`);
-  await persistCaseMutation(c,previous,'A1 konnte nicht zugeordnet werden.');
+  addCaseActivity(c,'Akte geschlossen und zur Archivierung eingereicht.');
+  showSavingToast('Akte wird zur Archivierung eingereicht …');
+  if(await persistCaseMutation(c,previous,'Akte konnte nicht zur Archivierung eingereicht werden.')){
+    showSaveToast('Akte zur Archivierung eingereicht.');
+    go('archive',c.id);
+  }
 }
 async function finalizeCaseArchive(caseId){
-  if(currentTier()<2){ showAccessNotice('Akte endgültig archivieren dürfen nur Tier 2 und Tier 3.'); return; }
+  if(currentTier()<3){ showAccessNotice('Nur Tier 3 darf eine Akte endgültig archivieren.'); return; }
   const c=DB.cases.find(item=>item.id===caseId);
   if(!c||c.archiveWorkflow?.status!=='submitted'){ showAccessNotice('Die Akte wurde nicht zur Archivierung eingereicht.'); return; }
-  if(c.archiveWorkflow.a1Status!=='active'||!documentCaseProcessCodes(c).includes('A1')){ showAccessNotice('Vor der endgültigen Archivierung muss Prozess A1 aktiv zugeordnet sein.'); return; }
-  if((c.processLinkRequests||[]).some(item=>item.processCode==='A1'&&item.status==='Tier-3-Prüfung ausstehend')){ showAccessNotice('Die Tier-3-Bestätigung für Prozess A1 steht noch aus.'); return; }
-  if(!CASE_DOCUMENTS.loaded.has(c.id)) await loadCaseDocuments(c.id,true);
-  if(CASE_DOCUMENTS.errorByCase.has(c.id)){ showAccessNotice('Der A1-Dokumentbestand konnte nicht sicher geprüft werden.'); return; }
-  const closure=caseDocumentClosureState(c);
-  if(!closure.ready){
-    showAccessNotice(`A1-Abschluss gesperrt: Es fehlen ${Math.max(0,5-closure.count)} abgeschlossene PDF-Dokumente und ${closure.missing.length} Pflichtunterlage(n).`);
-    render();
-    return;
-  }
-  const reason=window.prompt('Abschlussvermerk für die endgültige Archivierung:','A1-Vollständigkeitsprüfung abgeschlossen; Akte wird archiviert.');
+  const reason=window.prompt('Abschlussvermerk für die endgültige Archivierung:','Abschlussprüfung durch Tier 3 durchgeführt; Akte wird archiviert.');
   if(reason===null) return;
   if(!reason.trim()){ showAccessNotice('Bitte einen Abschlussvermerk eintragen.'); return; }
   const previous=JSON.parse(JSON.stringify(c));
@@ -3937,9 +3590,13 @@ async function finalizeCaseArchive(caseId){
   const event={id:uid(),action:'archived',actorId,actorTier:currentTier(),actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()};
   c.archiveWorkflow={...c.archiveWorkflow,status:'archived',archivedAt:now,archivedById:actorId,archivedByTier:currentTier(),history:[...(c.archiveWorkflow.history||[]),event]};
   c.updatedAt=now;
-  c.history=[...(c.history||[]),{ts:now,actorId,actorTier:currentTier(),text:'Akte nach abgeschlossenem Prozess A1 endgültig archiviert.'}];
-  addCaseActivity(c,'Akte endgültig nach A1 archiviert.');
-  if(await persistCaseMutation(c,previous,'Akte konnte nicht endgültig archiviert werden.')) go('archive',c.id);
+  c.history=[...(c.history||[]),{ts:now,actorId,actorTier:currentTier(),text:'Akte durch Tier 3 endgültig archiviert.'}];
+  addCaseActivity(c,'Akte endgültig archiviert.');
+  showSavingToast('Akte wird endgültig archiviert …');
+  if(await persistCaseMutation(c,previous,'Akte konnte nicht endgültig archiviert werden.')){
+    showSaveToast('Akte endgültig archiviert.');
+    go('archive',c.id);
+  }
 }
 function renderCaseTable(){
   const q = (document.getElementById('cf_q')?.value||'').toLowerCase();
@@ -4630,7 +4287,9 @@ async function saveDriver(id){
     notes:v('d_notes'), updatedAt:Date.now(),
   });
   if(!isNew && document.getElementById('d_rulesAccepted')) d.rulesAccepted = document.getElementById('d_rulesAccepted').checked;
+  showSavingToast(isNew?'Neue Fahrerakte wird gespeichert …':'Fahrerakte wird gespeichert …');
   await persist.drivers();
+  showSaveToast(isNew?'Fahrerakte angelegt und gespeichert.':'Fahrerakte gespeichert.');
   go('driverform', d.id);
 }
 async function deleteDriver(id){
@@ -4853,12 +4512,12 @@ function pageArchive(){
   const actions=DB.caseActivityLog.slice().sort((a,b)=>(b.ts||0)-(a.ts||0));
   const deleted=DB.deletedCaseLog.slice().sort((a,b)=>(b.deletedAt||0)-(a.deletedAt||0));
   const rows=list=>list.map(c=>`<button class="archive-case-row" onclick="go('archive','${escAttr(c.id)}')"><span class="archive-case-no">${esc(c.stw||'Ohne Nummer')}</span><span class="archive-case-meta"><b>${esc(c.event||'Ohne Event')}</b><small>${esc(c.category||'Sonstiger Vorfall')} · ${esc(caseDisplayStatus(c))}</small></span><span class="archive-category-dot" style="background:${categoryColor(c.category)}"></span><span class="archive-open">Ansehen →</span></button>`).join('');
-  return `<div class="pagehead"><div><div class="eyebrow">Aktenablage · Tier 2 &amp; Tier 3</div><h1>Aktenarchiv</h1><p>Abgeschlossene Akten werden hier gesammelt. A1 dokumentiert Vollständigkeit und sichere Ablage.</p></div><div class="actions"><button class="btn" onclick="go('cases')">← Alle Akten</button></div></div>
+  return `<div class="pagehead"><div><div class="eyebrow">Aktenablage · Tier 2 &amp; Tier 3</div><h1>Aktenarchiv</h1><p>Eingereichte Akten werden direkt von Tier 3 endgültig archiviert.</p></div><div class="actions"><button class="btn" onclick="go('cases')">← Alle Akten</button></div></div>
   <div class="grid cols-2 archive-workflow-stats"><div class="stat amber"><div class="n">${pending.length}</div><div class="l">Zur Archivierung eingereicht</div></div><div class="stat green"><div class="n">${archived.length}</div><div class="l">Endgültig archiviert</div></div></div>
-  <div class="panel archive-intro"><h2>Abschluss über <b>Prozess A1</b></h2><p>Eine eingereichte Akte verschwindet aus „Alle Akten“. Tier 2 oder Tier 3 ordnet A1 hier direkt zu. Nach den Pflichtunterlagen kann Tier 2 oder Tier 3 die Akte schliessen und archivieren.</p></div>
-  <div class="panel"><div class="archive-section-head"><h2>Zur Archivierung eingereicht</h2><span>${pending.length} offen</span></div><div class="archive-case-list">${rows(pending)||'<div class="empty">Keine Akten warten auf den A1-Abschluss.</div>'}</div></div>
+  <div class="panel archive-intro"><h2>Direkter Abschluss <b>ohne Zwischenprozess</b></h2><p>Tier 2 kann eine abgeschlossene Akte einreichen. Die endgültige Archivierung sowie eine spätere endgültige Löschung sind ausschließlich Tier 3 vorbehalten.</p></div>
+  <div class="panel"><div class="archive-section-head"><h2>Zur Archivierung eingereicht</h2><span>${pending.length} offen</span></div><div class="archive-case-list">${rows(pending)||'<div class="empty">Keine Akten warten auf den Abschluss durch Tier 3.</div>'}</div></div>
   <div class="panel"><div class="archive-section-head"><h2>Endgültig archiviert</h2><span>${archived.length} abgelegt</span></div><div class="archive-case-list">${rows(archived)||'<div class="empty">Noch keine Akten endgültig archiviert.</div>'}</div></div>
-  <div class="archive-log-grid"><section class="panel"><div class="archive-section-head"><h2>Aktionslog</h2><span>Nur ansehen</span></div><div class="archive-log">${actions.map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(item.category)}"></span><div><b>${esc(item.stw)}</b><span>${esc(item.action)}</span><small>${fmtDateTime(item.ts)} · ${esc(item.category)}</small></div></div>`).join('')||'<div class="empty">Noch keine Aktionen protokolliert.</div>'}</div></section><section class="panel"><div class="archive-section-head"><h2>Gelöschte Akten</h2><span>Nur ansehen</span></div><div class="archive-log">${deleted.map(item=>`<div class="archive-log-row deleted"><span class="archive-log-mark"></span><div><b>${esc(item.stw||'Unbekannte Akte')}</b><span>Akte gelöscht</span><small>${fmtDateTime(item.deletedAt)} · ${esc(item.event||'Ohne Event')}</small></div></div>`).join('')||'<div class="empty">Keine gelöschten Akten protokolliert.</div>'}</div></section></div>`;
+  <div class="archive-log-grid"><section class="panel"><div class="archive-section-head"><h2>Aktionslog</h2><span>Nur ansehen</span></div><div class="archive-log">${actions.map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(item.category)}"></span><div><b>${esc(item.stw)}</b><span>${esc(item.action)}</span><small>${fmtDateTime(item.ts)} · ${esc(item.category)}</small></div></div>`).join('')||'<div class="empty">Noch keine Aktionen protokolliert.</div>'}</div></section><section class="panel"><div class="archive-section-head"><h2>Gelöschte Akten</h2><span>Nur ansehen</span></div><div class="archive-log">${deleted.map(item=>`<div class="archive-log-row deleted"><span class="archive-log-mark"></span><div><b>${esc(item.stw||'Unbekannte Akte')}</b><span>Akte endgültig gelöscht</span><small>${fmtDateTime(item.deletedAt)} · ${esc(item.event||'Ohne Event')} · ${esc(item.deletedByName||'Tier 3')} · Tier ${esc(item.deletedByTier||3)}</small></div></div>`).join('')||'<div class="empty">Keine gelöschten Akten protokolliert.</div>'}</div></section></div>`;
 }
 function pageArchiveCase(id){
   const c=DB.cases.find(item=>item.id===id);
@@ -4866,16 +4525,16 @@ function pageArchiveCase(id){
   const submitted=c.archiveWorkflow?.status==='submitted';
   const finalized=c.archiveWorkflow?.status==='archived'||c.status==='Archiviert';
   const driver=driverById(c.driverInvolved), affected=driverById(c.driverAffected);
-  const heading=`<div class="pagehead"><div><div class="eyebrow">Aktenarchiv · ${finalized?'Endgültig abgelegt':'A1-Abschluss ausstehend'}</div><h1>${esc(c.stw||'Akte')}</h1></div><div class="actions"><button class="btn" onclick="go('archive')">← Zum Archiv</button></div></div>`;
+  const heading=`<div class="pagehead"><div><div class="eyebrow">Aktenarchiv · ${finalized?'Endgültig abgelegt':'Tier-3-Abschluss ausstehend'}</div><h1>${esc(c.stw||'Akte')}</h1></div><div class="actions"><button class="btn" onclick="go('archive')">← Zum Archiv</button></div></div>`;
   const status=`<div class="panel archive-readonly-head"><div><span class="archive-case-no">${esc(c.stw||'—')}</span><h2>${esc(c.event||'Ohne Event')}</h2></div><span class="tag ${finalized?'archived':'invest'}">${finalized?'Archiviert':caseDisplayStatus(c)}</span></div>`;
   const detail=`<div class="panel"><div class="archive-section-head"><h2>Akteninhalt</h2><span>Schreibgeschützt</span></div>
     <div class="grid cols-3">${archiveField('Saison',c.season)}${archiveField('Session',c.sessionType)}${archiveField('Zeitpunkt',c.incidentLap)}${archiveField('Kategorie',c.category)}${archiveField('Meldung durch',c.reportedBy)}${archiveField('Angelegt am',fmtDateTime(c.createdAt))}${archiveField('Zur Archivierung eingereicht',fmtDateTime(c.archiveWorkflow?.submittedAt))}</div>
     <div class="sectiontitle">Beteiligte</div><div class="grid cols-2">${archiveField('Beschuldigtes Team',teamById(c.teamInvolved)?.name)}${archiveField('Betroffener Fahrer',driverName(driver))}${archiveField('Geschädigtes Team',teamById(c.teamAffected)?.name)}${archiveField('Geschädigter Fahrer',driverName(affected))}</div>
     <div class="sectiontitle">Sachverhalt</div>${archiveField('Beschreibung des Vorfalls',c.description,true)}<div class="grid cols-2">${archiveField('Beweismittel',c.evidenceLink)}${archiveField('Anhörung',c.hearingHeld?'Durchgeführt':'Nicht dokumentiert')}</div>${archiveField('Untersuchung / Anmerkungen',c.investigationNotes,true)}<div class="grid cols-2">${archiveField('Regelverstoß',c.regulationBreach)}${archiveField('Präzedenzfall',c.precedent)}</div>
     <div class="sectiontitle">Entscheidung</div><div class="grid cols-2">${archiveField('Entscheidung',c.decision)}${archiveField('Strafpunkte',String(c.penaltyPoints||0))}${archiveField('Lizenzstatus',c.licenseStatusAfter)}${archiveField('Lizenzdetail',c.licenseStatusDetail)}</div>${archiveField('Begründung / Detail',c.decisionDetail,true)}</div>`;
-  const archiveHistory=c.archiveWorkflow?.history?.length?`<div class="panel"><div class="archive-section-head"><h2>A1-Abschlussprotokoll</h2><span>Nachvollziehbar</span></div><div class="archive-log">${c.archiveWorkflow.history.slice().reverse().map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(c.category)}"></span><div><b>${fmtDateTime(item.ts)}</b><span>${esc(({submitted:'Zur Archivierung eingereicht',a1_requested:'A1 angefordert',a1_approved:'A1 bestätigt',a1_assigned:'A1 zugeordnet',archived:'Endgültig archiviert'})[item.action]||item.action)} · ${esc(item.reason)}</span><small>${esc(item.actorName||'Tier '+item.actorTier)} · Tier ${esc(item.actorTier)}</small></div></div>`).join('')}</div></div>`:'';
+  const archiveHistory=c.archiveWorkflow?.history?.length?`<div class="panel"><div class="archive-section-head"><h2>Archivierungsprotokoll</h2><span>Nachvollziehbar</span></div><div class="archive-log">${c.archiveWorkflow.history.slice().reverse().map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(c.category)}"></span><div><b>${fmtDateTime(item.ts)}</b><span>${esc(({submitted:'Zur Archivierung eingereicht',archived:'Endgültig archiviert'})[item.action]||item.action)} · ${esc(item.reason)}</span><small>${esc(item.actorName||'Tier '+item.actorTier)} · Tier ${esc(item.actorTier)}</small></div></div>`).join('')}</div></div>`:'';
   const caseHistory=c.history?.length?`<div class="panel"><div class="archive-section-head"><h2>Aktenhistorie</h2><span>Nur ansehen</span></div><div class="archive-log">${c.history.slice().reverse().map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(c.category)}"></span><div><b>${fmtDateTime(item.ts)}</b><span>${esc(item.text)}</span></div></div>`).join('')}</div></div>`:'';
-  return `${heading}${status}${submitted?archiveA1Panel(c):''}${detail}${archiveHistory}${caseHistory}`;
+  return `${heading}${status}${archiveActionPanel(c)}${detail}${archiveHistory}${caseHistory}`;
 }
 
 /* ============================= MANAGEMENT ============================= */
