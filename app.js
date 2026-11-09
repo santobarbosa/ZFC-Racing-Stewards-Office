@@ -1273,6 +1273,11 @@ let ROUTE = {page:'dashboard', id:null};
 let CASE_OPENING_SEEN = null;
 let CASE_OPENING_MODE = 'none';
 
+function normalizeRoute(page,id){
+  if(page==='driver-classification') return {page:'dashboard',id:null};
+  return {page:page||'dashboard',id:id||null};
+}
+
 const PAGE_TIERS={
   dashboard:1,
   'tier-office':2,
@@ -1314,6 +1319,9 @@ function canAccessPage(page){
   return tier>=requiredTier;
 }
 function go(page, id){
+  const normalized=normalizeRoute(page,id);
+  page=normalized.page;
+  id=normalized.id;
   if(page==='tier-office') page=currentTier()===3?'tier-office-t3':'tier-office-t2';
   const documentCase=page==='document-create'
     ?DB.cases.find(item=>item.id===id)
@@ -1469,6 +1477,10 @@ window.addEventListener('hashchange', ()=>{
   if(!AUTH.profile) return;
   const h = location.hash.replace('#','');
   let [page,id] = h.split('/');
+  const normalized=normalizeRoute(page,id);
+  page=normalized.page;
+  id=normalized.id;
+  if(location.hash!=='#'+page+(id?'/'+id:'')) location.hash='#'+page+(id?'/'+id:'');
   if(page==='tier-office') page=Number(AUTH.profile?.access_tier)===3?'tier-office-t3':'tier-office-t2';
   if(page===ROUTE.page&&id===(ROUTE.id||null)) return;
   if(!canAccessPage(page||'dashboard')||(page==='process-form'&&!canStartProcess(id))){
@@ -5231,7 +5243,8 @@ function init(){
   loadAll();
   const h = location.hash.replace('#','');
   const [page,id] = h.split('/');
-  ROUTE = {page: page||'dashboard', id: id||null};
+  ROUTE = normalizeRoute(page,id);
+  if(location.hash!=='#'+ROUTE.page+(ROUTE.id?'/'+ROUTE.id:'')) location.hash='#'+ROUTE.page+(ROUTE.id?'/'+ROUTE.id:'');
   initSupabase();
 }
 init();

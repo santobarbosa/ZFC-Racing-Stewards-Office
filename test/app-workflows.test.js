@@ -105,13 +105,23 @@ test('HR data schema is tier-3-only and supports realtime synchronization',()=>{
 test('Driver classification has been removed from application code and navigation',()=>{
   const index=fs.readFileSync(require.resolve('../index.html'),'utf8');
   const styles=fs.readFileSync(require.resolve('../styles.css'),'utf8');
-  assert.doesNotMatch(appSource,/classification|driver-classification/i);
+  assert.doesNotMatch(appSource,/function pageDriverClassification|Driver Classification|Klassifizierung/i);
+  assert.match(appSource,/function normalizeRoute\(page,id\)[\s\S]*?page==='driver-classification'[\s\S]*?return \{page:'dashboard',id:null\}/);
+  assert.doesNotMatch(appSource,/label:\s*['"][^'"]*classification/i);
   assert.doesNotMatch(index,/classification|driver-classification/i);
   assert.doesNotMatch(styles,/classification|driver-classification/i);
   assert.doesNotMatch(schema,/classification|driver-classification/i);
   const retirementMigration=fs.readFileSync(require.resolve('../supabase/migrations/20261109030000_disable_driver_classification.sql'),'utf8');
   assert.match(retirementMigration,/revoke all on public\.zfc_driver_classifications/);
   assert.match(retirementMigration,/preserving its historical data/);
+});
+
+test('Removed driver classification URL redirects to dashboard without changing driver data',()=>{
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'tier-3',access_tier:3};render=()=>{};window.scrollTo=()=>{};DB.drivers=[{id:'driver-1',firstName:'Test',lastName:'Driver'}];go('driver-classification');`,context);
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('ROUTE',context))),{page:'dashboard',id:null});
+  assert.equal(vm.runInContext('location.hash',context),'#dashboard');
+  assert.equal(vm.runInContext('DB.drivers.length',context),1);
 });
 
 test('Case financial assessments are isolated and restricted to Tier 2 and Tier 3',()=>{
