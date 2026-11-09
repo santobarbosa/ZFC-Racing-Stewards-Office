@@ -206,8 +206,17 @@ nav.mainnav .navitem .ic{width:18px;text-align:center;font-family:var(--mono);co
 .case-financial-grid textarea{width:100%;min-height:84px;}
 .case-financial-footer{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);}
 .case-financial-footer small{color:var(--grey);font-size:11px;}
+.case-close-submit{box-shadow:0 8px 26px rgba(200,16,46,.18);}
+.archive-workflow-stats{margin:0 0 16px;}
+.archive-action-panel{display:flex;align-items:center;justify-content:space-between;gap:18px;margin:0 0 16px;padding:20px;border-color:rgba(230,198,92,.3);background:linear-gradient(130deg,rgba(230,198,92,.07),rgba(15,15,16,.92));}
+.archive-action-panel>div:first-child{display:grid;gap:6px;}
+.archive-action-panel strong{font-size:17px;}
+.archive-action-panel p{margin:0;color:var(--grey);font-size:12px;line-height:1.5;}
+.archive-action-panel small{flex-basis:100%;color:var(--grey);font-size:11px;}
+.archive-action-panel .actions{justify-content:flex-end;}
+.archive-action-panel button:disabled{opacity:.5;cursor:not-allowed;}
 @media(max-width:900px){.classification-weight-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.classification-form-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
-@media(max-width:640px){.classification-config-panel,.classification-form,.classification-preview{padding:15px;}.classification-track-row,.classification-division-row{grid-template-columns:1fr;gap:8px;}.classification-division-row label{grid-template-columns:1fr 110px;}.classification-form-grid,.classification-deviation-list,.classification-weight-grid,.classification-registry-grid,.case-financial-grid{grid-template-columns:1fr;}.classification-inline-add{flex-direction:column;}.classification-report-row{align-items:flex-start;flex-direction:column;}.classification-form-intro,.case-financial-heading,.case-financial-footer{align-items:flex-start;flex-direction:column;}}
+@media(max-width:640px){.classification-config-panel,.classification-form,.classification-preview{padding:15px;}.classification-track-row,.classification-division-row{grid-template-columns:1fr;gap:8px;}.classification-division-row label{grid-template-columns:1fr 110px;}.classification-form-grid,.classification-deviation-list,.classification-weight-grid,.classification-registry-grid,.case-financial-grid{grid-template-columns:1fr;}.classification-inline-add{flex-direction:column;}.classification-report-row{align-items:flex-start;flex-direction:column;}.classification-form-intro,.case-financial-heading,.case-financial-footer{align-items:flex-start;flex-direction:column;}.archive-action-panel{align-items:flex-start;flex-direction:column;}.archive-action-panel .actions{justify-content:flex-start;}}
 
 /* ---------- dashboard home ---------- */
 .dashboard-home{max-width:1180px;margin:0 auto;}

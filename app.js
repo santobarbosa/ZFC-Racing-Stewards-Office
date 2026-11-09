@@ -652,9 +652,17 @@ function nextLicenseNo(){
 function statusTagClass(s){
   return {Neu:'open',Offen:'open','In Untersuchung':'invest',Entschieden:'decided',Archiviert:'archived',
     'Noch nicht vorgelegt':'open','Tier-2-Prüfung ausstehend':'invest','Tier-3-Prüfung ausstehend':'invest',
-    'CEO-Entscheidung ausstehend':'invest','Zur Ergänzung zurückgegeben':'open','Freigegeben':'decided','Abgelehnt':'archived'}[s] || 'archived';
+    'CEO-Entscheidung ausstehend':'invest','Zur Ergänzung zurückgegeben':'open','Zur Archivierung eingereicht':'invest',
+    'Freigegeben':'decided','Abgelehnt':'archived'}[s] || 'archived';
 }
-function caseDisplayStatus(c){ return c?.processWorkflow?.approvalStatus||c?.status||'Neu'; }
+function caseDisplayStatus(c){
+  if(c?.archiveWorkflow?.status==='submitted') return 'Zur Archivierung eingereicht';
+  if(c?.archiveWorkflow?.status==='archived'||c?.status==='Archiviert') return 'Archiviert';
+  return c?.processWorkflow?.approvalStatus||c?.status||'Neu';
+}
+function caseIsInArchive(c){
+  return ['submitted','archived'].includes(c?.archiveWorkflow?.status)||c?.status==='Archiviert';
+}
 function licenseTagClass(s){
   return {'Aktiv':'active','Ausgesetzt':'suspended','Entzogen':'revoked','Nicht ausgestellt':'none'}[s] || 'none';
 }
@@ -1562,7 +1570,7 @@ const PAGE_TIERS={
   rulebook:2,
   manage:3,
   hr:3,
-  archive:3,
+  archive:2,
   esport:3,
   'esport-drivers':3,
   'esport-driverform':3,
@@ -2405,6 +2413,8 @@ function pageCaseForm(existing){
     stewardChairman:'', steward2:'', steward3:'', history:[]
   };
   const isNew = !existing;
+  if(existing?.archiveWorkflow?.status==='submitted') return pageCaseArchiveWork(existing);
+  if(existing&&caseIsInArchive(existing)) return pageArchiveCase(existing.id);
   const canEditDecision=currentTier()>=2&&!c.processCode;
   const stwDisplay = c.stw || nextStw() + ' (Vorschau)';
   const caseCategories=CATEGORIES.includes(c.category)?CATEGORIES:[c.category,...CATEGORIES];
@@ -2415,6 +2425,8 @@ function pageCaseForm(existing){
     <div><div class="eyebrow">${isNew?'Neue Akte':'Akte bearbeiten'}</div><h1>${c.caseType==='force'?'Force-Vorgang':'Steward-Fall'}</h1></div>
     <div class="actions">
       <button class="btn" onclick="go('cases')">← Zur Übersicht</button>
+      ${!isNew&&currentTier()>=2&&!caseIsInArchive(c)?`<button class="btn primary case-close-submit" onclick="closeCaseAndSendToArchive('${escAttr(c.id)}')">Akte schliessen &amp; zum Archiv einsenden</button>`:''}
+      ${!isNew&&caseIsInArchive(c)?`<button class="btn gold" onclick="go('archive','${escAttr(c.id)}')">Archivstatus ansehen</button>`:''}
     </div>
   </div>
 
@@ -2423,7 +2435,7 @@ function pageCaseForm(existing){
       <div><div class="stwlabel">Aktennummer</div><div class="stwno">${esc(stwDisplay)}</div>${c.processCode?`<div class="case-process-reference">Prozess ${esc(c.processCode)} · ${esc(c.processTitle||'')}</div>`:''}</div>
         <div style="text-align:right">
         <div class="stwlabel">Status</div>
-        ${isNew ? '<span class="tag open">Neu</span>' : c.processCode?`<span class="tag open">${esc(c.processWorkflow?.approvalStatus||c.status)}</span>`:currentTier()>=2?`<select id="f_status" style="width:auto;">${selectOptions(CASE_STATUS, c.status)}</select>`:`<span class="tag open">${esc(c.status)}</span>`}
+        ${isNew ? '<span class="tag open">Neu</span>' : c.processCode?`<span class="tag open">${esc(c.processWorkflow?.approvalStatus||c.status)}</span>`:currentTier()>=2?`<select id="f_status" style="width:auto;">${selectOptions(CASE_STATUS.filter(status=>status!=='Archiviert'), c.status)}</select>`:`<span class="tag open">${esc(c.status)}</span>`}
       </div>
     </div>
     <div class="dossier-body">
@@ -2511,6 +2523,28 @@ function pageCaseForm(existing){
     </div>
   </div>
   `;
+}
+
+function archiveA1Panel(c){
+  const workflow=c.archiveWorkflow||{};
+  const a1Active=workflow.a1Status==='active'&&documentCaseProcessCodes(c).includes('A1');
+  if(a1Active&&!CASE_DOCUMENTS.loaded.has(c.id)&&!CASE_DOCUMENTS.loading.has(c.id)) loadCaseDocuments(c.id);
+  const closure=CASE_DOCUMENTS.loaded.has(c.id)?caseDocumentClosureState(c):null;
+  const control=workflow.a1Status==='pending'
+    ?currentTier()>=3?`<button class="btn primary" onclick="assignArchiveA1('${escAttr(c.id)}',true)">A1-Anfrage bestätigen</button>`:'<span class="tag invest">Tier-3-Bestätigung ausstehend</span>'
+    :a1Active
+      ?`<button class="btn" onclick="go('caseform','${escAttr(c.id)}')">A1-Aufgaben bearbeiten</button><button class="btn primary" onclick="finalizeCaseArchive('${escAttr(c.id)}')" ${closure?.ready?'':'disabled'}>Akte endgültig archivieren</button>`
+      :currentTier()===2
+        ?`<button class="btn primary" onclick="requestArchiveA1('${escAttr(c.id)}')">A1 bei Tier 3 anfordern</button>`
+        :currentTier()>=3
+          ?`<button class="btn primary" onclick="assignArchiveA1('${escAttr(c.id)}')">A1-Prozess zuordnen</button>`
+          :'';
+  return `<div class="panel archive-action-panel"><div><span class="eyebrow">Abschlussprozess · A1 · Tier 2 &amp; Tier 3</span><strong>${a1Active?'A1 aktiv':workflow.a1Status==='pending'?'A1-Anfrage offen':'A1 noch nicht zugeordnet'}</strong><p>${a1Active?'Pflichtunterlagen vervollständigen und danach die finale Archivierung bestätigen.':workflow.a1Status==='pending'?'Eine Tier-2-Anfrage wartet auf Bestätigung durch Tier 3.':'Tier 2 kann A1 anfordern; Tier 3 kann A1 direkt zuordnen.'}</p></div><div class="actions">${control}</div>${a1Active&&CASE_DOCUMENTS.loading.has(c.id)?'<small role="status">A1-Unterlagen werden geprüft …</small>':''}${a1Active&&CASE_DOCUMENTS.errorByCase.has(c.id)?`<small class="case-document-error">${esc(CASE_DOCUMENTS.errorByCase.get(c.id))}</small>`:''}${a1Active&&closure&&!closure.ready?`<small>Es fehlen ${Math.max(0,5-closure.count)} abgeschlossene PDF-Dokumente und ${closure.missing.length} Pflichtunterlage(n).</small>`:''}</div>`;
+}
+function pageCaseArchiveWork(c){
+  return `<div class="pagehead"><div><div class="eyebrow">A1 · Aktenabschluss</div><h1>${esc(c.stw||'Akte')} · Archivprüfung</h1><p>Die Akte wurde geschlossen und aus „Alle Akten“ entfernt. Hier können ausschließlich A1-Zuordnung und Abschlussunterlagen bearbeitet werden.</p></div><div class="actions"><button class="btn" onclick="go('archive','${escAttr(c.id)}')">← Archivstatus</button></div></div>
+    ${archiveA1Panel(c)}
+    ${documentCaseProcessCodes(c).includes('A1')?caseDocumentsPanel(c):'<div class="panel"><h2>Prozess A1 erforderlich</h2><p>Die Pflichtunterlagen und Abschlussfreigabe werden nach der Zuordnung von A1 angezeigt.</p></div>'}`;
 }
 
 /* ============================= CASE DOCUMENTS ============================= */
@@ -2666,7 +2700,7 @@ async function loadCaseDocuments(caseId,force=false){
   }finally{
     CASE_DOCUMENTS.loading.delete(caseId);
     const openDocument=ROUTE.page==='document-editor'?DB.caseDocuments.find(row=>row.id===ROUTE.id):null;
-    if(['caseform','document-create'].includes(ROUTE.page)&&ROUTE.id===caseId||openDocument?.caseId===caseId) render();
+    if(['caseform','document-create'].includes(ROUTE.page)&&ROUTE.id===caseId||ROUTE.page==='archive'&&ROUTE.id===caseId||openDocument?.caseId===caseId) render();
   }
 }
 function documentFromRow(row){
@@ -3506,17 +3540,13 @@ async function saveCase(id, closeAfter){
     DB.cases.push(c);
   }
   const prevStatus = c.status, prevDecision = c.decision;
-  if(!isNew&&!c.processCode&&currentTier()>=2&&currentTier()<3&&v('f_status')==='Archiviert'){
-    await loadCaseDocuments(c.id,true);
-    if(CASE_DOCUMENTS.errorByCase.has(c.id)){
-      showAccessNotice('Der Aktenabschluss ist gesperrt, weil der PDF-Bestand nicht geprüft werden konnte.');
-      return;
-    }
-    const closure=caseDocumentClosureState(c);
-    if(!closure.ready){
-      showAccessNotice(`Aktenabschluss gesperrt: mindestens fünf abgeschlossene PDFs und alle Pflichtunterlagen sind erforderlich. Es fehlen ${Math.max(0,5-closure.count)} Dokumente und ${closure.missing.length} Pflichtunterlage(n).`);
-      return;
-    }
+  if(!isNew&&c.archiveWorkflow?.status==='submitted'){
+    showAccessNotice('Diese Akte ist geschlossen. Änderungen sind nur noch im A1-Abschlussprozess möglich.');
+    return;
+  }
+  if(!isNew&&v('f_status')==='Archiviert'){
+    showAccessNotice('Zum Schließen zuerst „Akte schliessen & zum Archiv einsenden“ verwenden. Die endgültige Archivierung erfolgt anschließend über Prozess A1.');
+    return;
   }
   const canEditLegacyDecision=currentTier()>=2&&!c.processCode;
   const requestedDecision=canEditLegacyDecision?v('f_decision'):c.decision;
@@ -3647,7 +3677,7 @@ function categoryColor(category){
 function pageCaseList(){
   return `
   <div class="pagehead">
-    <div><div class="eyebrow">Übersicht</div><h1>Alle Akten</h1></div>
+    <div><div class="eyebrow">Übersicht</div><h1>Alle Akten</h1><p>Zur Archivierung eingereichte und archivierte Akten findest du im Archiv.</p></div>
     <div class="actions">${currentTier()>=2?'<button class="btn" onclick="go(\'process-catalog\')">Vorgang anlegen</button>':''}<button class="btn primary" onclick="go('caseform')">+ Neue Akte</button></div>
   </div>
   <div class="panel">
@@ -3681,9 +3711,11 @@ function pageCaseProcessManagement(caseId){
     const actions=currentTier()>=3&&pending?`<div class="actions"><button class="btn small primary" onclick="reviewCaseProcessLink('${esc(c.id)}','${esc(request.id)}',true)">Bestätigen &amp; verknüpfen</button><button class="btn small danger" onclick="reviewCaseProcessLink('${esc(c.id)}','${esc(request.id)}',false)">Ablehnen</button></div>`:'';
     return `<article class="case-process-request"><div class="case-process-request-head"><div><span class="process-catalog-code">${esc(request.processCode)}</span><strong>${esc(process?.title||request.processCode)}</strong></div><span class="tag ${statusTagClass(request.status)}">${esc(request.status)}</span></div><p>${esc(request.reason||'—')}</p><small>Erstellt von ${esc(request.requestedByName||'Steward')} · Tier ${esc(request.requestedTier||'—')} · ${fmtDateTime(request.createdAt)}</small>${request.reviewReason?`<p class="case-process-review-note"><b>Prüfvermerk:</b> ${esc(request.reviewReason)}</p>`:''}${actions}</article>`;
   }).join('')||'<div class="empty">Noch keine Prozessanfragen vorhanden.</div>';
-  const canCreate=!['Archiviert','Entschieden'].includes(c.status);
+  const archiveSubmitted=c.archiveWorkflow?.status==='submitted';
+  const canCreate=!archiveSubmitted&&c.archiveWorkflow?.status!=='archived'&&!['Archiviert','Entschieden'].includes(c.status);
   return `<div class="pagehead"><div><div class="eyebrow">Aktenverwaltung · ${esc(c.stw)}</div><h1>Vorgänge verwalten</h1><p>${esc(c.event||'')} · Neue Vorgänge werden außerhalb der Akte erfasst und danach hier dokumentiert.</p></div><div class="actions"><button class="btn" onclick="go('caseform','${esc(c.id)}')">← Zur Akte</button>${currentTier()>=3?'<button class="btn gold" onclick="go(\'process-reviews\')">Prüfungsübersicht</button>':''}</div></div>
   <section class="panel case-process-management">
+    ${archiveSubmitted?'<div class="note">Diese Akte wurde zur Archivierung eingereicht. Für den Abschluss muss der Prozess A1 aktiv sein und vollständig dokumentiert werden.</div>':''}
     <div class="case-process-section-title"><div><span class="eyebrow">Aktive Zuordnungen</span><h2>Vorgänge dieser Akte</h2></div><span class="tag">${active.length} aktiv</span></div>
     <div class="case-process-list">${activeRows}</div>
     ${canCreate?`<form class="case-process-create" onsubmit="requestCaseProcess(event,'${esc(c.id)}')"><div><span class="eyebrow">${currentTier()===3?'Tier 3 · Direktanlage':'Tier 2 · Prüfanfrage'}</span><h3>Vorgang hinzufügen</h3><p>${currentTier()===3?'Tier 3 kann den Vorgang direkt anlegen.':'Die Zuordnung wird erst nach Bestätigung durch Tier 3 aktiviert.'}</p></div><div class="field"><label for="caseProcessCode">Prozess auswählen</label><select id="caseProcessCode" required><option value="">Prozess auswählen …</option>${available.map(process=>`<option value="${esc(process.code)}">${esc(process.code)} · ${esc(process.title)}</option>`).join('')}</select></div><div class="field"><label for="caseProcessReason">Auftrag / Begründung</label><textarea id="caseProcessReason" required maxlength="2000" rows="3" placeholder="Warum ist dieser Vorgang für die Akte erforderlich?"></textarea></div><button class="btn primary" type="submit">${currentTier()===3?'Vorgang anlegen':'Zur Tier-3-Prüfung senden'}</button></form>`:'<p class="note">Diese Akte ist abgeschlossen; weitere Vorgänge können nicht hinzugefügt werden.</p>'}
@@ -3712,7 +3744,7 @@ async function requestCaseProcess(event,caseId){
   if(documentCaseProcessCodes(c).includes(processCode)||(c.processLinkRequests||[]).some(item=>item.processCode===processCode&&item.status==='Tier-3-Prüfung ausstehend')){
     showAccessNotice('Dieser Vorgang ist bereits aktiv oder wartet schon auf Prüfung.'); return;
   }
-  if(['Archiviert','Entschieden'].includes(c.status)){
+  if(c.archiveWorkflow?.status==='submitted'||c.archiveWorkflow?.status==='archived'||['Archiviert','Entschieden'].includes(c.status)){
     showAccessNotice('Zu einer abgeschlossenen Akte kann kein weiterer Vorgang hinzugefügt werden.'); return;
   }
   const previous=JSON.parse(JSON.stringify(c));
@@ -3763,20 +3795,96 @@ async function persistCaseMutation(caseRecord,previous,errorLabel){
     await persist.cases();
     if(SUPABASE.lastSyncError) throw SUPABASE.lastSyncError;
     render();
+    return true;
   }catch(error){
     const index=DB.cases.findIndex(item=>item.id===caseRecord.id);
     if(index>=0) DB.cases[index]=previous;
     saveKey(KEYS.cases,DB.cases);
     console.error(errorLabel,error);
     showAccessNotice(`${errorLabel} ${error?.message||'Bitte Verbindung und Berechtigungen prüfen.'}`);
+    return false;
   }
+}
+async function closeCaseAndSendToArchive(caseId){
+  if(currentTier()<2){ showAccessNotice('Akten können nur von Tier 2 oder Tier 3 zur Archivierung eingereicht werden.'); return; }
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c||caseIsInArchive(c)){ showAccessNotice('Diese Akte ist nicht mehr für eine Einreichung verfügbar.'); return; }
+  const reason=window.prompt('Abschlussnotiz für die Archivierung:','Akte geschlossen und zur abschließenden A1-Prüfung eingereicht.');
+  if(reason===null) return;
+  if(!reason.trim()){ showAccessNotice('Bitte eine kurze Abschlussnotiz eintragen.'); return; }
+  const previous=JSON.parse(JSON.stringify(c));
+  const now=Date.now(),actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const event={id:uid(),action:'submitted',actorId,actorTier:currentTier(),actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()};
+  c.archiveWorkflow={status:'submitted',submittedAt:now,submittedById:actorId,submittedByTier:currentTier(),history:[...(c.archiveWorkflow?.history||[]),event]};
+  c.updatedAt=now;
+  c.history=[...(c.history||[]),{ts:now,actorId,actorTier:currentTier(),text:'Akte geschlossen und zur Archivierung eingereicht.'}];
+  addCaseActivity(c,'Akte geschlossen und zur A1-Archivierung eingereicht.');
+  if(await persistCaseMutation(c,previous,'Akte konnte nicht zur Archivierung eingereicht werden.')) go('archive',c.id);
+}
+async function requestArchiveA1(caseId){
+  if(currentTier()!==2){ showAccessNotice('Tier 2 kann A1 anfordern. Tier 3 kann A1 direkt zuordnen oder eine Anfrage bestätigen.'); return; }
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c||c.archiveWorkflow?.status!=='submitted'||c.archiveWorkflow.a1Status){ showAccessNotice('Für diese Akte kann keine neue A1-Anfrage erstellt werden.'); return; }
+  const reason=window.prompt('Begründung für die A1-Zuordnung:','Abschlussunterlagen prüfen und Akte vollständig archivieren.');
+  if(reason===null) return;
+  if(!reason.trim()){ showAccessNotice('Bitte die A1-Anfrage begründen.'); return; }
+  const previous=JSON.parse(JSON.stringify(c));
+  const now=Date.now(),actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const history=[...(c.archiveWorkflow.history||[]),{id:uid(),action:'a1_requested',actorId,actorTier:2,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()}];
+  c.archiveWorkflow={...c.archiveWorkflow,a1Status:'pending',a1RequestedAt:now,a1RequestedById:actorId,a1RequestedByTier:2,a1Reason:reason.trim(),history};
+  c.updatedAt=now;
+  addCaseActivity(c,'Prozess A1 zur Tier-3-Bestätigung angefordert.');
+  await persistCaseMutation(c,previous,'A1-Anfrage konnte nicht gespeichert werden.');
+}
+async function assignArchiveA1(caseId,approveRequest=false){
+  if(currentTier()<3){ showAccessNotice('Nur Tier 3 kann A1 direkt zuordnen oder eine Tier-2-Anfrage bestätigen.'); return; }
+  const c=DB.cases.find(item=>item.id===caseId), workflow=c?.archiveWorkflow||{};
+  if(!c||workflow.status!=='submitted'||(approveRequest?workflow.a1Status!=='pending':Boolean(workflow.a1Status))){ showAccessNotice('Der A1-Status hat sich geändert. Bitte die Archivansicht neu laden.'); return; }
+  const reason=window.prompt(approveRequest?'Prüfvermerk zur A1-Bestätigung:':'Begründung für die direkte A1-Zuordnung:',approveRequest?'A1-Zuordnung geprüft und bestätigt.':'A1 zur abschließenden Dokumentation zugeordnet.');
+  if(reason===null) return;
+  if(!reason.trim()){ showAccessNotice('Bitte einen A1-Prüfvermerk eintragen.'); return; }
+  const previous=JSON.parse(JSON.stringify(c));
+  const now=Date.now(),actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const action=approveRequest?'a1_approved':'a1_assigned';
+  c.activeProcessCodes=[...new Set([...(c.activeProcessCodes||[]),...(c.processCode?[c.processCode]:[]),'A1'])];
+  c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode:'A1',actorId,actorTier:3,actorName:AUTH.profile?.display_name||'',ts:now,action:'linked'}];
+  c.archiveWorkflow={...workflow,a1Status:'active',a1AssignedAt:now,a1AssignedById:actorId,a1AssignedByTier:3,a1ReviewReason:reason.trim(),history:[...(workflow.history||[]),{id:uid(),action,actorId,actorTier:3,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()}]};
+  c.updatedAt=now;
+  addCaseActivity(c,`Prozess A1 durch Tier 3 ${approveRequest?'bestätigt':'zugeordnet'}.`);
+  await persistCaseMutation(c,previous,'A1 konnte nicht zugeordnet werden.');
+}
+async function finalizeCaseArchive(caseId){
+  if(currentTier()<2){ showAccessNotice('Akte endgültig archivieren dürfen nur Tier 2 und Tier 3.'); return; }
+  const c=DB.cases.find(item=>item.id===caseId);
+  if(!c||c.archiveWorkflow?.status!=='submitted'){ showAccessNotice('Die Akte wurde nicht zur Archivierung eingereicht.'); return; }
+  if(c.archiveWorkflow.a1Status!=='active'||!documentCaseProcessCodes(c).includes('A1')){ showAccessNotice('Vor der endgültigen Archivierung muss Prozess A1 aktiv zugeordnet sein.'); return; }
+  if((c.processLinkRequests||[]).some(item=>item.processCode==='A1'&&item.status==='Tier-3-Prüfung ausstehend')){ showAccessNotice('Die Tier-3-Bestätigung für Prozess A1 steht noch aus.'); return; }
+  if(!CASE_DOCUMENTS.loaded.has(c.id)) await loadCaseDocuments(c.id,true);
+  if(CASE_DOCUMENTS.errorByCase.has(c.id)){ showAccessNotice('Der A1-Dokumentbestand konnte nicht sicher geprüft werden.'); return; }
+  const closure=caseDocumentClosureState(c);
+  if(!closure.ready){
+    showAccessNotice(`A1-Abschluss gesperrt: Es fehlen ${Math.max(0,5-closure.count)} abgeschlossene PDF-Dokumente und ${closure.missing.length} Pflichtunterlage(n).`);
+    render();
+    return;
+  }
+  const reason=window.prompt('Abschlussvermerk für die endgültige Archivierung:','A1-Vollständigkeitsprüfung abgeschlossen; Akte wird archiviert.');
+  if(reason===null) return;
+  if(!reason.trim()){ showAccessNotice('Bitte einen Abschlussvermerk eintragen.'); return; }
+  const previous=JSON.parse(JSON.stringify(c));
+  const now=Date.now(),actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
+  const event={id:uid(),action:'archived',actorId,actorTier:currentTier(),actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()};
+  c.archiveWorkflow={...c.archiveWorkflow,status:'archived',archivedAt:now,archivedById:actorId,archivedByTier:currentTier(),history:[...(c.archiveWorkflow.history||[]),event]};
+  c.updatedAt=now;
+  c.history=[...(c.history||[]),{ts:now,actorId,actorTier:currentTier(),text:'Akte nach abgeschlossenem Prozess A1 endgültig archiviert.'}];
+  addCaseActivity(c,'Akte endgültig nach A1 archiviert.');
+  if(await persistCaseMutation(c,previous,'Akte konnte nicht endgültig archiviert werden.')) go('archive',c.id);
 }
 function renderCaseTable(){
   const q = (document.getElementById('cf_q')?.value||'').toLowerCase();
   const st = document.getElementById('cf_status')?.value||'';
   const tm = document.getElementById('cf_team')?.value||'';
   const ct = document.getElementById('cf_cat')?.value||'';
-  let list = [...DB.cases].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  let list = DB.cases.filter(c=>!caseIsInArchive(c)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   list = list.filter(c=>{
     if(st && c.status!==st && caseDisplayStatus(c)!==st) return false;
     if(tm && c.teamInvolved!==tm) return false;
@@ -4232,7 +4340,7 @@ function renderCaseTable(){
   const st = document.getElementById('cf_status')?.value||'';
   const tm = document.getElementById('cf_team')?.value||'';
   const ct = document.getElementById('cf_cat')?.value||'';
-  let list = [...DB.cases].sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  let list = DB.cases.filter(c=>!caseIsInArchive(c)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   list = list.filter(c=>{
     if(String(c.status||'').startsWith('An Tier ') || c.status === 'Zurück an Tier 1') {
       if(st !== 'Eskaliert' && st !== 'Zurück an Tier 1' && st !== '') return false;
@@ -4677,19 +4785,35 @@ function archiveField(label, value, multiline){
   return `<div class="field archive-field"><label>${esc(label)}</label><div class="archive-value${multiline?' multiline':''}">${multiline?nl2br(value||'—'):esc(value||'—')}</div></div>`;
 }
 function pageArchive(){
-  const cases=DB.cases.slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const cases=DB.cases.filter(caseIsInArchive).sort((a,b)=>(b.archiveWorkflow?.updatedAt||b.createdAt||0)-(a.archiveWorkflow?.updatedAt||a.createdAt||0));
+  const pending=cases.filter(c=>c.archiveWorkflow?.status==='submitted');
+  const archived=cases.filter(c=>c.archiveWorkflow?.status==='archived'||c.status==='Archiviert');
   const actions=DB.caseActivityLog.slice().sort((a,b)=>(b.ts||0)-(a.ts||0));
   const deleted=DB.deletedCaseLog.slice().sort((a,b)=>(b.deletedAt||0)-(a.deletedAt||0));
-  return `<div class="pagehead"><div><div class="eyebrow">Verwaltung · Nur lesen</div><h1>Aktenarchiv</h1></div><div class="actions"><button class="btn" onclick="go('manage')">← Verwaltung</button></div></div>
-  <div class="panel archive-intro"><h2>Gespeicherte <b>Akten</b></h2><p>Hier werden ausschließlich bereits angelegte Akten angezeigt. Die Archivansicht ist schreibgeschützt.</p></div>
-  <div class="panel"><div class="archive-section-head"><h2>Aktennummern</h2><span>${cases.length} angelegt</span></div><div class="archive-case-list">${cases.map(c=>`<button class="archive-case-row" onclick="go('archive','${c.id}')"><span class="archive-case-no">${esc(c.stw||'Ohne Nummer')}</span><span class="archive-case-meta"><b>${esc(c.event||'Ohne Event')}</b><small>${esc(c.category||'Sonstiger Vorfall')} · ${esc(c.status||'Neu')}</small></span><span class="archive-category-dot" style="background:${categoryColor(c.category)}"></span><span class="archive-open">Ansehen →</span></button>`).join('')||'<div class="empty">Noch keine Akten angelegt.</div>'}</div></div>
+  const rows=list=>list.map(c=>`<button class="archive-case-row" onclick="go('archive','${escAttr(c.id)}')"><span class="archive-case-no">${esc(c.stw||'Ohne Nummer')}</span><span class="archive-case-meta"><b>${esc(c.event||'Ohne Event')}</b><small>${esc(c.category||'Sonstiger Vorfall')} · ${esc(caseDisplayStatus(c))}</small></span><span class="archive-category-dot" style="background:${categoryColor(c.category)}"></span><span class="archive-open">Ansehen →</span></button>`).join('');
+  return `<div class="pagehead"><div><div class="eyebrow">Aktenablage · Tier 2 &amp; Tier 3</div><h1>Aktenarchiv</h1><p>Abgeschlossene Akten werden hier gesammelt. A1 dokumentiert Vollständigkeit und sichere Ablage.</p></div><div class="actions"><button class="btn" onclick="go('cases')">← Alle Akten</button></div></div>
+  <div class="grid cols-2 archive-workflow-stats"><div class="stat amber"><div class="n">${pending.length}</div><div class="l">Zur Archivierung eingereicht</div></div><div class="stat green"><div class="n">${archived.length}</div><div class="l">Endgültig archiviert</div></div></div>
+  <div class="panel archive-intro"><h2>Abschluss über <b>Prozess A1</b></h2><p>Eine eingereichte Akte verschwindet aus „Alle Akten“. Tier 2 kann A1 anfordern; Tier 3 bestätigt die Zuordnung. Nach den Pflichtunterlagen kann Tier 2 oder Tier 3 endgültig archivieren.</p></div>
+  <div class="panel"><div class="archive-section-head"><h2>Zur Archivierung eingereicht</h2><span>${pending.length} offen</span></div><div class="archive-case-list">${rows(pending)||'<div class="empty">Keine Akten warten auf den A1-Abschluss.</div>'}</div></div>
+  <div class="panel"><div class="archive-section-head"><h2>Endgültig archiviert</h2><span>${archived.length} abgelegt</span></div><div class="archive-case-list">${rows(archived)||'<div class="empty">Noch keine Akten endgültig archiviert.</div>'}</div></div>
   <div class="archive-log-grid"><section class="panel"><div class="archive-section-head"><h2>Aktionslog</h2><span>Nur ansehen</span></div><div class="archive-log">${actions.map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(item.category)}"></span><div><b>${esc(item.stw)}</b><span>${esc(item.action)}</span><small>${fmtDateTime(item.ts)} · ${esc(item.category)}</small></div></div>`).join('')||'<div class="empty">Noch keine Aktionen protokolliert.</div>'}</div></section><section class="panel"><div class="archive-section-head"><h2>Gelöschte Akten</h2><span>Nur ansehen</span></div><div class="archive-log">${deleted.map(item=>`<div class="archive-log-row deleted"><span class="archive-log-mark"></span><div><b>${esc(item.stw||'Unbekannte Akte')}</b><span>Akte gelöscht</span><small>${fmtDateTime(item.deletedAt)} · ${esc(item.event||'Ohne Event')}</small></div></div>`).join('')||'<div class="empty">Keine gelöschten Akten protokolliert.</div>'}</div></section></div>`;
 }
 function pageArchiveCase(id){
   const c=DB.cases.find(item=>item.id===id);
-  if(!c) return `<div class="pagehead"><div><div class="eyebrow">Aktenarchiv</div><h1>Akte nicht gefunden</h1></div><button class="btn" onclick="go('archive')">← Zum Archiv</button></div><div class="empty">Diese Akte ist nicht mehr im Archiv vorhanden.</div>`;
+  if(!c||!caseIsInArchive(c)) return `<div class="pagehead"><div><div class="eyebrow">Aktenarchiv</div><h1>Akte nicht gefunden</h1></div><button class="btn" onclick="go('archive')">← Zum Archiv</button></div><div class="empty">Diese Akte wurde noch nicht zur Archivierung eingereicht.</div>`;
+  const submitted=c.archiveWorkflow?.status==='submitted';
+  const finalized=c.archiveWorkflow?.status==='archived'||c.status==='Archiviert';
   const driver=driverById(c.driverInvolved), affected=driverById(c.driverAffected);
-  return `<div class="pagehead"><div><div class="eyebrow">Aktenarchiv · Nur lesen</div><h1>${esc(c.stw||'Akte')}</h1></div><div class="actions"><button class="btn" onclick="go('archive')">← Zum Archiv</button></div></div><div class="panel archive-readonly-head"><div><span class="archive-case-no">${esc(c.stw||'—')}</span><h2>${esc(c.event||'Ohne Event')}</h2></div><span class="tag ${statusTagClass(c.status)}">${esc(c.status||'Neu')}</span></div><div class="panel"><div class="archive-section-head"><h2>Akteninhalt</h2><span>Schreibgeschützt</span></div><div class="grid cols-3">${archiveField('Saison',c.season)}${archiveField('Session',c.sessionType)}${archiveField('Zeitpunkt',c.incidentLap)}${archiveField('Kategorie',c.category)}${archiveField('Meldung durch',c.reportedBy)}${archiveField('Angelegt am',fmtDateTime(c.createdAt))}</div><div class="sectiontitle">Beteiligte</div><div class="grid cols-2">${archiveField('Beschuldigtes Team',teamById(c.teamInvolved)?.name)}${archiveField('Betroffener Fahrer',driverName(driver))}${archiveField('Geschädigtes Team',teamById(c.teamAffected)?.name)}${archiveField('Geschädigter Fahrer',driverName(affected))}</div><div class="sectiontitle">Sachverhalt</div>${archiveField('Beschreibung des Vorfalls',c.description,true)}<div class="grid cols-2">${archiveField('Beweismittel',c.evidenceLink)}${archiveField('Anhörung',c.hearingHeld?'Durchgeführt':'Nicht dokumentiert')}</div>${archiveField('Untersuchung / Anmerkungen',c.investigationNotes,true)}<div class="grid cols-2">${archiveField('Regelverstoß',c.regulationBreach)}${archiveField('Präzedenzfall',c.precedent)}</div><div class="sectiontitle">Entscheidung</div><div class="grid cols-2">${archiveField('Entscheidung',c.decision)}${archiveField('Strafpunkte',String(c.penaltyPoints||0))}${archiveField('Lizenzstatus',c.licenseStatusAfter)}${archiveField('Lizenzdetail',c.licenseStatusDetail)}</div>${archiveField('Begründung / Detail',c.decisionDetail,true)}</div>${c.history?.length?`<div class="panel"><div class="archive-section-head"><h2>Aktenhistorie</h2><span>Nur ansehen</span></div><div class="archive-log">${c.history.slice().reverse().map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(c.category)}"></span><div><b>${fmtDateTime(item.ts)}</b><span>${esc(item.text)}</span></div></div>`).join('')}</div></div>`:''}`;
+  const heading=`<div class="pagehead"><div><div class="eyebrow">Aktenarchiv · ${finalized?'Endgültig abgelegt':'A1-Abschluss ausstehend'}</div><h1>${esc(c.stw||'Akte')}</h1></div><div class="actions"><button class="btn" onclick="go('archive')">← Zum Archiv</button></div></div>`;
+  const status=`<div class="panel archive-readonly-head"><div><span class="archive-case-no">${esc(c.stw||'—')}</span><h2>${esc(c.event||'Ohne Event')}</h2></div><span class="tag ${finalized?'archived':'invest'}">${finalized?'Archiviert':caseDisplayStatus(c)}</span></div>`;
+  const detail=`<div class="panel"><div class="archive-section-head"><h2>Akteninhalt</h2><span>Schreibgeschützt</span></div>
+    <div class="grid cols-3">${archiveField('Saison',c.season)}${archiveField('Session',c.sessionType)}${archiveField('Zeitpunkt',c.incidentLap)}${archiveField('Kategorie',c.category)}${archiveField('Meldung durch',c.reportedBy)}${archiveField('Angelegt am',fmtDateTime(c.createdAt))}${archiveField('Zur Archivierung eingereicht',fmtDateTime(c.archiveWorkflow?.submittedAt))}</div>
+    <div class="sectiontitle">Beteiligte</div><div class="grid cols-2">${archiveField('Beschuldigtes Team',teamById(c.teamInvolved)?.name)}${archiveField('Betroffener Fahrer',driverName(driver))}${archiveField('Geschädigtes Team',teamById(c.teamAffected)?.name)}${archiveField('Geschädigter Fahrer',driverName(affected))}</div>
+    <div class="sectiontitle">Sachverhalt</div>${archiveField('Beschreibung des Vorfalls',c.description,true)}<div class="grid cols-2">${archiveField('Beweismittel',c.evidenceLink)}${archiveField('Anhörung',c.hearingHeld?'Durchgeführt':'Nicht dokumentiert')}</div>${archiveField('Untersuchung / Anmerkungen',c.investigationNotes,true)}<div class="grid cols-2">${archiveField('Regelverstoß',c.regulationBreach)}${archiveField('Präzedenzfall',c.precedent)}</div>
+    <div class="sectiontitle">Entscheidung</div><div class="grid cols-2">${archiveField('Entscheidung',c.decision)}${archiveField('Strafpunkte',String(c.penaltyPoints||0))}${archiveField('Lizenzstatus',c.licenseStatusAfter)}${archiveField('Lizenzdetail',c.licenseStatusDetail)}</div>${archiveField('Begründung / Detail',c.decisionDetail,true)}</div>`;
+  const archiveHistory=c.archiveWorkflow?.history?.length?`<div class="panel"><div class="archive-section-head"><h2>A1-Abschlussprotokoll</h2><span>Nachvollziehbar</span></div><div class="archive-log">${c.archiveWorkflow.history.slice().reverse().map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(c.category)}"></span><div><b>${fmtDateTime(item.ts)}</b><span>${esc(({submitted:'Zur Archivierung eingereicht',a1_requested:'A1 angefordert',a1_approved:'A1 bestätigt',a1_assigned:'A1 zugeordnet',archived:'Endgültig archiviert'})[item.action]||item.action)} · ${esc(item.reason)}</span><small>${esc(item.actorName||'Tier '+item.actorTier)} · Tier ${esc(item.actorTier)}</small></div></div>`).join('')}</div></div>`:'';
+  const caseHistory=c.history?.length?`<div class="panel"><div class="archive-section-head"><h2>Aktenhistorie</h2><span>Nur ansehen</span></div><div class="archive-log">${c.history.slice().reverse().map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(c.category)}"></span><div><b>${fmtDateTime(item.ts)}</b><span>${esc(item.text)}</span></div></div>`).join('')}</div></div>`:'';
+  return `${heading}${status}${submitted?archiveA1Panel(c):''}${detail}${archiveHistory}${caseHistory}`;
 }
 
 /* ============================= MANAGEMENT ============================= */

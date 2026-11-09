@@ -1,6 +1,6 @@
 # Driver Classification deployment
 
-1. Apply the complete `supabase_schema.sql` in the Supabase SQL Editor. It creates the classification tables and the private, Tier-2/3 case financial-assessment table, then asks PostgREST to reload its schema cache. If only the missing configuration table and financial-assessment feature need to be applied, run `supabase/migrations/20261109000000_driver_classification_and_case_financial_assessments.sql` instead. Both scripts are safe to reapply.
+1. Apply the complete `supabase_schema.sql` in the Supabase SQL Editor. It creates the classification tables, the private Tier-2/3 case financial-assessment table, and the protected A1 archive workflow, then asks PostgREST to reload its schema cache. If applying migrations individually, run `supabase/migrations/20261109000000_driver_classification_and_case_financial_assessments.sql` followed by `supabase/migrations/20261109010000_case_archive_workflow.sql`.
 2. Deploy the PDF Edge Function from the repository root after linking the existing Supabase project:
 
    ```sh
@@ -12,6 +12,8 @@
 3. Sign in with a Tier-3 account and open **Driver Classification**. Enter the official reference times for Australia, Bahrain, Belgium, and any additional tracks before evaluating applicants.
 
 On a new classification, an existing driver can be selected from the driver registry or found by license number. Case financial assessments are stored separately from the shared case data and are protected by database policies: only Tier 2 and Tier 3 can read or save them.
+
+Closing a case submits it to the archive and removes it from **Alle Akten**. Tier 2 can request A1; Tier 3 confirms that request or assigns A1 directly. Only Tier 2 and Tier 3 can perform the final archive action, which is enforced by the database together with the A1 document requirements. Submitted cases are locked while A1 is completed; finalized archive records cannot be changed or deleted.
 
 The initial track references are intentionally empty: no authoritative lap-time values were present in the existing application. The scoring defaults are editable and are stored in the database. Time-trial score is `max(0, 1000 - max(0, deviationPercent) × penaltyPerPercent)`, capped at 1,000. Category scores are combined as a weighted mean; division thresholds and minimum safety ratings determine the suggested division.
 

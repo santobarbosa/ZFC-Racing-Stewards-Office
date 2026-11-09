@@ -66,11 +66,13 @@ test('Tier 2 can view Tier 1 areas and Tier 3 can view every registered area',()
   const context=createAppContext();
   vm.runInContext(`AUTH.profile={id:'tier-1',access_tier:1};`,context);
   assert.equal(vm.runInContext(`canAccessPage('dashboard')`,context),true);
+  assert.equal(vm.runInContext(`canAccessPage('archive')`,context),false);
   assert.equal(vm.runInContext(`canAccessPage('finance')`,context),false);
 
   vm.runInContext(`AUTH.profile={id:'tier-2',access_tier:2};`,context);
   assert.equal(vm.runInContext(`canAccessPage('dashboard')`,context),true);
   assert.equal(vm.runInContext(`canAccessPage('cases')`,context),true);
+  assert.equal(vm.runInContext(`canAccessPage('archive')`,context),true);
   assert.equal(vm.runInContext(`canAccessPage('finance')`,context),false);
   assert.equal(vm.runInContext(`canAccessPage('tier-office-t3')`,context),false);
 
@@ -166,6 +168,34 @@ test('Case financial assessments are isolated and restricted to Tier 2 and Tier 
   vm.runInContext(`AUTH.profile={id:'tier-1',access_tier:1};let accessMessage='';showAccessNotice=message=>{accessMessage=message;};`,context);
   vm.runInContext(`saveCaseFinancialAssessment('case-1')`,context);
   assert.match(vm.runInContext('accessMessage',context),/nur von Tier 2 und Tier 3/);
+});
+
+test('Closing a case sends it to the archive, hides it from active cases, and routes A1 by tier',()=>{
+  const context=createAppContext();
+  const caseData={id:'case-archive-1',stw:'STW-1',event:'GP Test',category:'Kontakt',status:'Entschieden',archiveWorkflow:{status:'submitted',history:[]}};
+  vm.runInContext(`DB.cases=[${JSON.stringify(caseData)}];DB.caseActivityLog=[];DB.deletedCaseLog=[];AUTH.profile={id:'tier-2',display_name:'Tier 2',access_tier:2};`,context);
+  const archiveHtml=vm.runInContext('pageArchive()',context);
+  assert.match(archiveHtml,/STW-1/);
+  assert.match(archiveHtml,/Zur Archivierung eingereicht/);
+
+  vm.runInContext(`const table={};document.getElementById=id=>table[id]||(table[id]={value:'',innerHTML:''});renderCaseTable();`,context);
+  assert.match(vm.runInContext(`document.getElementById('caseTableWrap').innerHTML`,context),/Keine Akten gefunden/);
+
+  const tier2Panel=vm.runInContext(`archiveA1Panel(DB.cases[0])`,context);
+  assert.match(tier2Panel,/A1 bei Tier 3 anfordern/);
+  assert.doesNotMatch(tier2Panel,/A1-Anfrage bestätigen/);
+  vm.runInContext(`AUTH.profile={id:'tier-3',display_name:'Tier 3',access_tier:3};`,context);
+  vm.runInContext(`DB.cases[0].archiveWorkflow.a1Status='pending';`,context);
+  assert.match(vm.runInContext(`archiveA1Panel(DB.cases[0])`,context),/A1-Anfrage bestätigen/);
+  assert.match(vm.runInContext(`pageCaseForm(DB.cases[0])`,context),/A1 · Aktenabschluss/);
+
+  const caseForm=vm.runInContext(`pageCaseForm({id:'active',status:'Offen',history:[]})`,context);
+  assert.match(caseForm,/Akte schliessen &amp; zum Archiv einsenden/);
+  assert.match(schema,/create or replace function public\.zfc_validate_case_archive_workflow/);
+  assert.match(schema,/Akten können nur von Tier 2 oder Tier 3 geschlossen und archiviert werden/);
+  assert.match(schema,/A1-Abschluss gesperrt: Pflichtunterlage/);
+  assert.match(schema,/Eingereichte oder archivierte Akten dürfen nicht gelöscht werden/);
+  assert.match(schema,/Endgültig archivierte Akten sind unveränderlich/);
 });
 
 test('Jarves expands short keywords into grounded long drafts with document and style options',()=>{
