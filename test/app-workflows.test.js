@@ -182,8 +182,9 @@ test('Closing a case sends it to the archive, hides it from active cases, and ro
   assert.match(vm.runInContext(`document.getElementById('caseTableWrap').innerHTML`,context),/Keine Akten gefunden/);
 
   const tier2Panel=vm.runInContext(`archiveA1Panel(DB.cases[0])`,context);
-  assert.match(tier2Panel,/A1 bei Tier 3 anfordern/);
+  assert.match(tier2Panel,/A1-Prozess zuordnen/);
   assert.doesNotMatch(tier2Panel,/A1-Anfrage bestätigen/);
+  assert.match(vm.runInContext(`pageArchive()`,context),/Tier 2 oder Tier 3 ordnet A1 hier direkt zu/);
   vm.runInContext(`AUTH.profile={id:'tier-3',display_name:'Tier 3',access_tier:3};`,context);
   vm.runInContext(`DB.cases[0].archiveWorkflow.a1Status='pending';`,context);
   assert.match(vm.runInContext(`archiveA1Panel(DB.cases[0])`,context),/A1-Anfrage bestätigen/);
@@ -194,6 +195,7 @@ test('Closing a case sends it to the archive, hides it from active cases, and ro
   assert.match(schema,/create or replace function public\.zfc_validate_case_archive_workflow/);
   assert.match(schema,/Akten können nur von Tier 2 oder Tier 3 geschlossen und archiviert werden/);
   assert.match(schema,/A1-Abschluss gesperrt: Pflichtunterlage/);
+  assert.match(schema,/old_archive->>'a1Status' is null and actor_tier<2/);
   assert.match(schema,/Eingereichte oder archivierte Akten dürfen nicht gelöscht werden/);
   assert.match(schema,/Endgültig archivierte Akten sind unveränderlich/);
 });

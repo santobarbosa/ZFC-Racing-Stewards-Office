@@ -1,5 +1,5 @@
 -- Apply after the base schema and the case-document tables are installed.
--- Adds a Tier-2/3 close-and-submit step, a Tier-3 A1 approval, and a guarded
+-- Adds a Tier-2/3 close-and-submit step, a Tier-2/3 A1 assignment, and a guarded
 -- final archive step with required A1 documents.
 
 create or replace function public.zfc_validate_case_archive_workflow()
@@ -108,9 +108,13 @@ begin
 						raise exception 'Eine A1-Anfrage darf nur einmalig durch Tier 2 eingereicht werden.';
 					end if;
 				elsif new_archive->>'a1Status'='active' then
-					if actor_tier<>3
+					if (old_archive->>'a1Status'='pending' and actor_tier<>3)
+						or (old_archive->>'a1Status' is null and actor_tier<2)
 						or (old_archive->>'a1Status' is not null and old_archive->>'a1Status'<>'pending')
-						or last_event->>'action' is distinct from (case when old_archive->>'a1Status'='pending' then 'a1_approved' else 'a1_assigned' end)
+						or (old_archive->>'a1Status'='pending'
+							and last_event->>'action' is distinct from 'a1_approved')
+						or (old_archive->>'a1Status' is null
+							and last_event->>'action' is distinct from 'a1_assigned')
 						or (coalesce(old_case->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb
 							and case_item->'activeProcessCodes' is distinct from old_case->'activeProcessCodes')
 						or (not coalesce(old_case->'activeProcessCodes','[]'::jsonb) @> '["A1"]'::jsonb
@@ -123,7 +127,7 @@ begin
 						or case_item->'activeProcessHistory'->(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)->>'action' is distinct from 'linked'
 						or case_item->'activeProcessHistory'->(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)->>'actorId' is distinct from auth.uid()::text
 						or (case_item->'activeProcessHistory'->(jsonb_array_length(coalesce(case_item->'activeProcessHistory','[]'::jsonb))-1)->>'actorTier')::smallint is distinct from actor_tier then
-						raise exception 'A1 kann nur durch Tier 3 bestätigt oder direkt zugeordnet werden.';
+						raise exception 'A1 kann durch Tier 2 oder Tier 3 zugeordnet werden; offene Anfragen bestätigt Tier 3.';
 					end if;
 				else
 					raise exception 'Ungültiger A1-Status.';

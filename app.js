@@ -2533,13 +2533,11 @@ function archiveA1Panel(c){
   const control=workflow.a1Status==='pending'
     ?currentTier()>=3?`<button class="btn primary" onclick="assignArchiveA1('${escAttr(c.id)}',true)">A1-Anfrage bestätigen</button>`:'<span class="tag invest">Tier-3-Bestätigung ausstehend</span>'
     :a1Active
-      ?`<button class="btn" onclick="go('caseform','${escAttr(c.id)}')">A1-Aufgaben bearbeiten</button><button class="btn primary" onclick="finalizeCaseArchive('${escAttr(c.id)}')" ${closure?.ready?'':'disabled'}>Akte endgültig archivieren</button>`
-      :currentTier()===2
-        ?`<button class="btn primary" onclick="requestArchiveA1('${escAttr(c.id)}')">A1 bei Tier 3 anfordern</button>`
-        :currentTier()>=3
-          ?`<button class="btn primary" onclick="assignArchiveA1('${escAttr(c.id)}')">A1-Prozess zuordnen</button>`
-          :'';
-  return `<div class="panel archive-action-panel"><div><span class="eyebrow">Abschlussprozess · A1 · Tier 2 &amp; Tier 3</span><strong>${a1Active?'A1 aktiv':workflow.a1Status==='pending'?'A1-Anfrage offen':'A1 noch nicht zugeordnet'}</strong><p>${a1Active?'Pflichtunterlagen vervollständigen und danach die finale Archivierung bestätigen.':workflow.a1Status==='pending'?'Eine Tier-2-Anfrage wartet auf Bestätigung durch Tier 3.':'Tier 2 kann A1 anfordern; Tier 3 kann A1 direkt zuordnen.'}</p></div><div class="actions">${control}</div>${a1Active&&CASE_DOCUMENTS.loading.has(c.id)?'<small role="status">A1-Unterlagen werden geprüft …</small>':''}${a1Active&&CASE_DOCUMENTS.errorByCase.has(c.id)?`<small class="case-document-error">${esc(CASE_DOCUMENTS.errorByCase.get(c.id))}</small>`:''}${a1Active&&closure&&!closure.ready?`<small>Es fehlen ${Math.max(0,5-closure.count)} abgeschlossene PDF-Dokumente und ${closure.missing.length} Pflichtunterlage(n).</small>`:''}</div>`;
+      ?`<button class="btn" onclick="go('caseform','${escAttr(c.id)}')">A1-Aufgaben bearbeiten</button><button class="btn primary" onclick="finalizeCaseArchive('${escAttr(c.id)}')" ${closure?.ready?'':'disabled'}>Schliessen und archivieren</button>`
+      :currentTier()>=2
+        ?`<button class="btn primary" onclick="assignArchiveA1('${escAttr(c.id)}')">A1-Prozess zuordnen</button>`
+        :'';
+  return `<div class="panel archive-action-panel"><div><span class="eyebrow">Abschlussprozess · A1 · Tier 2 &amp; Tier 3</span><strong>${a1Active?'A1 aktiv':workflow.a1Status==='pending'?'A1-Anfrage offen':'A1 noch nicht zugeordnet'}</strong><p>${a1Active?'Pflichtunterlagen vervollständigen und danach die finale Archivierung bestätigen.':workflow.a1Status==='pending'?'Eine Tier-2-Anfrage wartet auf Bestätigung durch Tier 3.':'Tier 2 oder Tier 3 ordnet A1 direkt zu.'}</p></div><div class="actions">${control}</div>${a1Active&&CASE_DOCUMENTS.loading.has(c.id)?'<small role="status">A1-Unterlagen werden geprüft …</small>':''}${a1Active&&CASE_DOCUMENTS.errorByCase.has(c.id)?`<small class="case-document-error">${esc(CASE_DOCUMENTS.errorByCase.get(c.id))}</small>`:''}${a1Active&&closure&&!closure.ready?`<small>Es fehlen ${Math.max(0,5-closure.count)} abgeschlossene PDF-Dokumente und ${closure.missing.length} Pflichtunterlage(n).</small>`:''}</div>`;
 }
 function pageCaseArchiveWork(c){
   return `<div class="pagehead"><div><div class="eyebrow">A1 · Aktenabschluss</div><h1>${esc(c.stw||'Akte')} · Archivprüfung</h1><p>Die Akte wurde geschlossen und aus „Alle Akten“ entfernt. Hier können ausschließlich A1-Zuordnung und Abschlussunterlagen bearbeitet werden.</p></div><div class="actions"><button class="btn" onclick="go('archive','${escAttr(c.id)}')">← Archivstatus</button></div></div>
@@ -3797,6 +3795,24 @@ async function persistCaseMutation(caseRecord,previous,errorLabel){
     render();
     return true;
   }catch(error){
+    const caseId=caseRecord.id;
+    if(SUPABASE.client&&/Eingereichte Akten sind bis zum Abschluss von A1 gesperrt/.test(error?.message||'')){
+      try{
+        const latest=await SUPABASE.client.from('zfc_app_state').select('state').eq('id',1).maybeSingle();
+        if(latest.error) throw latest.error;
+        if(latest.data?.state){
+          applyRemoteState(latest.data.state);
+          SUPABASE.baseState=cloneState(latest.data.state);
+          if(DB.cases.find(item=>item.id===caseId)?.archiveWorkflow?.status==='submitted'){
+            render();
+            showAccessNotice('Diese Akte wurde bereits zur Archivierung eingereicht und befindet sich im Archiv.');
+            return true;
+          }
+        }
+      }catch(refreshError){
+        console.error('Aktueller Archivstatus konnte nach einem Synchronisationsfehler nicht geladen werden.',refreshError);
+      }
+    }
     const index=DB.cases.findIndex(item=>item.id===caseRecord.id);
     if(index>=0) DB.cases[index]=previous;
     saveKey(KEYS.cases,DB.cases);
@@ -3808,7 +3824,8 @@ async function persistCaseMutation(caseRecord,previous,errorLabel){
 async function closeCaseAndSendToArchive(caseId){
   if(currentTier()<2){ showAccessNotice('Akten können nur von Tier 2 oder Tier 3 zur Archivierung eingereicht werden.'); return; }
   const c=DB.cases.find(item=>item.id===caseId);
-  if(!c||caseIsInArchive(c)){ showAccessNotice('Diese Akte ist nicht mehr für eine Einreichung verfügbar.'); return; }
+  if(c&&caseIsInArchive(c)){ go('archive',c.id); return; }
+  if(!c){ showAccessNotice('Diese Akte ist nicht mehr für eine Einreichung verfügbar.'); return; }
   const reason=window.prompt('Abschlussnotiz für die Archivierung:','Akte geschlossen und zur abschließenden A1-Prüfung eingereicht.');
   if(reason===null) return;
   if(!reason.trim()){ showAccessNotice('Bitte eine kurze Abschlussnotiz eintragen.'); return; }
@@ -3822,7 +3839,7 @@ async function closeCaseAndSendToArchive(caseId){
   if(await persistCaseMutation(c,previous,'Akte konnte nicht zur Archivierung eingereicht werden.')) go('archive',c.id);
 }
 async function requestArchiveA1(caseId){
-  if(currentTier()!==2){ showAccessNotice('Tier 2 kann A1 anfordern. Tier 3 kann A1 direkt zuordnen oder eine Anfrage bestätigen.'); return; }
+  if(currentTier()!==2){ showAccessNotice('A1 kann nur durch Tier 2 oder Tier 3 zugeordnet werden.'); return; }
   const c=DB.cases.find(item=>item.id===caseId);
   if(!c||c.archiveWorkflow?.status!=='submitted'||c.archiveWorkflow.a1Status){ showAccessNotice('Für diese Akte kann keine neue A1-Anfrage erstellt werden.'); return; }
   const reason=window.prompt('Begründung für die A1-Zuordnung:','Abschlussunterlagen prüfen und Akte vollständig archivieren.');
@@ -3837,7 +3854,7 @@ async function requestArchiveA1(caseId){
   await persistCaseMutation(c,previous,'A1-Anfrage konnte nicht gespeichert werden.');
 }
 async function assignArchiveA1(caseId,approveRequest=false){
-  if(currentTier()<3){ showAccessNotice('Nur Tier 3 kann A1 direkt zuordnen oder eine Tier-2-Anfrage bestätigen.'); return; }
+  if(currentTier()<2||(approveRequest&&currentTier()<3)){ showAccessNotice('A1 kann nur durch Tier 2 oder Tier 3 zugeordnet werden. Offene Anfragen bestätigt Tier 3.'); return; }
   const c=DB.cases.find(item=>item.id===caseId), workflow=c?.archiveWorkflow||{};
   if(!c||workflow.status!=='submitted'||(approveRequest?workflow.a1Status!=='pending':Boolean(workflow.a1Status))){ showAccessNotice('Der A1-Status hat sich geändert. Bitte die Archivansicht neu laden.'); return; }
   const reason=window.prompt(approveRequest?'Prüfvermerk zur A1-Bestätigung:':'Begründung für die direkte A1-Zuordnung:',approveRequest?'A1-Zuordnung geprüft und bestätigt.':'A1 zur abschließenden Dokumentation zugeordnet.');
@@ -3846,11 +3863,12 @@ async function assignArchiveA1(caseId,approveRequest=false){
   const previous=JSON.parse(JSON.stringify(c));
   const now=Date.now(),actorId=AUTH.profile?.id||AUTH.session?.user?.id||'';
   const action=approveRequest?'a1_approved':'a1_assigned';
+  const actorTier=currentTier();
   c.activeProcessCodes=[...new Set([...(c.activeProcessCodes||[]),...(c.processCode?[c.processCode]:[]),'A1'])];
-  c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode:'A1',actorId,actorTier:3,actorName:AUTH.profile?.display_name||'',ts:now,action:'linked'}];
-  c.archiveWorkflow={...workflow,a1Status:'active',a1AssignedAt:now,a1AssignedById:actorId,a1AssignedByTier:3,a1ReviewReason:reason.trim(),history:[...(workflow.history||[]),{id:uid(),action,actorId,actorTier:3,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()}]};
+  c.activeProcessHistory=[...(c.activeProcessHistory||[]),{id:uid(),processCode:'A1',actorId,actorTier,actorName:AUTH.profile?.display_name||'',ts:now,action:'linked'}];
+  c.archiveWorkflow={...workflow,a1Status:'active',a1AssignedAt:now,a1AssignedById:actorId,a1AssignedByTier:actorTier,a1ReviewReason:reason.trim(),history:[...(workflow.history||[]),{id:uid(),action,actorId,actorTier,actorName:AUTH.profile?.display_name||AUTH.profile?.email||'',ts:now,reason:reason.trim()}]};
   c.updatedAt=now;
-  addCaseActivity(c,`Prozess A1 durch Tier 3 ${approveRequest?'bestätigt':'zugeordnet'}.`);
+  addCaseActivity(c,`Prozess A1 durch Tier ${actorTier} ${approveRequest?'bestätigt':'zugeordnet'}.`);
   await persistCaseMutation(c,previous,'A1 konnte nicht zugeordnet werden.');
 }
 async function finalizeCaseArchive(caseId){
@@ -4793,7 +4811,7 @@ function pageArchive(){
   const rows=list=>list.map(c=>`<button class="archive-case-row" onclick="go('archive','${escAttr(c.id)}')"><span class="archive-case-no">${esc(c.stw||'Ohne Nummer')}</span><span class="archive-case-meta"><b>${esc(c.event||'Ohne Event')}</b><small>${esc(c.category||'Sonstiger Vorfall')} · ${esc(caseDisplayStatus(c))}</small></span><span class="archive-category-dot" style="background:${categoryColor(c.category)}"></span><span class="archive-open">Ansehen →</span></button>`).join('');
   return `<div class="pagehead"><div><div class="eyebrow">Aktenablage · Tier 2 &amp; Tier 3</div><h1>Aktenarchiv</h1><p>Abgeschlossene Akten werden hier gesammelt. A1 dokumentiert Vollständigkeit und sichere Ablage.</p></div><div class="actions"><button class="btn" onclick="go('cases')">← Alle Akten</button></div></div>
   <div class="grid cols-2 archive-workflow-stats"><div class="stat amber"><div class="n">${pending.length}</div><div class="l">Zur Archivierung eingereicht</div></div><div class="stat green"><div class="n">${archived.length}</div><div class="l">Endgültig archiviert</div></div></div>
-  <div class="panel archive-intro"><h2>Abschluss über <b>Prozess A1</b></h2><p>Eine eingereichte Akte verschwindet aus „Alle Akten“. Tier 2 kann A1 anfordern; Tier 3 bestätigt die Zuordnung. Nach den Pflichtunterlagen kann Tier 2 oder Tier 3 endgültig archivieren.</p></div>
+  <div class="panel archive-intro"><h2>Abschluss über <b>Prozess A1</b></h2><p>Eine eingereichte Akte verschwindet aus „Alle Akten“. Tier 2 oder Tier 3 ordnet A1 hier direkt zu. Nach den Pflichtunterlagen kann Tier 2 oder Tier 3 die Akte schliessen und archivieren.</p></div>
   <div class="panel"><div class="archive-section-head"><h2>Zur Archivierung eingereicht</h2><span>${pending.length} offen</span></div><div class="archive-case-list">${rows(pending)||'<div class="empty">Keine Akten warten auf den A1-Abschluss.</div>'}</div></div>
   <div class="panel"><div class="archive-section-head"><h2>Endgültig archiviert</h2><span>${archived.length} abgelegt</span></div><div class="archive-case-list">${rows(archived)||'<div class="empty">Noch keine Akten endgültig archiviert.</div>'}</div></div>
   <div class="archive-log-grid"><section class="panel"><div class="archive-section-head"><h2>Aktionslog</h2><span>Nur ansehen</span></div><div class="archive-log">${actions.map(item=>`<div class="archive-log-row"><span class="archive-log-mark" style="background:${categoryColor(item.category)}"></span><div><b>${esc(item.stw)}</b><span>${esc(item.action)}</span><small>${fmtDateTime(item.ts)} · ${esc(item.category)}</small></div></div>`).join('')||'<div class="empty">Noch keine Aktionen protokolliert.</div>'}</div></section><section class="panel"><div class="archive-section-head"><h2>Gelöschte Akten</h2><span>Nur ansehen</span></div><div class="archive-log">${deleted.map(item=>`<div class="archive-log-row deleted"><span class="archive-log-mark"></span><div><b>${esc(item.stw||'Unbekannte Akte')}</b><span>Akte gelöscht</span><small>${fmtDateTime(item.deletedAt)} · ${esc(item.event||'Ohne Event')}</small></div></div>`).join('')||'<div class="empty">Keine gelöschten Akten protokolliert.</div>'}</div></section></div>`;

@@ -13,7 +13,7 @@
 
 On a new classification, an existing driver can be selected from the driver registry or found by license number. Case financial assessments are stored separately from the shared case data and are protected by database policies: only Tier 2 and Tier 3 can read or save them.
 
-Closing a case submits it to the archive and removes it from **Alle Akten**. Tier 2 can request A1; Tier 3 confirms that request or assigns A1 directly. Only Tier 2 and Tier 3 can perform the final archive action, which is enforced by the database together with the A1 document requirements. Submitted cases are locked while A1 is completed; finalized archive records cannot be changed or deleted.
+Closing a case submits it to the archive and removes it from **Alle Akten**. After submission, Tier 2 or Tier 3 assigns A1 directly from the archive case page. Once the A1 requirements are complete, Tier 2 or Tier 3 can close and archive the case. The database enforces the workflow and required documents. A stale submission attempt refreshes the case and opens its existing archive entry; finalized archive records cannot be changed or deleted.
 
 The initial track references are intentionally empty: no authoritative lap-time values were present in the existing application. The scoring defaults are editable and are stored in the database. Time-trial score is `max(0, 1000 - max(0, deviationPercent) × penaltyPerPercent)`, capped at 1,000. Category scores are combined as a weighted mean; division thresholds and minimum safety ratings determine the suggested division.
 
