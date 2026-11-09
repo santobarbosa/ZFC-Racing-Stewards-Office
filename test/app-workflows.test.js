@@ -124,6 +124,14 @@ test('Removed driver classification URL redirects to dashboard without changing 
   assert.equal(vm.runInContext('DB.drivers.length',context),1);
 });
 
+test('Authenticated account badge exposes the top-right sign-out action',()=>{
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'user-1',display_name:'Steward',position:'Race Director',access_tier:3};const badgeElement={innerHTML:''};document.getElementById=()=>badgeElement;renderAccountBadge();`,context);
+  const badge=vm.runInContext(`badgeElement.innerHTML`,context);
+  assert.match(badge,/class="btn account-session-action"/);
+  assert.match(badge,/onclick="logout\(\)">Abmelden/);
+});
+
 test('Case financial assessments are isolated and restricted to Tier 2 and Tier 3',()=>{
   const migration=fs.readFileSync(require.resolve('../supabase/migrations/20261109000000_driver_classification_and_case_financial_assessments.sql'),'utf8');
   assert.match(schema,/create table if not exists public\.zfc_case_financial_assessments/);
@@ -173,6 +181,20 @@ test('Archive submission is direct and final archive or deletion is Tier-3-only'
   assert.match(archiveMigration,/archivierte Akten darf nur Tier 3 endgültig löschen/);
   assert.match(schema,/zfc_reject_retired_a1_process/);
   assert.match(schema,/Endgültig archivierte Akten sind unveränderlich/);
+});
+
+test('Tier-3 document and case deletion RPCs exist in the schema and upgrade migration',()=>{
+  const migration=fs.readFileSync(require.resolve('../supabase/migrations/20261109040000_case_document_deletion_rpc.sql'),'utf8');
+  for(const sql of [schema,migration]){
+    assert.match(sql,/create or replace function public\.zfc_delete_case_documents\(p_case_id text default null, p_document_id uuid default null\)/);
+    assert.match(sql,/public\.zfc_current_tier\(\) < 3/);
+    assert.match(sql,/delete from public\.zfc_case_document_events doc_event[\s\S]*?delete from public\.zfc_case_documents doc/);
+    assert.match(sql,/grant execute on function public\.zfc_delete_case_documents\(text, uuid\) to authenticated/);
+    assert.match(sql,/create or replace function public\.zfc_delete_case\(p_case_id text\)[\s\S]*?deletedCaseLog[\s\S]*?grant execute on function public\.zfc_delete_case\(text\) to authenticated/);
+  }
+  const deleteCaseSource=appSource.slice(appSource.indexOf('async function deleteCase('),appSource.indexOf('\nfunction addCaseActivity',appSource.indexOf('async function deleteCase(')));
+  assert.match(deleteCaseSource,/rpc\('zfc_delete_case'/);
+  assert.doesNotMatch(deleteCaseSource,/persist\.cases\(\)|persist\.deletedCaseLog\(\)/);
 });
 
 test('Archive submission refreshes the server status and does not resubmit an already submitted case',async()=>{

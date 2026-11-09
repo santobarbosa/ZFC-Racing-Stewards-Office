@@ -553,7 +553,7 @@ async function handleLogin(){
 async function logout(){ if(SUPABASE.client) await SUPABASE.client.auth.signOut(); }
 function renderAccountBadge(){
   const badge=document.getElementById('accountBadge'); if(!badge||!AUTH.profile) return;
-  badge.innerHTML=`<strong>${esc(AUTH.profile.display_name||AUTH.profile.email)}</strong><span>${esc(AUTH.profile.position||'Position offen')}</span><br><span class="account-tier">Tier ${Number(AUTH.profile.access_tier)}</span><br><button class="btn small" onclick="logout()">Abmelden</button>`;
+  badge.innerHTML=`<strong>${esc(AUTH.profile.display_name||AUTH.profile.email)}</strong><span>${esc(AUTH.profile.position||'Position offen')}</span><br><span class="account-tier">Tier ${Number(AUTH.profile.access_tier)}</span><br><button class="btn account-session-action" type="button" aria-label="Abmelden" onclick="logout()">Abmelden</button>`;
 }
 async function syncFinanceTransaction(t){
   if(!SUPABASE.client) return;
@@ -3368,18 +3368,14 @@ async function deleteCase(id){
   if(!confirm(`Akte ${c.stw||id}${c.processCode?` · Vorgang ${c.processCode}`:''} endgültig löschen? Zugehörige Dokumente, PDFs und Dokumentverläufe werden ebenfalls unwiderruflich entfernt.`)) return;
   if(!SUPABASE.client){ showAccessNotice('Endgültiges Löschen ist ohne sichere Supabase-Verbindung nicht möglich.'); return; }
   try{
-    const rowIds=new Set(DB.caseDocuments.filter(doc=>doc.caseId===id).map(doc=>doc.id));
     await removeCaseDocumentFiles(id);
-    const result=await SUPABASE.client.rpc('zfc_delete_case_documents',{p_case_id:id,p_document_id:null});
+    const result=await SUPABASE.client.rpc('zfc_delete_case',{p_case_id:id});
     if(result.error) throw result.error;
-    DB.caseDocuments=DB.caseDocuments.filter(doc=>doc.caseId!==id);
-    DB.caseDocumentEvents=DB.caseDocumentEvents.filter(event=>!rowIds.has(event.documentRowId));
     CASE_DOCUMENTS.loaded.delete(id);
     CASE_DOCUMENTS.errorByCase.delete(id);
-    DB.cases=DB.cases.filter(item=>item.id!==id);
-    DB.deletedCaseLog.push({caseId:id,stw:c.stw||'',event:c.event||'',deletedAt:Date.now(),deletedById:AUTH.profile?.id||AUTH.session?.user?.id||'',deletedByName:AUTH.profile?.display_name||AUTH.profile?.email||'Tier 3',deletedByTier:currentTier()});
-    await persist.cases();
-    await persist.deletedCaseLog();
+    if(!result.data||!Array.isArray(result.data.cases)) throw new Error('Supabase hat keinen aktualisierten Aktenbestand zurückgegeben.');
+    applyRemoteState(result.data);
+    SUPABASE.baseState=cloneState(result.data);
     showSaveToast('Akte und zugehörige Dokumente wurden endgültig gelöscht.');
     go('cases');
   }catch(error){

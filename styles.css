@@ -827,7 +827,8 @@ nav.mainnav .navgroup:last-child .navitem.active{color:#ff8498;border-color:rgba
 #accountBadge{display:grid;grid-template-columns:auto auto;column-gap:9px;align-items:center;font-size:10px;line-height:1.2;}
 #accountBadge strong{grid-column:1;font-size:11px;}
 #accountBadge .account-tier{grid-column:2;grid-row:1;color:var(--gold-2);}
-#accountBadge button{grid-column:1 / -1;margin-top:5px;padding:3px 8px;}
+#accountBadge .account-session-action{grid-column:1 / -1;justify-self:start;margin-top:7px;padding:7px 12px;border-color:rgba(255,59,95,.5);background:rgba(255,59,95,.1);color:#ff9aaa;font-size:11px;font-weight:700;letter-spacing:.3px;}
+#accountBadge .account-session-action:hover{border-color:var(--red);background:rgba(255,59,95,.2);color:var(--white);}
 #main{width:100%;max-width:none;padding:30px clamp(18px,3vw,48px) 68px;background:linear-gradient(90deg,rgba(6,15,24,.25),rgba(6,15,24,.06));}
 .pagehead{align-items:center;padding-bottom:15px;border-bottom:1px solid rgba(65,217,255,.16);}
 .pagehead h1{font-size:clamp(25px,3vw,34px);letter-spacing:-.3px;}
@@ -1321,7 +1322,7 @@ nav.mainnav .navgroup:last-child .navitem.active{color:#ff8498;border-color:rgba
   #brand .sub{font-size:7px;}
   #accountBadge{grid-template-columns:auto;gap:2px;}
   #accountBadge .account-tier{grid-column:1;grid-row:auto;}
-  #accountBadge button{grid-column:1;margin-top:3px;}
+  #accountBadge .account-session-action{grid-column:1;margin-top:4px;padding:6px 9px;}
   #main{padding:22px 14px 112px;}
   nav.mainnav{height:76px;gap:7px;padding:7px 9px;}
   nav.mainnav .navgroup{gap:2px;padding-right:6px;}
