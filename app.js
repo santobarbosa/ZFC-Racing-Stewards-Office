@@ -6,18 +6,20 @@ const SUPABASE_CONFIG = {
   url: 'https://ktvcwyrsayoggjiapnln.supabase.co', // Project URL, z. B. https://xxxx.supabase.co
   anonKey: 'sb_publishable_EEM214FLVj0CA3hkPq4BCg_1dFAZmvr' // anon/public key
 };
-const DB = { teams: [], drivers: [], cases: [], caseDocuments: [], caseDocumentEvents: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [] };
+const DB = { teams: [], drivers: [], cases: [], caseDocuments: [], caseDocumentEvents: [], transfers: [], finance: [], financeSettings: null, esportSetups: [], marketRequests: [], escalations: [], caseActivityLog: [], deletedCaseLog: [], classificationApplicants: [], classificationConfig: null, classificationEvents: [], classificationReports: [], classificationConfigHistory: [] };
 const KEYS = { teams:'zfc_teams_v1', drivers:'zfc_drivers_v1', cases:'zfc_cases_v1', transfers:'zfc_transfers_v1', finance:'zfc_finance_v1', financeSettings:'zfc_finance_settings_v1', esportSetups:'zfc_esport_setups_v1', marketRequests:'zfc_market_requests_v1', escalations:'zfc_escalations_v1', caseActivityLog:'zfc_case_activity_log_v1', deletedCaseLog:'zfc_deleted_case_log_v1', supabase:'zfc_supabase_config_v1' };
 let SUPABASE = { client:null, channel:null, applyingRemote:false, status:'Nicht verbunden', baseState:null, lastSyncError:null };
 let AUTH = { session:null, profile:null, authSubscription:null, loginIntroRequested:false };
 let TIER_CHAT = { messages:[], loading:false, sending:false, error:'', connected:false };
 const CASE_DOCUMENTS = { loading:new Set(), loaded:new Set(), errorByCase:new Map(), saving:false };
 const HR = { profiles:[], staffRecords:[], reviews:[], training:[], activity:[], loading:false, loaded:false, refreshQueued:false, error:'', editingReviewId:null, editingTrainingId:null };
+const CLASSIFICATION = { loading:false, error:'' };
 let JARVES_BOOT_TIMERS=[];
 let syncQueue = Promise.resolve();
 
 function uid(){ return (crypto.randomUUID? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(16).slice(2)); }
 function esc(s){ return (s===undefined||s===null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escAttr(s){ return esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function nl2br(s){ return esc(s).replace(/\n/g,'<br>'); }
 function fmtDate(d){ if(!d) return '—'; try{ const dt=new Date(d+'T00:00:00'); return dt.toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}); }catch(e){return d;} }
 function fmtDateTime(ts){ if(!ts) return '—'; const dt=new Date(ts); return dt.toLocaleDateString('de-DE')+' '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}); }
@@ -406,6 +408,7 @@ async function initSupabase(){
       await syncAppState();
       SUPABASE.baseState=cloneState(appState());
     }
+    if(Number(AUTH.profile.access_tier)>=3) await loadDriverClassificationData();
     const tierEscalations=await SUPABASE.client.from('zfc_tier_escalations').select('id,target_tier,data,updated_at').order('updated_at',{ascending:false});
     if(tierEscalations.error) throw tierEscalations.error;
     DB.escalations=tierEscalations.data.map(row=>({...row.data,targetTier:row.target_tier}));
@@ -1198,6 +1201,286 @@ function pageEsportSetup(){
 function saveEsportSetup(track){ const values={}; SETUP_FIELDS.forEach((field,index)=>values['s'+index]=document.getElementById('s'+index)?.value||''); const current=DB.esportSetups.find(item=>item.track===track); const setup={id:current?.id||uid(),track,name:document.getElementById('setup_name')?.value||'Race Setup',values,updatedAt:new Date().toISOString()}; if(current) Object.assign(current,setup); else DB.esportSetups.push(setup); persist.esportSetups(); alert(`Setup für ${track} gespeichert.`); render(); }
 function deleteEsportSetup(track){ const setup=DB.esportSetups.find(item=>item.track===track); if(!setup) return; if(!confirm(`Setup für ${track} löschen?`)) return; DB.esportSetups=DB.esportSetups.filter(item=>item.track!==track); persist.esportSetups(); render(); }
 
+/* ======================= DRIVER CLASSIFICATION ======================= */
+function defaultClassificationConfig(){
+  return {
+    tracks:[
+      {id:'australia',name:'Australien',referenceSeconds:null},
+      {id:'bahrain',name:'Bahrain',referenceSeconds:null},
+      {id:'belgium',name:'Belgien',referenceSeconds:null}
+    ],
+    weights:{timeTrial:40,racePace:25,consistency:20,safety:15},
+    divisions:[
+      {name:'D1',minRating:800,minSafety:80},
+      {name:'D2',minRating:600,minSafety:60},
+      {name:'D3',minRating:0,minSafety:0}
+    ],
+    timePenaltyPerPercent:100
+  };
+}
+function classificationConfig(){
+  return DB.classificationConfig||defaultClassificationConfig();
+}
+function classificationTrackRows(config){
+  return config.tracks.map((track,index)=>`<div class="classification-track-row">
+    <label>${esc(track.name)}${index<3?' · Pflichtstrecke':' · Zusatzstrecke'}</label>
+    <input type="number" min="1" step="0.001" id="classification_ref_${esc(track.id)}" value="${track.referenceSeconds??''}" placeholder="Referenzzeit in Sekunden">
+    ${index>=3?`<button class="btn small danger" type="button" onclick="removeClassificationTrack('${esc(track.id)}')">Entfernen</button>`:''}
+  </div>`).join('');
+}
+function classificationDivisionRows(config){
+  return config.divisions.map((division,index)=>`<div class="classification-division-row">
+    <input aria-label="Divisionsname" id="classification_division_name_${index}" value="${escAttr(division.name)}">
+    <label>Mindestpunkte <input type="number" min="0" max="1000" id="classification_division_rating_${index}" value="${Number(division.minRating)||0}"></label>
+    <label>Safety min. <input type="number" min="0" max="100" id="classification_division_safety_${index}" value="${Number(division.minSafety)||0}"></label>
+    ${index>=config.divisions.length-1?`<button class="btn small danger" type="button" onclick="removeClassificationDivision(${index})">Entfernen</button>`:''}
+  </div>`).join('');
+}
+function readClassificationSettingsForm(){
+  const config=classificationConfig(), value=id=>document.getElementById(id)?.value;
+  return {
+    ...config,
+    tracks:config.tracks.map(track=>({...track,referenceSeconds:value(`classification_ref_${track.id}`)===''?null:Number(value(`classification_ref_${track.id}`))})),
+    weights:{
+      timeTrial:Number(value('classification_weight_timeTrial')??config.weights.timeTrial),
+      racePace:Number(value('classification_weight_racePace')??config.weights.racePace),
+      consistency:Number(value('classification_weight_consistency')??config.weights.consistency),
+      safety:Number(value('classification_weight_safety')??config.weights.safety)
+    },
+    divisions:config.divisions.map((division,index)=>({
+      name:value(`classification_division_name_${index}`)??division.name,
+      minRating:Number(value(`classification_division_rating_${index}`)??division.minRating),
+      minSafety:Number(value(`classification_division_safety_${index}`)??division.minSafety)
+    })),
+    timePenaltyPerPercent:Number(value('classification_time_penalty')??config.timePenaltyPerPercent)
+  };
+}
+function pageClassificationSettings(){
+  const config=classificationConfig();
+  const history=DB.classificationConfigHistory.slice(0,8);
+  return `<div class="pagehead"><div><div class="eyebrow">Tier 3 · Fahrerbewertung</div><h1>Referenzdaten &amp; Kriterien</h1><p>Bewertungsformeln: Zeit-Score = max(0, 1000 − positive Zeitabweichung in % × Strafpunkte je Prozent). Gesamtpunkte = gewichteter Mittelwert der Kategorie-Scores.</p></div><div class="actions"><button class="btn" onclick="go('driver-classification')">← Bewerber</button></div></div>
+    ${CLASSIFICATION.error?`<div class="classification-error">${esc(CLASSIFICATION.error)}</div>`:''}
+    <section class="panel classification-config-panel"><h2>Referenzzeiten <b>(Sekunden)</b></h2><p>Die drei Pflichtstrecken benötigen eine Referenzzeit, bevor Bewerbungen berechnet werden können. Weitere Strecken lassen sich ergänzen.</p><div class="classification-track-list">${classificationTrackRows(config)}</div>
+      <div class="classification-inline-add"><input id="classification_new_track" placeholder="Weitere Strecke"><button class="btn" onclick="addClassificationTrack()">Strecke hinzufügen</button></div>
+    </section>
+    <section class="panel classification-config-panel"><h2>Gewichtung <b>(Prozent)</b></h2><p>Die Gewichte werden bei der Berechnung auf ihre Summe normiert.</p><div class="classification-weight-grid">
+      <label>Time Trial<input type="number" min="0" max="100" id="classification_weight_timeTrial" value="${Number(config.weights.timeTrial)||0}"></label>
+      <label>Race Pace<input type="number" min="0" max="100" id="classification_weight_racePace" value="${Number(config.weights.racePace)||0}"></label>
+      <label>Konstanz<input type="number" min="0" max="100" id="classification_weight_consistency" value="${Number(config.weights.consistency)||0}"></label>
+      <label>Safety<input type="number" min="0" max="100" id="classification_weight_safety" value="${Number(config.weights.safety)||0}"></label>
+      <label>Strafpunkte je +1 % Abweichung<input type="number" min="1" max="1000" id="classification_time_penalty" value="${Number(config.timePenaltyPerPercent)||100}"></label>
+    </div></section>
+    <section class="panel classification-config-panel"><h2>Divisionsgrenzen</h2><div class="classification-division-list">${classificationDivisionRows(config)}</div><button class="btn" onclick="addClassificationDivision()">Division hinzufügen</button></section>
+    <div class="classification-actions"><button class="btn primary" onclick="saveClassificationConfig()">Referenzdaten speichern</button></div>
+    ${history.length?`<section class="panel classification-config-history"><h2>Änderungsverlauf <b>Referenzdaten</b></h2>${history.map(entry=>`<div><strong>${fmtDateTime(entry.created_at)}</strong><span>${esc(entry.actor_name||'Tier 3')}</span><small>${(entry.config?.tracks||[]).length} Strecken · ${(entry.config?.divisions||[]).length} Divisionen · Gewichtungen ${esc(JSON.stringify(entry.config?.weights||{}))}</small></div>`).join('')}</section>`:''}`;
+}
+function pageClassificationApplicant(applicant){
+  const item=applicant||{id:crypto.randomUUID(),application_no:'Wird beim Speichern vergeben',status:'Pending',driver_data:{},test_data:{}};
+  const locked=['Approved','Rejected'].includes(item.status);
+  const driver=item.driver_data||{}, tests=item.test_data||{};
+  const tracks=classificationConfig().tracks||[];
+  const trials=tracks.map((track,index)=>`<label>${esc(track.name)} ${index<3?'*':''}<input type="number" min="1" step="0.001" id="classification_trial_${esc(track.id)}" value="${escAttr(tests.timeTrials?.[track.id]??'')}" placeholder="Sekunden"></label>`).join('');
+  const calculation=applicant?calculateClassification(driver,tests,classificationConfig()):null;
+  const events=DB.classificationEvents.filter(event=>event.application_id===item.id).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
+  const reports=DB.classificationReports.filter(report=>report.application_id===item.id);
+  const decisionActions=locked?'':`<button class="btn" onclick="setClassificationStatus('${item.id}','Under Review')">In Prüfung nehmen</button>
+    <button class="btn primary" onclick="decideClassification('${item.id}','Approved')">Freigeben</button>
+    <button class="btn danger" onclick="decideClassification('${item.id}','Rejected')">Ablehnen</button>`;
+  return `<div class="pagehead"><div><div class="eyebrow">Driver Classification · ${esc(item.application_no||'Neue Bewerbung')}</div><h1>${applicant?'Bewerber bearbeiten':'Fahrer hinzufügen'}</h1><p>Bewertungen werden aus den gespeicherten Referenzzeiten und Gewichtungen berechnet.</p></div><div class="actions"><button class="btn" onclick="go('driver-classification')">← Übersicht</button></div></div>
+    ${CLASSIFICATION.error?`<div class="classification-error">${esc(CLASSIFICATION.error)}</div>`:''}
+    <section class="panel classification-form"><h2>Fahrerstammdaten</h2><div class="classification-form-grid">
+      <label>Fahrername *<input id="classification_name" value="${escAttr(driver.name||'')}" autocomplete="name"></label>
+      <label>EA-ID<input id="classification_ea_id" value="${escAttr(driver.eaId||'')}"></label>
+      <label>Discord-ID<input id="classification_discord_id" value="${escAttr(driver.discordId||'')}"></label>
+      <label>E-Mail<input type="email" id="classification_email" value="${escAttr(driver.email||'')}"></label>
+      <label>Plattform<input id="classification_platform" value="${escAttr(driver.platform||'')}"></label>
+      <label>Weitere Stammdaten<input id="classification_extra" value="${escAttr(driver.extra||'')}" placeholder="Team, Zeitzone, Notizen"></label>
+    </div><h2>Fahrertests</h2><div class="classification-form-grid">${trials}
+      <label>Race Pace (0–1.000)<input type="number" min="0" max="1000" id="classification_race_pace" value="${escAttr(tests.racePace??'')}"></label>
+      <label>Konstanz (0–100)<input type="number" min="0" max="100" id="classification_consistency" value="${escAttr(tests.consistency??'')}"></label>
+      <label>Safety Rating (0–100)<input type="number" min="0" max="100" id="classification_safety" value="${escAttr(tests.safetyRating??'')}"></label>
+    </div><label>Tester-Notizen<textarea id="classification_test_notes" rows="3">${esc(tests.notes||'')}</textarea></label>
+      <div class="classification-actions"><button class="btn" onclick="previewClassification()">Berechnungsvorschau</button>${locked?'':`<button class="btn primary" onclick="saveDriverClassification('${item.id}')">Bewerbung speichern</button>`}${applicant?decisionActions:''}</div>
+    </section>
+    <div id="classification_preview">${calculation?classificationCalculationPanel(calculation):''}</div>
+    ${item.status==='Approved'?`<section class="panel"><h2>Freigegebener Bericht</h2>${reports.map(report=>`<div class="classification-report-row"><span>${esc(report.document_number||report.id)} · ${fmtDate(String(report.created_at||'').slice(0,10))}</span><button class="btn small primary" onclick="downloadClassificationReport('${report.id}')">PDF öffnen / herunterladen</button></div>`).join('')||'<p>Für diese Freigabe wurde noch kein Bericht registriert.</p>'}</section>`:''}
+    ${events.length?`<section class="panel"><h2>Änderungs- &amp; Entscheidungsverlauf</h2><div class="classification-history">${events.map(event=>`<article><strong>${esc(event.action)}</strong><span>${fmtDateTime(event.created_at)} · ${esc(event.actor_name||'Tier 3')}</span><p>${esc(event.reason||'Änderung gespeichert')}</p></article>`).join('')}</div></section>`:''}`;
+}
+function pageDriverClassification(){
+  if(ROUTE.id==='settings') return pageClassificationSettings();
+  if(ROUTE.id==='new') return pageClassificationApplicant(null);
+  if(ROUTE.id){ const applicant=DB.classificationApplicants.find(item=>item.id===ROUTE.id); if(applicant) return pageClassificationApplicant(applicant); }
+  const applicants=[...DB.classificationApplicants].sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
+  const rows=applicants.map(item=>`<tr><td><button class="classification-link" onclick="go('driver-classification','${item.id}')">${esc(item.application_no||'—')}</button><small>${esc(item.driver_data?.name||'Unbenannt')}</small></td><td><span class="classification-status status-${String(item.status||'Pending').toLowerCase().replace(/\s+/g,'-')}">${esc(item.status||'Pending')}</span></td><td>${Number(item.performance_rating||0)} / 1.000</td><td>${esc(item.suggested_division||'—')}</td><td>${esc(item.approved_division||'—')}</td><td>${fmtDateTime(item.updated_at)}</td><td><button class="btn small" onclick="go('driver-classification','${item.id}')">Öffnen</button></td></tr>`).join('');
+  return `<div class="pagehead"><div><div class="eyebrow">Tier 3 · Bewerberverwaltung</div><h1>Driver Classification</h1><p>Fahrertests erfassen, automatische Einstufung prüfen und Entscheidungen revisionssicher dokumentieren.</p></div><div class="actions"><button class="btn" onclick="go('driver-classification','settings')">Referenzdaten &amp; Kriterien</button><button class="btn primary" onclick="go('driver-classification','new')">+ Fahrer hinzufügen</button></div></div>
+    ${CLASSIFICATION.error?`<div class="classification-error">${esc(CLASSIFICATION.error)}</div>`:''}
+    <div class="grid cols-4 classification-stats"><div class="stat"><div class="n">${applicants.length}</div><div class="l">Bewerbungen</div></div><div class="stat amber"><div class="n">${applicants.filter(item=>['Pending','Under Review'].includes(item.status)).length}</div><div class="l">Offen</div></div><div class="stat green"><div class="n">${applicants.filter(item=>item.status==='Approved').length}</div><div class="l">Freigegeben</div></div><div class="stat red"><div class="n">${applicants.filter(item=>item.status==='Rejected').length}</div><div class="l">Abgelehnt</div></div></div>
+    <section class="panel classification-table-panel"><div class="classification-table-wrap"><table><thead><tr><th>Bewerbung / Fahrer</th><th>Status</th><th>Rating</th><th>Vorschlag</th><th>Freigegeben</th><th>Zuletzt geändert</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7">Noch keine Bewerbungen vorhanden.</td></tr>'}</tbody></table></div></section>`;
+}
+function classificationCalculationPanel(result){
+  return `<section class="panel classification-preview"><h2>Berechnungsergebnis</h2><div class="classification-result-score"><strong>${result.rating}</strong><span>/ 1.000 · Vorschlag: <b>${esc(result.suggestedDivision||'Keine Division')}</b></span></div>
+    <div class="classification-deviation-list">${result.tracks.map(track=>`<div><span>${esc(track.name)}</span><strong>${track.deviation===null?'Keine Daten':`${track.deviation>=0?'+':''}${track.deviation.toFixed(3)} %`}</strong><small>Fahrer: ${track.driverSeconds??'—'} s · Referenz: ${track.referenceSeconds??'—'} s · Score: ${track.score??'—'}</small></div>`).join('')}</div>
+    <p>Time Trial ${result.categoryScores.timeTrial} · Race Pace ${result.categoryScores.racePace} · Konstanz ${result.categoryScores.consistency} · Safety ${result.categoryScores.safety} · Gewichtete Formel.</p></section>`;
+}
+function calculateClassification(driver,tests,config){
+  const tracks=config.tracks.map((track,index)=>{
+    const ref=Number(track.referenceSeconds), seconds=Number(tests.timeTrials?.[track.id]);
+    const valid=Number.isFinite(ref)&&ref>0&&Number.isFinite(seconds)&&seconds>0;
+    const deviation=valid?((seconds-ref)/ref)*100:null;
+    const score=valid?Math.max(0,Math.min(1000,Math.round(1000-Math.max(0,deviation)*Number(config.timePenaltyPerPercent||100)))):null;
+    return {id:track.id,name:track.name,referenceSeconds:valid?ref:null,driverSeconds:valid?seconds:null,deviation,score,required:index<3};
+  });
+  const validTracks=tracks.filter(track=>track.score!==null);
+  const bounded=(value,max)=>Math.max(0,Math.min(max,Number(value)||0));
+  const categoryScores={
+    timeTrial:validTracks.length?Math.round(validTracks.reduce((sum,track)=>sum+track.score,0)/validTracks.length):0,
+    racePace:Math.round(bounded(tests.racePace,1000)),
+    consistency:Math.round(bounded(tests.consistency,100)*10),
+    safety:Math.round(bounded(tests.safetyRating,100)*10)
+  };
+  const weights=config.weights||{};
+  const weightTotal=Object.values(weights).reduce((sum,value)=>sum+Math.max(0,Number(value)||0),0);
+  const rating=weightTotal?Math.round(Object.entries(categoryScores).reduce((sum,[key,score])=>sum+score*Math.max(0,Number(weights[key])||0),0)/weightTotal):0;
+  const suggestedDivision=[...(config.divisions||[])].sort((a,b)=>Number(b.minRating)-Number(a.minRating)).find(division=>rating>=Number(division.minRating||0)&&Number(tests.safetyRating||0)>=Number(division.minSafety||0))?.name||'';
+  return {rating,categoryScores,tracks,suggestedDivision,weightTotal};
+}
+function classificationFormData(){
+  const value=id=>document.getElementById(id)?.value?.trim()||'';
+  const timeTrials={};
+  classificationConfig().tracks.forEach(track=>{ const input=document.getElementById(`classification_trial_${track.id}`); if(input&&input.value!=='') timeTrials[track.id]=Number(input.value); });
+  return {
+    driver:{name:value('classification_name'),eaId:value('classification_ea_id'),discordId:value('classification_discord_id'),email:value('classification_email'),platform:value('classification_platform'),extra:value('classification_extra')},
+    tests:{timeTrials,racePace:value('classification_race_pace')===''?null:Number(value('classification_race_pace')),consistency:value('classification_consistency')===''?null:Number(value('classification_consistency')),safetyRating:value('classification_safety')===''?null:Number(value('classification_safety')),notes:value('classification_test_notes')}
+  };
+}
+async function loadDriverClassificationData(){
+  if(!SUPABASE.client||currentTier()<3) return;
+  CLASSIFICATION.loading=true; CLASSIFICATION.error='';
+  try{
+    const [configResult,applicantsResult,eventsResult,reportsResult,configHistoryResult]=await Promise.all([
+      SUPABASE.client.from('zfc_driver_classification_config').select('config').eq('id',1).maybeSingle(),
+      SUPABASE.client.from('zfc_driver_classifications').select('*').order('updated_at',{ascending:false}),
+      SUPABASE.client.from('zfc_driver_classification_events').select('*').order('created_at',{ascending:false}).limit(500),
+      SUPABASE.client.from('zfc_driver_classification_reports').select('id,application_id,document_number,created_at').order('created_at',{ascending:false}),
+      SUPABASE.client.from('zfc_driver_classification_config_history').select('config,actor_name,created_at').order('created_at',{ascending:false}).limit(20)
+    ]);
+    for(const result of [configResult,applicantsResult,eventsResult,reportsResult,configHistoryResult]) if(result.error) throw result.error;
+    DB.classificationConfig=configResult.data?.config||defaultClassificationConfig();
+    DB.classificationApplicants=applicantsResult.data||[];
+    DB.classificationEvents=eventsResult.data||[];
+    DB.classificationReports=reportsResult.data||[];
+    DB.classificationConfigHistory=configHistoryResult.data||[];
+  }catch(error){
+    CLASSIFICATION.error=`Driver Classification konnte nicht geladen werden: ${error.message||error}`;
+    console.error(CLASSIFICATION.error,error);
+  }finally{ CLASSIFICATION.loading=false; }
+}
+async function saveClassificationConfig(){
+  if(currentTier()<3) return showAccessNotice('Nur Tier 3 darf Referenzdaten bearbeiten.');
+  const old=classificationConfig(), value=id=>document.getElementById(id)?.value??'';
+  const tracks=old.tracks.map(track=>({...track,referenceSeconds:value(`classification_ref_${track.id}`)===''?null:Number(value(`classification_ref_${track.id}`))}));
+  const divisions=old.divisions.map((division,index)=>({name:value(`classification_division_name_${index}`).trim(),minRating:Number(value(`classification_division_rating_${index}`)),minSafety:Number(value(`classification_division_safety_${index}`))}));
+  const weights={timeTrial:Number(value('classification_weight_timeTrial')),racePace:Number(value('classification_weight_racePace')),consistency:Number(value('classification_weight_consistency')),safety:Number(value('classification_weight_safety'))};
+  if(tracks.length<3||new Set(tracks.map(track=>track.id)).size!==tracks.length||new Set(tracks.map(track=>track.name.toLowerCase())).size!==tracks.length||tracks.some(track=>!track.name.trim()||(track.referenceSeconds!==null&&(!Number.isFinite(track.referenceSeconds)||track.referenceSeconds<=0)))||!tracks.slice(0,3).every(track=>Number.isFinite(track.referenceSeconds)&&track.referenceSeconds>0)||Object.values(weights).some(weight=>!Number.isFinite(weight)||weight<0)||!Object.values(weights).some(Boolean)||!divisions.length||new Set(divisions.map(division=>division.name)).size!==divisions.length||divisions.some(division=>!division.name||!Number.isFinite(division.minRating)||division.minRating<0||division.minRating>1000||!Number.isFinite(division.minSafety)||division.minSafety<0||division.minSafety>100)){
+    return showAccessNotice('Bitte gültige Pflicht-Referenzzeiten, nichtnegative Gewichte und gültige Divisionsgrenzen eintragen.');
+  }
+  const config={...old,tracks,weights,divisions,timePenaltyPerPercent:Number(value('classification_time_penalty'))};
+  if(!Number.isFinite(config.timePenaltyPerPercent)||config.timePenaltyPerPercent<=0) return showAccessNotice('Der Strafwert je Zeitabweichung muss größer als 0 sein.');
+  const result=await SUPABASE.client.from('zfc_driver_classification_config').upsert({id:1,config,updated_by:AUTH.profile.id,updated_at:new Date().toISOString()});
+  if(result.error){ CLASSIFICATION.error=`Referenzdaten konnten nicht gespeichert werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
+  DB.classificationConfig=config;
+  const openApplicants=DB.classificationApplicants.filter(applicant=>['Pending','Under Review'].includes(applicant.status));
+  const recalculations=await Promise.all(openApplicants.map(applicant=>{
+    const calculation=calculateClassification(applicant.driver_data,applicant.test_data,config);
+    return SUPABASE.client.rpc('zfc_save_driver_classification',{
+      p_application_id:applicant.id,p_driver_data:applicant.driver_data,p_test_data:applicant.test_data,
+      p_performance_rating:calculation.rating,p_suggested_division:calculation.suggestedDivision,p_status:applicant.status
+    });
+  }));
+  const recalculationError=recalculations.find(entry=>entry.error)?.error;
+  if(recalculationError){
+    CLASSIFICATION.error=`Referenzdaten wurden gespeichert, aber eine oder mehrere offenen Bewerbungen konnten nicht neu berechnet werden: ${recalculationError.message}`;
+    console.error(CLASSIFICATION.error,recalculationError);
+  }else CLASSIFICATION.error='';
+  await loadDriverClassificationData(); render();
+}
+function addClassificationTrack(){
+  const input=document.getElementById('classification_new_track'), name=input?.value.trim();
+  if(!name) return showAccessNotice('Bitte einen Streckennamen eingeben.');
+  const config=readClassificationSettingsForm();
+  if(config.tracks.some(track=>track.name.toLowerCase()===name.toLowerCase())) return showAccessNotice('Diese Strecke ist bereits vorhanden.');
+  DB.classificationConfig={...config,tracks:[...config.tracks,{id:`track-${crypto.randomUUID()}`,name,referenceSeconds:null}]}; render();
+}
+function removeClassificationTrack(id){
+  const config=readClassificationSettingsForm();
+  if(config.tracks.findIndex(track=>track.id===id)<3) return;
+  DB.classificationConfig={...config,tracks:config.tracks.filter(track=>track.id!==id)}; render();
+}
+function addClassificationDivision(){
+  const config=readClassificationSettingsForm();
+  DB.classificationConfig={...config,divisions:[...config.divisions,{name:`D${config.divisions.length+1}`,minRating:0,minSafety:0}]}; render();
+}
+function removeClassificationDivision(index){
+  const config=readClassificationSettingsForm();
+  if(config.divisions.length<=1) return showAccessNotice('Mindestens eine Division muss bestehen bleiben.');
+  DB.classificationConfig={...config,divisions:config.divisions.filter((_,divisionIndex)=>divisionIndex!==index)}; render();
+}
+function previewClassification(){
+  const data=classificationFormData(), result=calculateClassification(data.driver,data.tests,classificationConfig());
+  const target=document.getElementById('classification_preview');
+  if(target) target.innerHTML=classificationCalculationPanel(result);
+}
+async function saveDriverClassification(id){
+  if(currentTier()<3) return showAccessNotice('Nur Tier 3 darf Bewerbungen bearbeiten.');
+  const data=classificationFormData(), config=classificationConfig(), result=calculateClassification(data.driver,data.tests,config);
+  if(!data.driver.name) return showAccessNotice('Der Fahrername ist erforderlich.');
+  if(config.tracks.slice(0,3).some(track=>!Number.isFinite(Number(track.referenceSeconds))||Number(track.referenceSeconds)<=0||!Number.isFinite(Number(data.tests.timeTrials[track.id]))||Number(data.tests.timeTrials[track.id])<=0)||Object.values(data.tests.timeTrials).some(time=>!Number.isFinite(time)||time<=0)) return showAccessNotice('Für alle eingetragenen Time-Trial-Werte und die drei Pflichtstrecken sind gültige positive Zeiten erforderlich.');
+  if([data.tests.racePace,data.tests.consistency,data.tests.safetyRating].some(value=>!Number.isFinite(value))||data.tests.racePace<0||data.tests.racePace>1000||data.tests.consistency<0||data.tests.consistency>100||data.tests.safetyRating<0||data.tests.safetyRating>100||!result.weightTotal) return showAccessNotice('Race Pace (0–1.000), Konstanz und Safety Rating (jeweils 0–100) müssen gültig bewertet sein.');
+  const existing=DB.classificationApplicants.find(item=>item.id===id);
+  const rpc=await SUPABASE.client.rpc('zfc_save_driver_classification',{p_application_id:id,p_driver_data:data.driver,p_test_data:data.tests,p_performance_rating:result.rating,p_suggested_division:result.suggestedDivision,p_status:existing?.status==='Under Review'?'Under Review':'Pending'});
+  if(rpc.error){ CLASSIFICATION.error=`Bewerbung konnte nicht gespeichert werden: ${rpc.error.message}`; console.error(CLASSIFICATION.error,rpc.error); render(); return; }
+  await loadDriverClassificationData(); go('driver-classification',id);
+}
+async function setClassificationStatus(id,status){
+  if(currentTier()<3||status!=='Under Review') return showAccessNotice('Nur Tier 3 darf den Bearbeitungsstatus ändern.');
+  const applicant=DB.classificationApplicants.find(item=>item.id===id); if(!applicant) return;
+  const result=await SUPABASE.client.rpc('zfc_save_driver_classification',{p_application_id:id,p_driver_data:applicant.driver_data,p_test_data:applicant.test_data,p_performance_rating:applicant.performance_rating,p_suggested_division:applicant.suggested_division,p_status:status});
+  if(result.error){ CLASSIFICATION.error=`Status konnte nicht geändert werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
+  await loadDriverClassificationData(); go('driver-classification',id);
+}
+async function decideClassification(id,status){
+  if(currentTier()<3||!['Approved','Rejected'].includes(status)) return showAccessNotice('Nur Tier 3 darf Einstufungen freigeben oder ablehnen.');
+  const applicant=DB.classificationApplicants.find(item=>item.id===id); if(!applicant) return;
+  const reason=prompt(status==='Approved'?'Begründung der Freigabe:':'Begründung der Ablehnung:')?.trim();
+  if(!reason) return showAccessNotice('Für jede Entscheidung ist eine Begründung erforderlich.');
+  const config=classificationConfig(), calculated=calculateClassification(applicant.driver_data,applicant.test_data,config);
+  const selectedDivision=status==='Approved'?(prompt(`Tatsächlich freigegebene Division (Vorschlag: ${applicant.suggested_division||'—'}):`,applicant.suggested_division||'')||'').trim():'';
+  if(status==='Approved'&&!selectedDivision) return showAccessNotice('Für eine Freigabe muss eine Division angegeben werden.');
+  if(status==='Approved'&&!config.divisions.some(division=>division.name===selectedDivision)) return showAccessNotice('Die freigegebene Division muss in den Referenzdaten konfiguriert sein.');
+  const snapshot=status==='Approved'?{
+    documentNumber:`ZFC-CLASS-${new Date().getUTCFullYear()}-${crypto.randomUUID().slice(0,8).toUpperCase()}`,
+    applicationId:applicant.id,applicationNumber:applicant.application_no,driver:applicant.driver_data,tests:applicant.test_data,
+    referenceConfig:JSON.parse(JSON.stringify(config)),calculation:calculated,suggestedDivision:applicant.suggested_division,
+    approvedDivision:selectedDivision,decisionReason:reason,reviewer:{id:AUTH.profile.id,name:AUTH.profile.display_name||AUTH.profile.email},
+    decidedAt:new Date().toISOString(),status
+  }:null;
+  const result=await SUPABASE.client.rpc('zfc_decide_driver_classification',{p_application_id:id,p_status:status,p_approved_division:selectedDivision||null,p_reason:reason,p_snapshot:snapshot});
+  if(result.error){ CLASSIFICATION.error=`Entscheidung konnte nicht gespeichert werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
+  await loadDriverClassificationData();
+  if(status==='Approved'&&result.data){
+    const pdf=await SUPABASE.client.functions.invoke('driver-classification-pdf',{body:{action:'generate',reportId:result.data}});
+    if(pdf.error){ CLASSIFICATION.error=`Freigabe ist gespeichert. PDF-Erstellung fehlgeschlagen: ${pdf.error.message}`; console.error(CLASSIFICATION.error,pdf.error); }
+  }
+  go('driver-classification',id);
+}
+async function downloadClassificationReport(reportId){
+  const result=await SUPABASE.client.functions.invoke('driver-classification-pdf',{body:{action:'download',reportId}});
+  if(result.error){ CLASSIFICATION.error=`PDF konnte nicht geladen werden: ${result.error.message}`; console.error(CLASSIFICATION.error,result.error); render(); return; }
+  const url=result.data?.signedUrl;
+  if(!url) return showAccessNotice('Der PDF-Dienst hat keinen Download-Link zurückgegeben.');
+  window.open(url,'_blank','noopener');
+}
+
 /* ============================= ROUTER / APP ============================= */
 const App = {};
 let ROUTE = {page:'dashboard', id:null};
@@ -1237,6 +1520,7 @@ const PAGE_TIERS={
   'esport-driverform':3,
   'esport-setup':3,
   'esport-presentation':3,
+  'driver-classification':3,
 };
 function canAccessPage(page){
   const tier=Number(AUTH.profile?.access_tier||0);
@@ -1381,6 +1665,7 @@ const NAV = [
   {id:'hr', label:'HR', ic:'16'},
   {id:'archive', label:'Archiv', ic:'14'},
   {id:'esport', label:'CFC Esport', ic:'15'},
+  {id:'driver-classification', label:'Driver Classification', ic:'D1'},
 ];
 
 function renderNav(){
@@ -1450,6 +1735,7 @@ function render(){
   else if(ROUTE.page==='esport-drivers') main.innerHTML = pageEsportDrivers();
   else if(ROUTE.page==='esport-driverform') main.innerHTML = pageEsportDriverForm(ROUTE.id?driverById(ROUTE.id):null);
   else if(ROUTE.page==='esport-setup') main.innerHTML = pageEsportSetup();
+  else if(ROUTE.page==='driver-classification') main.innerHTML = pageDriverClassification();
   else main.innerHTML = pageDashboard();
   if(ROUTE.page==='document-create'){
     const selector=document.getElementById('documentTypeSelect');
@@ -1625,6 +1911,7 @@ function pageDashboard(){
       <div class="dashboard-quicklink" onclick="go('cases')"><span class="quick-no">02</span><div><strong>Akten prüfen</strong><span>Status und Entscheidungen</span></div></div>
       <div class="dashboard-quicklink" onclick="go('drivers')"><span class="quick-no">03</span><div><strong>Fahrerregister</strong><span>Lizenzen und Profile</span></div></div>
       <div class="dashboard-quicklink" onclick="go('rulebook')"><span class="quick-no">04</span><div><strong>Regelwerk</strong><span>Sportliche Grundlage</span></div></div>
+      ${currentTier()>=3?`<div class="dashboard-quicklink" onclick="go('driver-classification')"><span class="quick-no">05</span><div><strong>Driver Classification</strong><span>Bewerber bewerten und Einstufungen freigeben</span></div></div>`:''}
     </div>
 
   <div class="grid cols-4" style="margin-bottom:22px;">

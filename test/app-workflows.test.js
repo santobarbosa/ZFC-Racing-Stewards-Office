@@ -6,6 +6,7 @@ const { webcrypto } = require('node:crypto');
 
 const appSource = fs.readFileSync(require.resolve('../app.js'), 'utf8').replace(/\ninit\(\);\s*$/, '\n');
 const schema = fs.readFileSync(require.resolve('../supabase_schema.sql'), 'utf8');
+const classificationPdfFunction = fs.readFileSync(require.resolve('../supabase/functions/driver-classification-pdf/index.ts'), 'utf8');
 
 function createAppContext(){
   const context=vm.createContext({
@@ -98,6 +99,40 @@ test('HR data schema is tier-3-only and supports realtime synchronization',()=>{
   }
   assert.match(schema,/create or replace function public\.zfc_hr_activity_summary\(\)[\s\S]*?if public\.zfc_current_tier\(\) < 3 then/);
   assert.match(schema,/create trigger zfc_stamp_hr_review/);
+});
+
+test('Driver classification calculates weighted scores and time deviations transparently',()=>{
+  const context=createAppContext();
+  const result=JSON.parse(JSON.stringify(vm.runInContext(`calculateClassification(
+    {name:'Test Driver'},
+    {timeTrials:{australia:101,bahrain:100,belgium:99},racePace:800,consistency:80,safetyRating:90},
+    {...defaultClassificationConfig(),tracks:[
+      {id:'australia',name:'Australien',referenceSeconds:100},
+      {id:'bahrain',name:'Bahrain',referenceSeconds:100},
+      {id:'belgium',name:'Belgien',referenceSeconds:100}
+    ]}
+  )`,context)));
+  assert.equal(result.tracks[0].deviation,1);
+  assert.equal(result.tracks[2].deviation,-1);
+  assert.equal(result.categoryScores.timeTrial,967);
+  assert.equal(result.rating,882);
+  assert.equal(result.suggestedDivision,'D1');
+});
+
+test('Driver classification is tier-3-only with append-only decisions and frozen report snapshots',()=>{
+  const context=createAppContext();
+  vm.runInContext(`AUTH.profile={id:'tier-2',access_tier:2};`,context);
+  assert.equal(vm.runInContext(`canAccessPage('driver-classification')`,context),false);
+  assert.doesNotMatch(vm.runInContext('pageDashboard()',context),/Driver Classification/);
+  vm.runInContext(`AUTH.profile={id:'tier-3',access_tier:3};`,context);
+  assert.equal(vm.runInContext(`canAccessPage('driver-classification')`,context),true);
+  assert.match(vm.runInContext('pageDashboard()',context),/Driver Classification/);
+  assert.match(schema,/create policy zfc_driver_classifications_tier3_select[\s\S]*?public\.zfc_current_tier\(\) >= 3/);
+  assert.match(schema,/create or replace function public\.zfc_decide_driver_classification[\s\S]*?insert into public\.zfc_driver_classification_reports/);
+  assert.match(schema,/grant select on public\.zfc_driver_classifications,[\s\S]*?public\.zfc_driver_classification_events,[\s\S]*?public\.zfc_driver_classification_reports to authenticated/);
+  assert.match(classificationPdfFunction,/SUPABASE_SERVICE_ROLE_KEY/);
+  assert.match(classificationPdfFunction,/PDFDocument\.create/);
+  assert.match(classificationPdfFunction,/createSignedUrl/);
 });
 
 test('Jarves expands short keywords into grounded long drafts with document and style options',()=>{

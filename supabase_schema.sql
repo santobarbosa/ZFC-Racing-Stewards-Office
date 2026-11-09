@@ -1751,6 +1751,330 @@ create policy zfc_hr_training_tier3_all on public.zfc_hr_training
 	using (public.zfc_current_tier() >= 3)
 	with check (public.zfc_current_tier() >= 3);
 
+-- Driver Classification: separately stored to keep immutable decisions outside the shared app state.
+create sequence if not exists public.zfc_driver_classification_number_seq;
+
+create table if not exists public.zfc_driver_classification_config (
+	id integer primary key check (id = 1),
+	config jsonb not null,
+	updated_by uuid,
+	updated_at timestamptz not null default now()
+);
+
+create table if not exists public.zfc_driver_classification_config_history (
+	id uuid primary key default gen_random_uuid(),
+	config jsonb not null,
+	actor_id uuid,
+	actor_name text not null,
+	created_at timestamptz not null default now()
+);
+
+insert into public.zfc_driver_classification_config (id, config)
+values (
+	1,
+	'{
+		"tracks":[
+			{"id":"australia","name":"Australien","referenceSeconds":null},
+			{"id":"bahrain","name":"Bahrain","referenceSeconds":null},
+			{"id":"belgium","name":"Belgien","referenceSeconds":null}
+		],
+		"weights":{"timeTrial":40,"racePace":25,"consistency":20,"safety":15},
+		"divisions":[
+			{"name":"D1","minRating":800,"minSafety":80},
+			{"name":"D2","minRating":600,"minSafety":60},
+			{"name":"D3","minRating":0,"minSafety":0}
+		],
+		"timePenaltyPerPercent":100
+	}'::jsonb
+)
+on conflict (id) do nothing;
+
+create table if not exists public.zfc_driver_classifications (
+	id uuid primary key,
+	application_no text not null unique default (
+		'ZFC-DC-' || to_char(now(), 'YYYY') || '-' ||
+		lpad(nextval('public.zfc_driver_classification_number_seq')::text, 5, '0')
+	),
+	driver_data jsonb not null default '{}'::jsonb,
+	test_data jsonb not null default '{}'::jsonb,
+	performance_rating integer not null default 0 check (performance_rating between 0 and 1000),
+	suggested_division text not null default '',
+	approved_division text,
+	status text not null default 'Pending'
+		check (status in ('Pending', 'Under Review', 'Approved', 'Rejected')),
+	decision_reason text,
+	created_by uuid,
+	created_at timestamptz not null default now(),
+	updated_at timestamptz not null default now(),
+	reviewed_by uuid,
+	reviewed_at timestamptz
+);
+
+create table if not exists public.zfc_driver_classification_events (
+	id uuid primary key default gen_random_uuid(),
+	application_id uuid not null references public.zfc_driver_classifications(id),
+	action text not null,
+	actor_id uuid not null,
+	actor_name text not null,
+	reason text not null default '',
+	event_data jsonb not null default '{}'::jsonb,
+	created_at timestamptz not null default now()
+);
+
+create table if not exists public.zfc_driver_classification_reports (
+	id uuid primary key default gen_random_uuid(),
+	application_id uuid not null references public.zfc_driver_classifications(id),
+	document_number text not null unique,
+	snapshot jsonb not null,
+	created_by uuid not null,
+	created_at timestamptz not null default now()
+);
+
+create table if not exists public.zfc_driver_classification_report_files (
+	report_id uuid primary key references public.zfc_driver_classification_reports(id),
+	pdf_path text not null,
+	generated_at timestamptz not null default now()
+);
+
+create index if not exists zfc_driver_classifications_status_idx
+	on public.zfc_driver_classifications(status, updated_at desc);
+create index if not exists zfc_driver_classification_events_application_idx
+	on public.zfc_driver_classification_events(application_id, created_at desc);
+create index if not exists zfc_driver_classification_reports_application_idx
+	on public.zfc_driver_classification_reports(application_id, created_at desc);
+
+alter table public.zfc_driver_classification_config enable row level security;
+alter table public.zfc_driver_classification_config_history enable row level security;
+alter table public.zfc_driver_classifications enable row level security;
+alter table public.zfc_driver_classification_events enable row level security;
+alter table public.zfc_driver_classification_reports enable row level security;
+alter table public.zfc_driver_classification_report_files enable row level security;
+
+drop policy if exists zfc_driver_classification_config_tier3_all on public.zfc_driver_classification_config;
+create policy zfc_driver_classification_config_tier3_all
+	on public.zfc_driver_classification_config for all to authenticated
+	using (public.zfc_current_tier() >= 3)
+	with check (public.zfc_current_tier() >= 3);
+drop policy if exists zfc_driver_classification_config_history_tier3_select on public.zfc_driver_classification_config_history;
+create policy zfc_driver_classification_config_history_tier3_select
+	on public.zfc_driver_classification_config_history for select to authenticated
+	using (public.zfc_current_tier() >= 3);
+drop policy if exists zfc_driver_classifications_tier3_select on public.zfc_driver_classifications;
+create policy zfc_driver_classifications_tier3_select
+	on public.zfc_driver_classifications for select to authenticated
+	using (public.zfc_current_tier() >= 3);
+drop policy if exists zfc_driver_classification_events_tier3_select on public.zfc_driver_classification_events;
+create policy zfc_driver_classification_events_tier3_select
+	on public.zfc_driver_classification_events for select to authenticated
+	using (public.zfc_current_tier() >= 3);
+drop policy if exists zfc_driver_classification_reports_tier3_select on public.zfc_driver_classification_reports;
+create policy zfc_driver_classification_reports_tier3_select
+	on public.zfc_driver_classification_reports for select to authenticated
+	using (public.zfc_current_tier() >= 3);
+
+revoke all on public.zfc_driver_classification_config,
+public.zfc_driver_classification_config_history,
+public.zfc_driver_classifications,
+	public.zfc_driver_classification_events,
+	public.zfc_driver_classification_reports,
+	public.zfc_driver_classification_report_files
+	from anon, authenticated;
+grant select, insert, update, delete on public.zfc_driver_classification_config to authenticated;
+grant select on public.zfc_driver_classification_config_history to authenticated;
+grant select on public.zfc_driver_classifications,
+	public.zfc_driver_classification_events,
+	public.zfc_driver_classification_reports to authenticated;
+
+create or replace function public.zfc_record_driver_classification_config()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+	actor uuid := coalesce(auth.uid(), new.updated_by);
+	actor_label text;
+begin
+	select coalesce(display_name, email) into actor_label
+	from public.zfc_user_profiles where id = actor;
+	insert into public.zfc_driver_classification_config_history (config, actor_id, actor_name)
+	values (new.config, actor, coalesce(actor_label, 'System'));
+	return new;
+end;
+$$;
+
+drop trigger if exists zfc_record_driver_classification_config on public.zfc_driver_classification_config;
+create trigger zfc_record_driver_classification_config
+	after insert or update on public.zfc_driver_classification_config
+	for each row execute function public.zfc_record_driver_classification_config();
+
+create or replace function public.zfc_save_driver_classification(
+	p_application_id uuid,
+	p_driver_data jsonb,
+	p_test_data jsonb,
+	p_performance_rating integer,
+	p_suggested_division text,
+	p_status text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+	actor_name text;
+	existing_status text;
+	action_name text;
+begin
+	if public.zfc_current_tier() < 3 or auth.uid() is null then
+		raise exception 'Driver Classification darf ausschließlich von Tier 3 bearbeitet werden.';
+	end if;
+	if p_application_id is null or p_status not in ('Pending', 'Under Review')
+		or p_performance_rating < 0 or p_performance_rating > 1000
+		or coalesce(p_driver_data->>'name', '') = '' then
+		raise exception 'Ungültige Bewerbungsdaten.';
+	end if;
+	select status into existing_status
+	from public.zfc_driver_classifications
+	where id = p_application_id
+	for update;
+	if existing_status in ('Approved', 'Rejected') then
+		raise exception 'Abgeschlossene Bewerbungen sind unveränderlich.';
+	end if;
+	select coalesce(display_name, email) into actor_name
+	from public.zfc_user_profiles where id = auth.uid();
+	action_name := case
+		when existing_status is null then 'Bewerbung erstellt'
+		when existing_status is distinct from p_status then 'Status geändert'
+		else 'Bewerbung aktualisiert'
+	end;
+	insert into public.zfc_driver_classifications (
+		id, driver_data, test_data, performance_rating, suggested_division, status, created_by, updated_at
+	) values (
+		p_application_id, p_driver_data, p_test_data, p_performance_rating,
+		coalesce(p_suggested_division, ''), p_status, auth.uid(), now()
+	)
+	on conflict (id) do update set
+		driver_data = excluded.driver_data,
+		test_data = excluded.test_data,
+		performance_rating = excluded.performance_rating,
+		suggested_division = excluded.suggested_division,
+		status = excluded.status,
+		updated_at = now();
+	insert into public.zfc_driver_classification_events (
+		application_id, action, actor_id, actor_name, reason, event_data
+	) values (
+		p_application_id, action_name, auth.uid(), coalesce(actor_name, 'Tier 3'), '',
+		jsonb_build_object('driver_data', p_driver_data, 'test_data', p_test_data,
+			'performance_rating', p_performance_rating, 'suggested_division', p_suggested_division,
+			'status', p_status)
+	);
+	return p_application_id;
+end;
+$$;
+
+create or replace function public.zfc_decide_driver_classification(
+	p_application_id uuid,
+	p_status text,
+	p_approved_division text,
+	p_reason text,
+	p_snapshot jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+	application_row public.zfc_driver_classifications%rowtype;
+	actor_name text;
+	report_id uuid;
+	snapshot_data jsonb;
+	decision_time timestamptz := clock_timestamp();
+	document_number_value text;
+begin
+	if public.zfc_current_tier() < 3 or auth.uid() is null then
+		raise exception 'Nur Tier 3 darf eine Einstufung freigeben oder ablehnen.';
+	end if;
+	if p_status not in ('Approved', 'Rejected') or length(trim(coalesce(p_reason, ''))) = 0 then
+		raise exception 'Entscheidungsstatus und Begründung sind erforderlich.';
+	end if;
+	select * into application_row
+	from public.zfc_driver_classifications
+	where id = p_application_id
+	for update;
+	if not found then raise exception 'Bewerbung nicht gefunden.'; end if;
+	if application_row.status in ('Approved', 'Rejected') then
+		raise exception 'Für diese Bewerbung wurde bereits endgültig entschieden.';
+	end if;
+	if p_status = 'Approved' and (
+		length(trim(coalesce(p_approved_division, ''))) = 0
+		or p_snapshot is null
+		or p_snapshot->>'applicationId' is distinct from p_application_id::text
+		or p_snapshot->>'applicationNumber' is distinct from application_row.application_no
+		or p_snapshot->>'approvedDivision' is distinct from p_approved_division
+		or p_snapshot->>'decisionReason' is distinct from p_reason
+	) then
+		raise exception 'Der unveränderliche Freigabe-Snapshot ist unvollständig oder ungültig.';
+	end if;
+	select coalesce(display_name, email) into actor_name
+	from public.zfc_user_profiles where id = auth.uid();
+	if p_status = 'Approved' then
+		document_number_value := 'ZFC-CLASS-' ||
+			to_char(decision_time at time zone 'UTC', 'YYYY') || '-' ||
+			upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8));
+		snapshot_data := p_snapshot || jsonb_build_object(
+			'documentNumber', document_number_value,
+			'applicationNumber', application_row.application_no,
+			'applicationId', p_application_id::text,
+			'driver', application_row.driver_data,
+			'tests', application_row.test_data,
+			'suggestedDivision', application_row.suggested_division,
+			'approvedDivision', p_approved_division,
+			'decisionReason', p_reason,
+			'referenceConfig', (select config from public.zfc_driver_classification_config where id = 1),
+			'reviewer', jsonb_build_object('id', auth.uid()::text, 'name', coalesce(actor_name, 'Tier 3')),
+			'decidedAt', to_char(decision_time at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+			'status', p_status
+		);
+	end if;
+	update public.zfc_driver_classifications set
+		status = p_status,
+		approved_division = case when p_status = 'Approved' then p_approved_division else null end,
+		decision_reason = p_reason,
+		reviewed_by = auth.uid(),
+		reviewed_at = decision_time,
+		updated_at = decision_time
+	where id = p_application_id;
+	if p_status = 'Approved' then
+		insert into public.zfc_driver_classification_reports (
+			application_id, document_number, snapshot, created_by
+		) values (
+			p_application_id, document_number_value, snapshot_data, auth.uid()
+		) returning id into report_id;
+	end if;
+	insert into public.zfc_driver_classification_events (
+		application_id, action, actor_id, actor_name, reason, event_data
+	) values (
+		p_application_id, p_status, auth.uid(), coalesce(actor_name, 'Tier 3'), p_reason,
+		jsonb_build_object('approved_division', p_approved_division,
+			'performance_rating', application_row.performance_rating,
+			'suggested_division', application_row.suggested_division,
+			'report_id', report_id)
+	);
+	return report_id;
+end;
+$$;
+
+revoke all on function public.zfc_save_driver_classification(uuid, jsonb, jsonb, integer, text, text) from public, anon;
+revoke all on function public.zfc_decide_driver_classification(uuid, text, text, text, jsonb) from public, anon;
+grant execute on function public.zfc_save_driver_classification(uuid, jsonb, jsonb, integer, text, text) to authenticated;
+grant execute on function public.zfc_decide_driver_classification(uuid, text, text, text, jsonb) to authenticated;
+
+insert into storage.buckets(id, name, public, file_size_limit, allowed_mime_types)
+values ('zfc-driver-classification-reports', 'zfc-driver-classification-reports', false, 10485760, array['application/pdf'])
+on conflict (id) do update set public = false, file_size_limit = 10485760, allowed_mime_types = array['application/pdf'];
+
 revoke all on public.zfc_hr_staff_records, public.zfc_hr_reviews, public.zfc_hr_training from anon;
 grant select, insert, update, delete on public.zfc_hr_staff_records, public.zfc_hr_reviews, public.zfc_hr_training to authenticated;
 
